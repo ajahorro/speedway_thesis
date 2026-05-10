@@ -19,6 +19,7 @@ import AdminSettings from './pages/Admin/AdminSettings';
 import AdminNotifications from './pages/Admin/AdminNotifications';
 import AdminProfile from './pages/Admin/AdminProfile';
 import AdminAcceptInvite from './pages/Admin/AdminAcceptInvite';
+import Landing from './pages/Landing';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
 import './index.css';
@@ -37,6 +38,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/accept-invite" element={<AdminAcceptInvite />} />
 
@@ -66,9 +69,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="*" element={<div style={{ padding: '2rem' }}>Module under development</div>} />
           </Route>
 
-          {/* Root redirect: Authenticated users to Admin, Others to Login (handled by ProtectedRoute) */}
-          <Route path="/" element={<Navigate to="/admin" replace />} />
-          
           {/* Global Fallback: Catch-all for unknown routes */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>

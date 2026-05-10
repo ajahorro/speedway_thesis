@@ -113,9 +113,9 @@ const Login = ({ isModal = false, onClose }) => {
     maxWidth: 'min(92vw, 440px)',
     background: 'var(--admin-card)',
     padding: 'clamp(1.5rem, 5vw, 3rem)',
-    borderRadius: '2rem',
+    borderRadius: '4px', // SHARP EDGES AS REQUESTED
     position: 'relative',
-    boxShadow: 'var(--admin-card-shadow)',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
     border: '1px solid var(--admin-border)',
     color: 'var(--admin-text-primary)',
     animation: 'modalIn 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
