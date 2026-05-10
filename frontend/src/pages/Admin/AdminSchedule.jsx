@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { mockBookings } from './AdminMockData';
+import { supabase } from '../../lib/supabase';
 import { Calendar, ChevronLeft, ChevronRight, Clock, User, Tag, ArrowRight } from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import toast from 'react-hot-toast';
+import { logger } from '../../utils/logger';
 
 const AdminSchedule = () => {
   const navigate = useNavigate();
@@ -22,30 +23,50 @@ const AdminSchedule = () => {
 
   const fetchDailyBookings = async () => {
     setLoading(true);
-    setTimeout(() => {
-      try {
-        const daily = mockBookings.filter(b => b.start_datetime?.startsWith(selectedDate));
-        setBookings(daily);
-      } catch (error) { 
-        toast.error('Failed to load schedule'); 
-      } finally { 
-        setLoading(false); 
-      }
-    }, 300);
+    try {
+      logger.admin(`Fetching timeline for ${selectedDate}...`);
+      
+      const startOfDay = `${selectedDate}T00:00:00.000Z`;
+      const endOfDay = `${selectedDate}T23:59:59.999Z`;
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          customer:profiles!bookings_customer_id_fkey(full_name),
+          vehicles:booking_vehicles(*)
+        `)
+        .gte('start_datetime', startOfDay)
+        .lte('start_datetime', endOfDay)
+        .order('start_datetime', { ascending: true });
+
+      if (error) throw error;
+      setBookings(data || []);
+      logger.admin('Timeline synchronized.');
+    } catch (err) {
+      logger.error('Schedule Sync Error', err);
+      toast.error('Failed to load schedule');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const getBookingsForHour = (hour) => bookings.filter(b => new Date(b.start_datetime).getHours() === hour);
+  const getBookingsForHour = (hour) => bookings.filter(b => {
+    const startHour = new Date(b.start_datetime).getHours();
+    return startHour === hour;
+  });
+
   const isHourOccupied = (hour) => bookings.some(b => {
     const startHour = new Date(b.start_datetime).getHours();
     const endHour = new Date(b.end_datetime || b.start_datetime).getHours();
     return hour >= startHour && hour < (endHour || startHour + 1);
   });
 
-  const panelStyle = { background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', padding: '1.5rem', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', color: 'var(--admin-text-primary)' };
+  const panelStyle = { background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', padding: '1.5rem', color: 'var(--admin-text-primary)' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem' }}>
-      <PageHeader badge="TIMELINE OVERVIEW" title="SCHEDULE" subtitle={`${bookings.length} ${bookings.length === 1 ? 'booking' : 'bookings'} today.`} onRefresh={() => fetchDailyBookings()}>
+      <PageHeader badge="TIMELINE OVERVIEW" title="SCHEDULE" subtitle={`${bookings.length} ${bookings.length === 1 ? 'booking' : 'bookings'} today.`}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.45rem 0.85rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)' }}>
           <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split('T')[0]); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><ChevronLeft size={18} color="var(--admin-brand)" /></button>
           <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'var(--admin-text-primary)', fontWeight: '800', fontSize: '0.85rem', outline: 'none', width: '125px' }} />
@@ -67,13 +88,13 @@ const AdminSchedule = () => {
                   const fleetSize = booking.vehicles?.length || 0;
                   const vehicleText = fleetSize > 1 ? `${fleetSize} Vehicles (Fleet)` : (booking.vehicles?.[0]?.vehicle_type || 'Vehicle');
                   return (
-                    <div key={booking.id} onClick={() => navigate(`/admin/bookings/${booking.id}`)} style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderLeft: `4px solid ${bIdx === 0 ? 'var(--admin-brand)' : '#8b5cf6'}`, borderRadius: 'var(--admin-radius)', padding: '0.75rem 1rem', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+                    <div key={booking.id} onClick={() => navigate(`/admin/bookings/${booking.id}`)} style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderLeft: `4px solid ${bIdx === 0 ? 'var(--admin-brand)' : '#8b5cf6'}`, borderRadius: 'var(--admin-radius)', padding: '0.75rem 1rem', cursor: 'pointer' }}>
                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                          <div style={{ color: bIdx === 0 ? 'var(--admin-brand)' : '#8b5cf6', fontSize: '0.65rem', fontWeight: '900', textTransform: 'uppercase' }}>APPOINTMENT</div>
                          <div style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>{vehicleText}</div>
                        </div>
                        <h3 style={{ margin: '0.2rem 0', fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{booking.customer?.full_name}</h3>
-                       <div style={{ fontSize: '0.85rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>₱{Number(booking.total_amount).toLocaleString()}</div>
+                       <div style={{ fontSize: '0.85rem', fontWeight: '900', color: 'var(--admin-brand)' }}>₱{Number(booking.total_amount).toLocaleString()}</div>
                      </div>
                   )
                 })}

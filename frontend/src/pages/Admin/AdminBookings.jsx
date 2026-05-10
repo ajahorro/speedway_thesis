@@ -1,78 +1,100 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { supabase } from '../../lib/supabase';
 import { Search, Clock, CreditCard, ExternalLink, RotateCw, Filter, Calendar, ArrowRight, User } from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { logger } from '../../utils/logger';
 import toast from 'react-hot-toast';
-import { mockBookings } from './AdminMockData';
 
 const AdminBookings = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useMediaQuery('(max-width: 1024px)');
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState(location.state?.filter || '');
 
-  useEffect(() => {
-    if (location.state?.filter) {
-      setSearchTerm(location.state.filter);
+  // BATCHED STATE: One source of truth for the page
+  const [state, setState] = useState({
+    bookings: [],
+    loading: true,
+    searchTerm: location.state?.filter || '',
+    filterStatus: 'all'
+  });
+
+  // MEMOIZED FETCH: Prevents unnecessary function recreation
+  const fetchBookings = useCallback(async () => {
+    setState(prev => ({ ...prev, loading: true }));
+    try {
+      logger.admin('Syncing Live Booking Directory...');
+      
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          customer:profiles!bookings_customer_id_fkey(full_name, email),
+          vehicles:booking_vehicles(*),
+          payments:payments(*)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const processedData = (data || []).map(b => {
+        const payments = b.payments || [];
+        const totalPaid = payments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
+        const isPendingVerification = payments.some(p => p.status === 'FOR_VERIFICATION');
+        
+        let calcStatus = 'UNPAID';
+        if (totalPaid >= b.total_amount && b.total_amount > 0) {
+          calcStatus = 'PAID';
+        } else if (isPendingVerification) {
+          calcStatus = 'VERIFYING';
+        } else if (totalPaid >= (b.total_amount * 0.3) && b.total_amount > 0) {
+          calcStatus = 'DOWNPAYMENT_PAID';
+        }
+
+        return {
+          ...b,
+          calculatedPaymentStatus: calcStatus,
+          totalPaidAmount: totalPaid
+        };
+      });
+
+      setState(prev => ({ ...prev, bookings: processedData, loading: false }));
+      logger.admin('Booking Directory synchronized.');
+    } catch (err) {
+      logger.error('Booking Fetch Error', err);
+      toast.error('Failed to sync booking records.');
+      setState(prev => ({ ...prev, loading: false }));
     }
-  }, [location.state]);
-
-  useEffect(() => {
-    fetchData();
   }, []);
 
-  const fetchData = async () => {
-    setLoading(true);
-    setTimeout(() => {
-        const combinedData = mockBookings.map(b => {
-          const payments = b.payments || [];
-          const totalPaid = payments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
-          const isPendingVerification = payments.some(p => p.status === 'FOR_VERIFICATION');
-          
-          let calcStatus = 'UNPAID';
-          if (totalPaid >= b.total_amount && b.total_amount > 0) {
-            calcStatus = 'PAID';
-          } else if (isPendingVerification) {
-            calcStatus = 'VERIFYING';
-          } else if (totalPaid >= (b.total_amount * 0.3) && b.total_amount > 0) {
-            calcStatus = 'DOWNPAYMENT_PAID';
-          }
-
-          return {
-            ...b,
-            calculatedPaymentStatus: calcStatus,
-            totalPaidAmount: totalPaid
-          };
-        });
-        setBookings(combinedData);
-        setLoading(false);
-    }, 500);
-  };
-
-  const filteredBookings = bookings.filter(b => {
-    const status = b.status || 'scheduled';
-    const sStatus = b.service_status || 'queued';
-    const pStatus = b.payment_status || 'unpaid';
+  useEffect(() => {
+    fetchBookings();
     
-    const searchStr = `
-      ${b.id} 
-      ${b.customer?.full_name || ''} 
-      ${b.vehicles?.map(v => v.vehicle_type).join(' ') || ''} 
-      ${b.vehicles?.map(v => v.make).join(' ') || ''} 
-      ${b.vehicles?.map(v => v.model).join(' ') || ''} 
-      ${b.vehicles?.map(v => v.plate_number).join(' ') || ''} 
-      ${status}
-      ${sStatus}
-      ${pStatus}
-    `.toLowerCase();
-    
-    const term = searchTerm.toLowerCase().replace(/_/g, ' ');
-    return searchStr.includes(searchTerm.toLowerCase()) || searchStr.includes(term);
-  });
+    // Live synchronization channel
+    const channel = supabase.channel('admin-bookings-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => fetchBookings())
+      .subscribe();
+      
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchBookings]);
+
+  // MEMOIZED FILTERING: Only re-calculates when data or search changes
+  const filteredBookings = useMemo(() => {
+    return state.bookings.filter(b => {
+      const matchesSearch = `
+        ${b.id} 
+        ${b.customer?.full_name || ''} 
+        ${b.vehicles?.map(v => v.vehicle_type).join(' ') || ''} 
+        ${b.vehicles?.map(v => v.plate_number).join(' ') || ''} 
+      `.toLowerCase().includes(state.searchTerm.toLowerCase());
+      
+      const matchesStatus = state.filterStatus === 'all' || b.status === state.filterStatus;
+      
+      return matchesSearch && matchesStatus;
+    });
+  }, [state.bookings, state.searchTerm, state.filterStatus]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -94,7 +116,7 @@ const AdminBookings = () => {
 
   const containerStyle = {
     background: 'var(--admin-card)',
-    borderRadius: 'var(--admin-radius)', // SHARP
+    borderRadius: 'var(--admin-radius)',
     overflow: 'hidden',
     boxShadow: 'var(--admin-card-shadow)',
     color: 'var(--admin-text-primary)',
@@ -108,10 +130,9 @@ const AdminBookings = () => {
         badge="RECORDS MANAGEMENT"
         title="BOOKING DIRECTORY"
         subtitle="Manage and monitor all vehicle detailing appointments."
-        onRefresh={() => { fetchData(); toast.success('Synchronizing database...'); }}
+        onRefresh={fetchBookings}
       />
 
-      {/* Filter & Search Bar */}
       <div style={{ background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', overflow: 'hidden', border: '1px solid var(--admin-border)', padding: '1rem' }}>
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '0.75rem' }}>
           <div style={{ position: 'relative', background: 'var(--admin-bg)', padding: '0.85rem 1.25rem', borderRadius: 'var(--admin-radius-sm)', flex: 1, border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -119,23 +140,19 @@ const AdminBookings = () => {
             <input 
               type="text"
               placeholder="Search by customer, vehicle, plate..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={state.searchTerm}
+              onChange={(e) => setState(prev => ({ ...prev, searchTerm: e.target.value }))}
               style={{ border: 'none', background: 'transparent', color: 'var(--admin-text-primary)', width: '100%', outline: 'none', fontSize: '0.9rem', fontWeight: '700', textTransform: 'uppercase' }} 
             />
           </div>
-          <button style={{ padding: '0.85rem 1.5rem', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', textTransform: 'uppercase', letterSpacing: '1px' }}>
-            <Filter size={16} /> FILTERS
-          </button>
         </div>
       </div>
 
-      {loading ? (
+      {state.loading ? (
         <LoadingState message="Retrieving booking records..." />
       ) : filteredBookings.length === 0 ? (
         <div style={{ ...containerStyle, padding: '4rem', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', fontWeight: '900', textTransform: 'uppercase' }}>No matching records found</div>
       ) : isMobile ? (
-        /* Mobile Card Layout */
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           {filteredBookings.map(booking => {
             const pStatus = getPaymentStatus(booking);
@@ -153,8 +170,7 @@ const AdminBookings = () => {
                   <div style={{ 
                     background: 'var(--admin-bg)', color: getStatusColor(booking.status), padding: '0.4rem 0.8rem', 
                     borderRadius: 'var(--admin-radius-sm)', fontSize: '0.65rem', fontWeight: '950',
-                    border: '1px solid currentColor', textTransform: 'uppercase',
-                    display: 'flex', alignItems: 'center', gap: '0.4rem'
+                    border: '1px solid currentColor', textTransform: 'uppercase'
                   }}>
                     {booking.status?.toUpperCase()}
                   </div>
@@ -184,7 +200,6 @@ const AdminBookings = () => {
           })}
         </div>
       ) : (
-        /* Desktop Table Layout */
         <div className="table-responsive-container" style={containerStyle}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
@@ -193,7 +208,6 @@ const AdminBookings = () => {
                 <th style={{ padding: '1.25rem 1.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Customer</th>
                 <th style={{ padding: '1.25rem 1.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Vehicle</th>
                 <th style={{ padding: '1.25rem 1.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Schedule</th>
-                <th style={{ padding: '1.25rem 1.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Status Lifecycle</th>
                 <th style={{ padding: '1.25rem 1.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Total Amount</th>
                 <th style={{ padding: '1.25rem 1.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1.5px' }}></th>
               </tr>
@@ -202,9 +216,9 @@ const AdminBookings = () => {
               {filteredBookings.map(booking => {
                 const pStatus = getPaymentStatus(booking);
                 return (
-                  <tr key={booking.id} style={{ borderBottom: '1px solid var(--admin-border)', transition: 'background 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.01)'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                  <tr key={booking.id} style={{ borderBottom: '1px solid var(--admin-border)', transition: 'background 0.2s' }}>
                     <td style={{ padding: '1.25rem 1.5rem' }}>
-                      <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '950', fontSize: '0.7rem', letterSpacing: '0.5px' }}>
+                      <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '950', fontSize: '0.7rem' }}>
                         #{booking.id.substring(0, 6).toUpperCase()}
                       </span>
                     </td>
@@ -215,38 +229,16 @@ const AdminBookings = () => {
                       <div style={{ fontWeight: '800', color: 'var(--admin-text-primary)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
                         {booking.vehicles?.length > 1 ? `FLEET (${booking.vehicles.length} UNITS)` : (booking.vehicles?.[0]?.vehicle_type || 'N/A')}
                       </div>
-                      <div style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        {booking.vehicles?.[0]?.plate_number || 'N/A'}
-                      </div>
                     </td>
                      <td style={{ padding: '1.25rem 1.5rem' }}>
                       <div style={{ fontWeight: '800', color: 'var(--admin-text-primary)', fontSize: '0.8rem' }}>{new Date(booking.start_datetime).toLocaleDateString()}</div>
                       <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>{new Date(booking.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                     </td>
-                     <td style={{ padding: '1.25rem 1.5rem' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                        <span style={{ 
-                          fontSize: '0.55rem', fontWeight: '950', padding: '0.25rem 0.6rem', borderRadius: 'var(--admin-radius-sm)', 
-                          background: 'rgba(255,255,255,0.03)',
-                          color: getStatusColor(booking.status),
-                          textTransform: 'uppercase', border: '1px solid currentColor'
-                        }}>
-                          {booking.status}
-                        </span>
-                        <span style={{ 
-                          fontSize: '0.55rem', fontWeight: '950', padding: '0.25rem 0.6rem', borderRadius: 'var(--admin-radius-sm)', 
-                          background: 'rgba(255,255,255,0.03)',
-                          color: booking.service_status === 'completed' ? '#10b981' : '#a855f7',
-                          textTransform: 'uppercase', border: '1px solid currentColor'
-                        }}>
-                          {booking.service_status?.replace('_', ' ')}
-                        </span>
-                      </div>
-                    </td>
                     <td style={{ padding: '1.25rem 1.5rem' }}>
                       <div style={{ fontWeight: '950', color: 'var(--admin-brand)', fontSize: '1rem', fontFamily: 'monospace' }}>
                         ₱{(booking.total_amount || 0).toLocaleString()}
                       </div>
+                      <div style={{ fontSize: '0.55rem', fontWeight: '950', color: pStatus.color }}>{pStatus.label}</div>
                     </td>
                     <td style={{ padding: '1.25rem 1.5rem', textAlign: 'right' }}>
                       <button 
@@ -254,10 +246,8 @@ const AdminBookings = () => {
                         style={{ 
                           background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', 
                           color: 'var(--admin-text-primary)', padding: '0.6rem 1rem', borderRadius: 'var(--admin-radius-sm)', 
-                          fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', transition: 'all 0.2s', textTransform: 'uppercase', letterSpacing: '1px'
+                          fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase'
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--admin-brand)'}
-                        onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--admin-border)'}
                       >
                         VIEW RECORD
                       </button>
@@ -269,9 +259,6 @@ const AdminBookings = () => {
           </table>
         </div>
       )}
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
     </div>
   );
 };

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { CheckCircle, AlertCircle, Search, RotateCw, Filter, CreditCard, XCircle, ArrowRight, Car } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -12,87 +12,122 @@ const AdminPayments = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useMediaQuery('(max-width: 1024px)');
-  const [payments, setPayments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState(location.state?.filter || '');
-  const [filter, setFilter] = useState('PENDING');
-  const [selectedItem, setSelectedItem] = useState(null);
 
-  useEffect(() => {
-    fetchPayments();
-    const channel = supabase.channel('admin-payments-sync').on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => fetchPayments()).subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+  // BATCHED STATE
+  const [state, setState] = useState({
+    payments: [],
+    loading: true,
+    searchTerm: location.state?.filter || '',
+    filter: 'PENDING',
+    selectedItem: null
+  });
 
-  const fetchPayments = async () => {
-    setLoading(true);
+  // MEMOIZED FETCH: Optimized with deep relationship embedding
+  const fetchPayments = useCallback(async () => {
+    setState(prev => ({ ...prev, loading: true }));
     try {
       logger.admin('Auditing Payment Transactions...');
+      
+      // One-shot join: payments -> bookings -> profiles (via explicit FK)
       const { data: paymentData, error: paymentError } = await supabase
         .from('payments')
-        .select('*, booking:bookings(*, vehicles:booking_vehicles(*))')
+        .select(`
+          *,
+          booking:bookings(
+            customer_id, 
+            customer:profiles!bookings_customer_id_fkey(full_name, email), 
+            vehicles:booking_vehicles(*)
+          )
+        `)
         .order('created_at', { ascending: false });
 
       if (paymentError) throw paymentError;
 
-      if (paymentData) {
-        const customerIds = [...new Set(paymentData.map(p => p.booking?.customer_id).filter(Boolean))];
-        let profileMap = {};
-        if (customerIds.length > 0) {
-          const { data: profiles } = await supabase.from('profiles').select('id, full_name, email').in('id', customerIds);
-          if (profiles) profileMap = profiles.reduce((acc, p) => ({ ...acc, [p.id]: p }), {});
+      const processed = (paymentData || []).filter(p => p.amount > 0).map(p => {
+        let url = p.receipt_url;
+        if (url && !url.startsWith('http')) {
+          const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(url);
+          url = publicUrl;
         }
+        return {
+          ...p,
+          receipt_url: url,
+          customer: p.booking?.customer || { full_name: 'Walk-in' }
+        };
+      });
 
-        const processed = paymentData.filter(p => p.amount > 0).map(p => {
-          let url = p.receipt_url;
-          if (url && !url.startsWith('http')) {
-            const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(url);
-            url = publicUrl;
-          }
-          return {
-            ...p,
-            receipt_url: url,
-            customer: profileMap[p.booking?.customer_id] || { full_name: 'Walk-in' }
-          };
-        });
-        setPayments(processed);
-      }
+      setState(prev => ({ ...prev, payments: processed, loading: false }));
+      logger.admin('Payment Audit complete.');
     } catch (err) {
       logger.error('Payment Audit Error', err);
       toast.error('Failed to load transactions');
-    } finally {
-      setLoading(false);
+      setState(prev => ({ ...prev, loading: false }));
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPayments();
+    
+    const channel = supabase.channel('admin-payments-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => fetchPayments())
+      .subscribe();
+      
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchPayments]);
+
+  // MEMOIZED FILTERING
+  const filteredItems = useMemo(() => {
+    return state.payments.filter(p => {
+      const searchStr = `${p.customer?.full_name} ${p.reference_number} ${p.amount}`.toLowerCase();
+      const matchesSearch = searchStr.includes(state.searchTerm.toLowerCase());
+      
+      if (state.filter === 'PENDING') return matchesSearch && p.status === 'FOR_VERIFICATION';
+      if (state.filter === 'PROCESSED') return matchesSearch && (p.status === 'PAID' || p.status === 'REFUNDED');
+      
+      return matchesSearch;
+    });
+  }, [state.payments, state.searchTerm, state.filter]);
+
+  const handleVerifyPayment = async (payment) => {
+    const toastId = toast.loading('Verifying transaction...');
+    try {
+      const { data: { user: verifier } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('payments').update({ 
+        status: 'PAID', 
+        verified_by: verifier?.id, 
+        verified_at: new Date().toISOString() 
+      }).eq('id', payment.id);
+      
+      if (error) throw error;
+      
+      toast.success('Payment verified', { id: toastId });
+      fetchPayments();
+      setState(prev => ({ ...prev, selectedItem: null }));
+    } catch (err) { 
+      toast.error('Verification failed', { id: toastId }); 
     }
   };
 
-  const handleVerifyPayment = async (payment) => {
-    try {
-      const { data: { user: verifier } } = await supabase.auth.getUser();
-      const { error } = await supabase.from('payments').update({ status: 'PAID', verified_by: verifier?.id, verified_at: new Date().toISOString() }).eq('id', payment.id);
-      if (error) throw error;
-      toast.success('Payment verified');
-      fetchPayments();
-      setSelectedItem(null);
-    } catch (err) { toast.error('Verification failed'); }
-  };
-
   const handleRejectPayment = async (payment) => {
+    const reason = window.prompt('Reason for rejection:');
+    if (!reason) return;
+    
+    const toastId = toast.loading('Rejecting transaction...');
     try {
-      const { error } = await supabase.from('payments').update({ status: 'UNPAID', receipt_url: null }).eq('id', payment.id);
+      const { error } = await supabase.from('payments').update({ 
+        status: 'REJECTED', 
+        rejection_reason: reason 
+      }).eq('id', payment.id);
+      
       if (error) throw error;
-      toast.error('Payment rejected');
+      
+      toast.error('Payment rejected', { id: toastId });
       fetchPayments();
-      setSelectedItem(null);
-    } catch (err) { toast.error('Rejection failed'); }
+      setState(prev => ({ ...prev, selectedItem: null }));
+    } catch (err) { 
+      toast.error('Rejection failed', { id: toastId }); 
+    }
   };
-
-  const filteredItems = payments.filter(p => {
-    const searchStr = `${p.customer?.full_name} ${p.reference_number} ${p.amount}`.toLowerCase();
-    const matchesSearch = searchStr.includes(searchTerm.toLowerCase());
-    if (filter === 'PENDING') return matchesSearch && p.status === 'FOR_VERIFICATION';
-    if (filter === 'PROCESSED') return matchesSearch && (p.status === 'PAID' || p.status === 'REFUNDED');
-    return matchesSearch;
-  });
 
   const cardStyle = { 
     background: 'var(--admin-card)', 
@@ -129,8 +164,8 @@ const AdminPayments = () => {
               <input 
                 type="text" 
                 placeholder="SEARCH REFERENCE..." 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
+                value={state.searchTerm} 
+                onChange={(e) => setState(prev => ({ ...prev, searchTerm: e.target.value }))} 
                 style={{ flex: 1, background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', padding: '0.85rem 1rem 0.85rem 2.75rem', color: 'var(--admin-text-primary)', outline: 'none', fontWeight: '950', fontSize: '0.75rem', width: '100%' }} 
               />
             </div>
@@ -138,14 +173,14 @@ const AdminPayments = () => {
               {['PENDING', 'PROCESSED', 'ALL'].map(f => (
                 <button 
                   key={f} 
-                  onClick={() => setFilter(f)} 
+                  onClick={() => setState(prev => ({ ...prev, filter: f }))} 
                   style={{ 
                     flex: isMobile ? 1 : 'none', 
                     padding: '0.5rem 1rem', 
                     borderRadius: 'calc(var(--admin-radius-sm) - 2px)', 
                     border: 'none', 
-                    background: filter === f ? 'var(--admin-brand)' : 'transparent', 
-                    color: filter === f ? 'white' : 'var(--admin-text-secondary)', 
+                    background: state.filter === f ? 'var(--admin-brand)' : 'transparent', 
+                    color: state.filter === f ? 'white' : 'var(--admin-text-secondary)', 
                     fontSize: '0.65rem', 
                     fontWeight: '950', 
                     cursor: 'pointer',
@@ -158,16 +193,20 @@ const AdminPayments = () => {
             </div>
           </div>
 
-          {filteredItems.map(p => (
+          {state.loading ? (
+            <LoadingState message="Auditing financial trail..." />
+          ) : filteredItems.length === 0 ? (
+            <div style={{ ...cardStyle, padding: '4rem', textAlign: 'center', opacity: 0.5, textTransform: 'uppercase', fontSize: '0.7rem', fontWeight: '900' }}>No transactions found</div>
+          ) : filteredItems.map(p => (
             <div 
               key={p.id} 
-              onClick={() => setSelectedItem(p)} 
+              onClick={() => setState(prev => ({ ...prev, selectedItem: p }))} 
               style={{ 
                 ...cardStyle, 
                 padding: isMobile ? '1rem' : '1.25rem', 
                 cursor: 'pointer', 
-                border: selectedItem?.id === p.id ? '2px solid var(--admin-brand)' : '1px solid var(--admin-border)',
-                background: selectedItem?.id === p.id ? 'rgba(var(--admin-brand-rgb), 0.02)' : 'var(--admin-card)',
+                border: state.selectedItem?.id === p.id ? '2px solid var(--admin-brand)' : '1px solid var(--admin-border)',
+                background: state.selectedItem?.id === p.id ? 'rgba(169, 27, 24, 0.03)' : 'var(--admin-card)',
                 transition: '0.2s'
               }}
             >
@@ -194,44 +233,44 @@ const AdminPayments = () => {
 
         {!isMobile && (
           <div style={{ position: 'sticky', top: '1.5rem', height: 'fit-content' }}>
-            {selectedItem ? (
+            {state.selectedItem ? (
               <div style={{ ...cardStyle, padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ margin: 0, fontWeight: '950', fontSize: '0.75rem', color: 'var(--admin-brand)', letterSpacing: '1.5px' }}>AUDIT DETAILS</h3>
-                  <button onClick={() => setSelectedItem(null)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><XCircle size={20} /></button>
+                  <button onClick={() => setState(prev => ({ ...prev, selectedItem: null }))} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><XCircle size={20} /></button>
                 </div>
 
                 <div style={{ background: 'var(--admin-bg)', padding: '1rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)' }}>
-                  <div style={{ fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase' }}>{selectedItem.customer?.full_name}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>{selectedItem.customer?.email}</div>
+                  <div style={{ fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase' }}>{state.selectedItem.customer?.full_name}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>{state.selectedItem.customer?.email}</div>
                 </div>
 
                 <div>
-                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.5px' }}>CONTEXT: FLEET ({selectedItem.booking?.vehicles?.length || 0} UNITS)</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.5px' }}>CONTEXT: FLEET ({state.selectedItem.booking?.vehicles?.length || 0} UNITS)</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {selectedItem.booking?.vehicles?.map(v => (
+                    {state.selectedItem.booking?.vehicles?.map(v => (
                       <div key={v.id} style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'uppercase' }}><Car size={14} /> {v.make} {v.model}</div>
                     ))}
                   </div>
                 </div>
 
-                {selectedItem.receipt_url && (
+                {state.selectedItem.receipt_url && (
                   <div>
                     <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.5px' }}>CUSTOMER RECEIPT</div>
                     <div style={{ width: '100%', height: '240px', background: 'var(--admin-bg)', borderRadius: 'var(--admin-radius-sm)', overflow: 'hidden', border: '1px solid var(--admin-border)' }}>
-                      <img src={selectedItem.receipt_url} alt="Receipt" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      <img src={state.selectedItem.receipt_url} alt="Receipt" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     </div>
                   </div>
                 )}
 
                 <div style={{ marginTop: 'auto', display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
-                  {selectedItem.status === 'FOR_VERIFICATION' && (
+                  {state.selectedItem.status === 'FOR_VERIFICATION' && (
                     <div style={{ display: 'flex', gap: '0.75rem' }}>
-                      <button onClick={() => handleRejectPayment(selectedItem)} style={{ flex: 1, padding: '0.85rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid #ef4444', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>REJECT</button>
-                      <button onClick={() => handleVerifyPayment(selectedItem)} style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>VERIFY PAID</button>
+                      <button onClick={() => handleRejectPayment(state.selectedItem)} style={{ flex: 1, padding: '0.85rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid #ef4444', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>REJECT</button>
+                      <button onClick={() => handleVerifyPayment(state.selectedItem)} style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>VERIFY PAID</button>
                     </div>
                   )}
-                  <button onClick={() => navigate(`/admin/bookings/${selectedItem.booking_id}`)} style={{ width: '100%', padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>VIEW BOOKING</button>
+                  <button onClick={() => navigate(`/admin/bookings/${state.selectedItem.booking_id}`)} style={{ width: '100%', padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>VIEW BOOKING</button>
                 </div>
               </div>
             ) : (
@@ -244,45 +283,45 @@ const AdminPayments = () => {
         )}
       </div>
 
-      {isMobile && selectedItem && (
+      {isMobile && state.selectedItem && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
           <div style={{ ...cardStyle, width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', animation: 'modalSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, fontWeight: '950', fontSize: '1rem', color: 'var(--admin-brand)' }}>AUDIT DETAILS</h3>
-              <button onClick={() => setSelectedItem(null)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><XCircle size={24} /></button>
+              <button onClick={() => setState(prev => ({ ...prev, selectedItem: null }))} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><XCircle size={24} /></button>
             </div>
 
             <div style={{ background: 'var(--admin-bg)', padding: '1rem', borderRadius: '0.75rem', border: '1px solid var(--admin-border)' }}>
-              <div style={{ fontWeight: '900', fontSize: '1rem' }}>{selectedItem.customer?.full_name}</div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>{selectedItem.customer?.email}</div>
+              <div style={{ fontWeight: '900', fontSize: '1rem' }}>{state.selectedItem.customer?.full_name}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>{state.selectedItem.customer?.email}</div>
             </div>
 
             <div>
-              <div style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>Context: Fleet ({selectedItem.booking?.vehicles?.length || 0} Units)</div>
+              <div style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>Context: Fleet ({state.selectedItem.booking?.vehicles?.length || 0} Units)</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {selectedItem.booking?.vehicles?.map(v => (
+                {state.selectedItem.booking?.vehicles?.map(v => (
                   <div key={v.id} style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--admin-text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Car size={14} /> {v.make} {v.model}</div>
                 ))}
               </div>
             </div>
 
-            {selectedItem.receipt_url && (
+            {state.selectedItem.receipt_url && (
               <div>
                 <div style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem' }}>Customer Receipt</div>
                 <div style={{ width: '100%', height: '250px', background: 'var(--admin-bg)', borderRadius: '1rem', overflow: 'hidden', border: '1px solid var(--admin-border)' }}>
-                  <img src={selectedItem.receipt_url} alt="Receipt" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  <img src={state.selectedItem.receipt_url} alt="Receipt" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                 </div>
               </div>
             )}
 
             <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
-              {selectedItem.status === 'FOR_VERIFICATION' && (
+              {state.selectedItem.status === 'FOR_VERIFICATION' && (
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button onClick={() => handleRejectPayment(selectedItem)} style={{ flex: 1, padding: '1rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', borderRadius: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>REJECT</button>
-                  <button onClick={() => handleVerifyPayment(selectedItem)} style={{ flex: 2, padding: '1rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: '0.75rem', fontWeight: '900', cursor: 'pointer' }}>VERIFY PAID</button>
+                  <button onClick={() => handleRejectPayment(state.selectedItem)} style={{ flex: 1, padding: '1rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', borderRadius: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>REJECT</button>
+                  <button onClick={() => handleVerifyPayment(state.selectedItem)} style={{ flex: 2, padding: '1rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: '0.75rem', fontWeight: '900', cursor: 'pointer' }}>VERIFY PAID</button>
                 </div>
               )}
-              <button onClick={() => navigate(`/admin/bookings/${selectedItem.booking_id}`)} style={{ width: '100%', padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>VIEW BOOKING</button>
+              <button onClick={() => navigate(`/admin/bookings/${state.selectedItem.booking_id}`)} style={{ width: '100%', padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>VIEW BOOKING</button>
             </div>
           </div>
         </div>

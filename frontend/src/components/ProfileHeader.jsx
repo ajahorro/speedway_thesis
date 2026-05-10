@@ -8,7 +8,7 @@ const ProfileHeader = () => {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
       <div style={{ textAlign: 'right', display: isMobile ? 'none' : 'block' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{profile?.full_name || 'MASTER ADMIN'}</div>
+        <div style={{ fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{profile?.full_name || 'DEFAULT ADMIN ACCOUNT'}</div>
         <div style={{ fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '900', textTransform: 'uppercase', opacity: 0.6 }}>SYSTEM OPERATOR</div>
       </div>
       <div style={{ 

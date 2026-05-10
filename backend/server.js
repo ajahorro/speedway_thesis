@@ -2,6 +2,7 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
@@ -10,7 +11,40 @@ app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Setup transporter (will still try to send, but won't crash if it fails)
+// 🔍 DEBUG: Check Environment Variables
+console.log('\n' + '🔍'.repeat(20));
+console.log('DEBUG: SERVICE ROLE KEY CHECK');
+console.log(`KEY DEFINED: ${!!process.env.SUPABASE_SERVICE_ROLE_KEY}`);
+console.log(`KEY LENGTH:  ${process.env.SUPABASE_SERVICE_ROLE_KEY?.length || 0}`);
+console.log(`URL DEFINED: ${!!process.env.SUPABASE_URL}`);
+console.log('🔍'.repeat(20) + '\n');
+
+// Initialize Supabase Admin Client
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+);
+
+// 🔍 DEBUG: Test Simple Admin Call on Startup
+(async () => {
+  try {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1 });
+    if (error) throw error;
+    console.log('✅ BACKEND: Service Role verification SUCCESSFUL (Supabase connection OK)');
+  } catch (err) {
+    console.error('❌ BACKEND: Service Role verification FAILED!');
+    console.error('ERROR:', err.message);
+  }
+})();
+
+
+// Setup transporter
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -45,8 +79,7 @@ const generateTemplate = (type, data) => {
 
 app.post('/send-email', async (req, res) => {
   const { to, type, data } = req.body;
-  
-  // 🌟 ALWAYS LOG TO TERMINAL (CRITICAL FOR DEFENSE)
+
   console.log('\n' + '='.repeat(40));
   console.log(`📧 [SHADOW BACKEND] EMAIL TRIGGERED`);
   console.log(`TYPE: ${type}`);
@@ -58,35 +91,221 @@ app.post('/send-email', async (req, res) => {
 
   try {
     const { subject, html } = generateTemplate(type, data);
-    
-    // Attempt real email delivery
+
     if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
-        await transporter.sendMail({
-          from: `"Speedway AutoxMoto" <${process.env.GMAIL_USER}>`,
-          to,
-          subject,
-          html
-        });
-        console.log('✅ Email successfully delivered to inbox.');
+      await transporter.sendMail({
+        from: `"Speedway AutoxMoto" <${process.env.GMAIL_USER}>`,
+        to,
+        subject,
+        html
+      });
+      console.log('✅ Email successfully delivered to inbox.');
     } else {
-        console.warn('⚠️ No SMTP credentials found. Logging to terminal only.');
+      console.warn('⚠️ No SMTP credentials found. Logging to terminal only.');
     }
-    
+
     return res.json({ success: true, message: 'Code logged to terminal and email attempted.' });
   } catch (err) {
     console.warn(`⚠️ SMTP delivery failed, but your code is logged above! (${err.message})`);
-    // Still return success so the frontend doesn't show an error
-    return res.json({ 
-      success: true, 
-      message: 'Email delivery failed, but check your terminal for the code!',
-      dev_mode: true 
-    });
+    return res.json({ success: true, message: 'Email delivery failed, but check your terminal for the code!', dev_mode: true });
   }
 });
+
+// 🚀 ISOLATED INVITATION SYSTEM
+const crypto = require('crypto');
+
+// 1. GENERATE INVITE
+app.post('/admin/generate-invite', async (req, res) => {
+  const { email, role } = req.body;
+  
+  console.log(`🎟️ [INVITE SYSTEM] GENERATING FOR: ${email} (${role})`);
+
+  try {
+    const token = crypto.randomUUID();
+    const expires_at = new Date();
+    expires_at.setHours(expires_at.getHours() + 48); // 48 hour expiry
+
+    // Store in DB
+    const { error: dbError } = await supabaseAdmin
+      .from('invites')
+      .insert({
+        email,
+        token,
+        role,
+        expires_at: expires_at.toISOString()
+      });
+
+    if (dbError) throw dbError;
+
+    const inviteLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/accept-invite?token=${token}`;
+    console.log(`🔗 Token Generated: ${token}`);
+
+    // Send Email
+    if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
+      try {
+        await transporter.sendMail({
+          from: `"Speedway Admin" <${process.env.GMAIL_USER}>`,
+          to: email,
+          subject: `Speedway Administrative Invitation`,
+          html: `
+            <div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 600px; border: 1px solid #eee;">
+              <h2 style="color: #A91B18;">SPEEDWAY AUTOXMOTO</h2>
+              <p>You have been invited to join the team as an <strong>${role}</strong>.</p>
+              <p>Click the button below to activate your account and set your password:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${inviteLink}" style="background-color: #A91B18; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">ACTIVATE ACCOUNT</a>
+              </div>
+              <p style="font-size: 11px; color: #888;">Link expires in 48 hours.</p>
+            </div>
+          `
+        });
+        console.log(`✅ Invitation delivered to ${email}`);
+      } catch (mailErr) {
+        console.error(`⚠️ Email delivery failed: ${mailErr.message}`);
+        console.log(`🔗 USE THIS LINK MANUALLY: ${inviteLink}`);
+      }
+    }
+
+
+    return res.json({ success: true, message: 'Invite generated', inviteLink });
+  } catch (err) {
+    console.error(`❌ Generate Invite Failed: ${err.message}`);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. VALIDATE INVITE
+app.get('/invite/validate', async (req, res) => {
+  const { token } = req.query;
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('invites')
+      .select('*')
+      .eq('token', token)
+      .eq('used', false)
+      .gt('expires_at', new Date().toISOString())
+      .single();
+
+    if (error || !data) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired invitation' });
+    }
+
+    return res.json({ success: true, email: data.email, role: data.role });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'Validation failed' });
+  }
+});
+
+// 3. ACCEPT INVITE (Create Account)
+app.post('/invite/accept', async (req, res) => {
+  const { token, password, first_name, last_name } = req.body;
+  
+  console.log(`\n🎟️ [INVITE SYSTEM] ACTIVATING ACCOUNT FOR TOKEN: ${token.substring(0, 8)}...`);
+
+  try {
+    // 1. Verify token
+    const { data: invite, error: inviteError } = await supabaseAdmin
+      .from('invites')
+      .select('*')
+      .eq('token', token)
+      .eq('used', false)
+      .single();
+
+    if (inviteError || !invite) {
+      console.error('❌ Token Validation Failed:', inviteError?.message || 'Token not found or already used');
+      throw new Error('Invalid or used invitation token');
+    }
+
+    console.log(`✅ Token valid for: ${invite.email} (${invite.role})`);
+
+    // 2. Create User in Auth
+    console.log(`⏳ Creating user in Supabase Auth...`);
+    let userId;
+    const { data: userData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email: invite.email,
+      password: password,
+      email_confirm: true,
+      user_metadata: { first_name, last_name, role: invite.role }
+    });
+
+    if (authError) {
+      if (authError.message.includes('already been registered')) {
+        console.log(`ℹ️ User already exists in Auth, searching for existing ID...`);
+        const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        const existingUser = listData.users.find(u => u.email === invite.email);
+        if (existingUser) {
+          userId = existingUser.id;
+          console.log(`✅ Found existing user ID: ${userId}`);
+        } else {
+          throw new Error('User reported as registered but not found in directory');
+        }
+      } else {
+        console.error('❌ Supabase Auth Creation Failed:', authError.message);
+        throw authError;
+      }
+    } else {
+      userId = userData.user.id;
+      console.log(`✅ Auth user created: ${userId}`);
+    }
+
+    // 3. Create Profile Row
+    console.log(`⏳ Inserting into profiles table for ID: ${userId}...`);
+    const fName = first_name || 'Admin';
+    const lName = last_name || 'User';
+    
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .upsert({
+        id: userId,
+        email: invite.email,
+        first_name: fName,
+        last_name: lName,
+        role: invite.role,
+        is_active: true,
+        updated_at: new Date().toISOString()
+      });
+
+    if (profileError) {
+      console.error('❌ Profile Insertion Failed:', profileError.message);
+      // We don't delete the auth user here to avoid data loss, 
+      // but we throw so the user knows it failed.
+      throw profileError;
+    }
+
+    // 4. Mark invite as used
+    const { error: updateError } = await supabaseAdmin
+      .from('invites')
+      .update({ used: true })
+      .eq('id', invite.id);
+
+    if (updateError) console.warn('⚠️ Could not mark invite as used:', updateError.message);
+
+    console.log(`🎉 SUCCESS: Account activated for ${invite.email}`);
+    return res.json({ success: true, message: 'Account activated successfully' });
+
+  } catch (err) {
+    console.error(`❌ Activation Final Error: ${err.message}`);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+
 
 app.listen(PORT, () => {
   console.log('\n' + '*'.repeat(50));
   console.log(`🚀 SPEEDWAY SHADOW BACKEND: http://localhost:${PORT}`);
-  console.log(`💡 ALL SYSTEM NOTIFICATIONS (BOOKINGS/STAFF) WILL APPEAR HERE!`);
+  console.log(`💡 ALL SYSTEM NOTIFICATIONS (BOOKINGS/STAFF/INVITES) WILL APPEAR HERE!`);
   console.log('*'.repeat(50) + '\n');
+}).on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n❌ ERROR: Port ${PORT} is already in use!`);
+    console.error(`   Please stop any other running backend processes and try again.\n`);
+  } else {
+    console.error(`\n❌ ERROR: Server failed to start:`, err.message);
+  }
+  process.exit(1);
 });
+
+

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, FileText, User, CreditCard, Bell, Settings, LayoutDashboard, Calendar, History, ClipboardList, Shield, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { mockBookings, mockUsers, mockStaff } from '../pages/Admin/AdminMockData';
+import { supabase } from '../lib/supabase';
+import { logger } from '../utils/logger';
 
 const AdminSearch = () => {
   const [query, setQuery] = useState('');
@@ -36,36 +37,56 @@ const AdminSearch = () => {
   }, []);
 
   useEffect(() => {
-    if (query.length < 1) {
-      setResults([]);
-      setIsOpen(false);
-      return;
-    }
+    const performSearch = async () => {
+      if (query.length < 2) {
+        setResults([]);
+        setIsOpen(false);
+        return;
+      }
 
-    const filteredPages = pages.filter(p => p.name.toLowerCase().includes(query.toLowerCase()));
-    
-    const filteredBookings = mockBookings.filter(b => 
-      b.id.toLowerCase().includes(query.toLowerCase()) || 
-      b.customer?.full_name?.toLowerCase().includes(query.toLowerCase())
-    ).map(b => ({
-      name: `Booking #${b.id.slice(0, 8)} - ${b.customer?.full_name}`,
-      path: `/admin/bookings/${b.id}`,
-      icon: FileText,
-      category: 'Recent Bookings'
-    }));
+      try {
+        logger.admin(`Searching for: ${query}`);
+        
+        // 1. Filter local pages
+        const filteredPages = pages.filter(p => p.name.toLowerCase().includes(query.toLowerCase()));
 
-    const filteredUsers = mockUsers.filter(u => 
-      u.full_name.toLowerCase().includes(query.toLowerCase()) || 
-      u.email.toLowerCase().includes(query.toLowerCase())
-    ).map(u => ({
-      name: `${u.full_name} (${u.role})`,
-      path: '/admin/users',
-      icon: User,
-      category: 'Users & Staff'
-    }));
+        // 2. Search Bookings
+        const { data: bookings } = await supabase
+          .from('bookings')
+          .select(`id, customer:profiles!bookings_customer_id_fkey(full_name)`)
+          .or(`id.ilike.%${query}%`)
+          .limit(3);
 
-    setResults([...filteredPages, ...filteredBookings.slice(0, 3), ...filteredUsers.slice(0, 3)]);
-    setIsOpen(true);
+        const bookingResults = (bookings || []).map(b => ({
+          name: `Booking #${b.id.slice(0, 8)} - ${b.customer?.full_name || 'Customer'}`,
+          path: `/admin/bookings/${b.id}`,
+          icon: FileText,
+          category: 'Recent Bookings'
+        }));
+
+        // 3. Search Users/Profiles
+        const { data: users } = await supabase
+          .from('profiles')
+          .select('full_name, role, id')
+          .or(`full_name.ilike.%${query}%, email.ilike.%${query}%`)
+          .limit(3);
+
+        const userResults = (users || []).map(u => ({
+          name: `${u.full_name} (${u.role})`,
+          path: u.role === 'CUSTOMER' ? '/admin/users' : '/admin/staff',
+          icon: User,
+          category: 'Users & Staff'
+        }));
+
+        setResults([...filteredPages, ...bookingResults, ...userResults]);
+        setIsOpen(true);
+      } catch (err) {
+        logger.error('Global Search Error', err);
+      }
+    };
+
+    const timeoutId = setTimeout(performSearch, 300);
+    return () => clearTimeout(timeoutId);
   }, [query]);
 
   const handleSelect = (path) => {
@@ -154,4 +175,3 @@ const AdminSearch = () => {
 };
 
 export default AdminSearch;
-

@@ -59,7 +59,7 @@ const AdminLayout = () => {
   }, [location, isMobile]);
 
   const fetchUnreadCount = async () => {
-    setUnreadCount(3);
+    setUnreadCount(0);
   };
   const handleLogout = async () => {
     confirmLogout(async () => {
@@ -75,7 +75,7 @@ const AdminLayout = () => {
     { name: 'Refund Hub', path: '/admin/refunds', icon: Undo },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart2 },
     { name: 'Audit Logs', path: '/admin/audit-logs', icon: History },
-    { name: 'Staff Management', path: '/admin/staff', icon: Users },
+    { name: 'Accounts Management', path: '/admin/accounts', icon: Users },
     { name: 'Users', path: '/admin/users', icon: User },
     { name: 'Notifications', path: '/admin/notifications', icon: Bell },
 

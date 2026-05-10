@@ -13,11 +13,12 @@ import AdminPayments from './pages/Admin/AdminPayments';
 import AdminRefunds from './pages/Admin/AdminRefunds';
 import AdminSalesReport from './pages/Admin/AdminSalesReport';
 import AdminAuditLogs from './pages/Admin/AdminAuditLogs';
-import AdminStaffManagement from './pages/Admin/AdminStaffManagement';
+import AdminAccountsManagement from './pages/Admin/AdminAccountsManagement';
 import AdminUserManagement from './pages/Admin/AdminUserManagement';
 import AdminSettings from './pages/Admin/AdminSettings';
 import AdminNotifications from './pages/Admin/AdminNotifications';
 import AdminProfile from './pages/Admin/AdminProfile';
+import AdminAcceptInvite from './pages/Admin/AdminAcceptInvite';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
 import './index.css';
@@ -37,6 +38,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/accept-invite" element={<AdminAcceptInvite />} />
+
           
           <Route 
             path="/admin" 
@@ -54,7 +57,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="refunds" element={<AdminRefunds />} />
             <Route path="analytics" element={<AdminSalesReport />} />
             <Route path="audit-logs" element={<AdminAuditLogs />} />
-            <Route path="staff" element={<AdminStaffManagement />} />
+            <Route path="accounts" element={<AdminAccountsManagement />} />
             <Route path="users" element={<AdminUserManagement />} />
             <Route path="settings" element={<AdminSettings />} />
             <Route path="notifications" element={<AdminNotifications />} />
