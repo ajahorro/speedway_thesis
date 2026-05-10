@@ -26,22 +26,24 @@ const AdminSchedule = () => {
     try {
       logger.admin(`Fetching timeline for ${selectedDate}...`);
       
-      const startOfDay = `${selectedDate}T00:00:00.000Z`;
-      const endOfDay = `${selectedDate}T23:59:59.999Z`;
-
       const { data, error } = await supabase
         .from('bookings')
-        .select(`
-          *,
-          customer:profiles!bookings_customer_id_fkey(full_name),
-          vehicles:booking_vehicles(*)
-        `)
-        .gte('start_datetime', startOfDay)
-        .lte('start_datetime', endOfDay)
+        .select(`*`)
         .order('start_datetime', { ascending: true });
 
+      // DEDUPLICATION ENGINE: Ensure unique IDs only
+      const uniqueBookings = Array.from(
+        new Map((data || []).map(b => [b.id, b])).values()
+      );
+
+      // Relaxed filter for full visibility
+      const dailyBookings = uniqueBookings.filter(b => {
+        const bDate = new Date(b.start_datetime).toISOString().split('T')[0];
+        return bDate === selectedDate;
+      });
+
       if (error) throw error;
-      setBookings(data || []);
+      setBookings(dailyBookings);
       logger.admin('Timeline synchronized.');
     } catch (err) {
       logger.error('Schedule Sync Error', err);
@@ -93,7 +95,7 @@ const AdminSchedule = () => {
                          <div style={{ color: bIdx === 0 ? 'var(--admin-brand)' : '#8b5cf6', fontSize: '0.65rem', fontWeight: '900', textTransform: 'uppercase' }}>APPOINTMENT</div>
                          <div style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>{vehicleText}</div>
                        </div>
-                       <h3 style={{ margin: '0.2rem 0', fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{booking.customer?.full_name}</h3>
+                       <h3 style={{ margin: '0.2rem 0', fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{booking.customer_name || booking.customer?.full_name || 'Anonymous'}</h3>
                        <div style={{ fontSize: '0.85rem', fontWeight: '900', color: 'var(--admin-brand)' }}>₱{Number(booking.total_amount).toLocaleString()}</div>
                      </div>
                   )

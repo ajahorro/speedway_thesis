@@ -100,7 +100,33 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           {/* Global Fallback: Catch-all for unknown routes */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
-        <Toaster position="top-right" />
+        <Toaster 
+          position="top-right" 
+          toastOptions={{
+            style: {
+              background: 'var(--admin-card)',
+              color: 'var(--admin-text-primary)',
+              border: '1px solid var(--admin-border)',
+              borderRadius: 'var(--admin-radius-sm)',
+              fontSize: '0.9rem',
+              fontWeight: '600',
+              padding: '1rem',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+            },
+            success: {
+              iconTheme: {
+                primary: 'var(--admin-brand)',
+                secondary: '#fff',
+              },
+            },
+            error: {
+              iconTheme: {
+                primary: '#ef4444',
+                secondary: '#fff',
+              },
+            }
+          }}
+        />
       </BrowserRouter>
     </AuthProvider>
   </ThemeProvider>

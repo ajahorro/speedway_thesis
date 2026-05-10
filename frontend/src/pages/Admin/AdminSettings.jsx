@@ -34,7 +34,7 @@ const AdminSettings = () => {
       const { data, error } = await supabase
         .from('business_config')
         .select('*')
-        .eq('id', 1)
+        .limit(1)
         .single();
 
       if (error) {
@@ -64,17 +64,19 @@ const AdminSettings = () => {
       
       const { error } = await supabase
         .from('business_config')
-        .update({
+        .upsert({
+          id: settings.id || 1,
           business_name: settings.business_name,
           contact_number: settings.contact_number,
           email_address: settings.email_address,
           business_address: settings.business_address,
           opening_hour: settings.opening_hour,
           closing_hour: settings.closing_hour,
+          gcash_number: settings.gcash_number,
+          gcash_name: settings.gcash_name,
           gcash_qr_url: settings.gcash_qr_url,
           updated_at: new Date().toISOString()
-        })
-        .eq('id', 1);
+        });
 
       if (error) throw error;
 
@@ -227,6 +229,29 @@ const AdminSettings = () => {
                   value={settings.closing_hour}
                   placeholder="e.g. 06:00 PM"
                   onChange={(e) => setSettings({...settings, closing_hour: e.target.value})}
+                  style={inputStyle} 
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div>
+                <label style={labelStyle}><CreditCard size={12} /> GCash Number</label>
+                <input 
+                  type="text" 
+                  value={settings.gcash_number}
+                  placeholder="e.g. 09123456789"
+                  onChange={(e) => setSettings({...settings, gcash_number: e.target.value})}
+                  style={inputStyle} 
+                />
+              </div>
+              <div>
+                <label style={labelStyle}><CreditCard size={12} /> GCash Account Name</label>
+                <input 
+                  type="text" 
+                  value={settings.gcash_name}
+                  placeholder="e.g. SPEEDWAY STUDIO"
+                  onChange={(e) => setSettings({...settings, gcash_name: e.target.value})}
                   style={inputStyle} 
                 />
               </div>

@@ -29,7 +29,8 @@ const Login = ({ isModal = false, onClose }) => {
     if (urlParams.get('reset') === 'true') {
       setMode('RESET');
     }
-  }, [setMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const renderForm = () => {
     switch (mode) {

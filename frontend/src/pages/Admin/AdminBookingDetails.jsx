@@ -6,7 +6,7 @@ import {
   History, CheckCircle, XCircle, AlertCircle, MessageCircle,
   Hash, Calendar, Phone, Shield, Activity, Play, CheckCircle2,
   Package, Truck, Trash2, Banknote, Loader2, Eye, ArrowRight, X, UserX, Box,
-  Send
+  Send, ShieldCheck, Image as ImageIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import BookingAuditTrail from '../../components/BookingAuditTrail';
@@ -73,18 +73,35 @@ const AdminBookingDetails = () => {
         assigned_staff = sData;
       }
 
-      // 3. Fetch Vehicles and Services
+      // 3. Fetch Vehicles (Manual Join)
       const { data: vData, error: vError } = await supabase
         .from('booking_vehicles')
-        .select('*, services:booking_vehicle_services(*)')
+        .select('*')
         .eq('booking_id', id)
         .order('created_at');
 
       if (vError) throw vError;
 
+      let vehiclesWithServices = [];
+      if (vData && vData.length > 0) {
+        const vehicleIds = vData.map(v => v.id);
+        const { data: sData } = await supabase
+          .from('booking_vehicle_services')
+          .select('*')
+          .in('booking_vehicle_id', vehicleIds);
+        
+        vehiclesWithServices = vData.map(v => ({
+          ...v,
+          services: (sData || []).filter(s => s.booking_vehicle_id === v.id)
+        }));
+      }
+
       // 🧮 CALCULATION FIX: Enforce snapshot-based calculation
-      const processedVehicles = (vData || []).map(v => {
-        const snapshotSubtotal = (v.services || []).reduce((sum, s) => sum + Number(s.price_snapshot || 0), 0);
+      const processedVehicles = vehiclesWithServices.map(v => {
+        const snapshotSubtotal = (v.services || []).reduce((sum, s) => {
+          const price = Number(s.price || s.price_snapshot || 0);
+          return sum + price;
+        }, 0);
         return {
           ...v,
           subtotal: Number(v.subtotal) > 0 ? Number(v.subtotal) : snapshotSubtotal
@@ -100,6 +117,27 @@ const AdminBookingDetails = () => {
         total_amount: Number(bData.total_amount) > 0 ? Number(bData.total_amount) : calculatedTotal
       });
       setVehicles(processedVehicles);
+
+      // SYNC AUDIT LOGS WITH DATA
+      const { data: auditData } = await supabase.from('audit_logs').select('*').eq('booking_id', id).order('created_at', { ascending: true });
+      const hasCreation = auditData?.some(l => l.action_type === 'BOOKING_CREATED');
+      const logs = auditData ? auditData.map(log => ({ 
+        ...log, 
+        event_type: log.action_type, 
+        metadata: { details: log.details }, 
+        actor: { full_name: log.actor_name, role: log.actor_role } 
+      })) : [];
+
+      if (!hasCreation) {
+        logs.unshift({
+          id: 'virtual-creation',
+          event_type: 'BOOKING_INITIATED',
+          details: 'Booking record successfully initiated in the Speedway Fleet Engine.',
+          created_at: bData.created_at,
+          actor: { full_name: 'System', role: 'SYSTEM' }
+        });
+      }
+      setAuditLogs(logs);
     } catch (error) { 
       logger.error('Admin Sync Error', error);
       toast.error('Data pipeline error. Check console.'); 
@@ -131,7 +169,27 @@ const AdminBookingDetails = () => {
 
   const fetchAuditLogs = async () => {
     const { data } = await supabase.from('audit_logs').select('*').eq('booking_id', id).order('created_at', { ascending: true });
-    if (data) setAuditLogs(data.map(log => ({ ...log, event_type: log.action_type, metadata: { details: log.details }, actor: { full_name: log.actor_name, role: log.actor_role } })));
+    
+    // Virtual Creation Log if missing
+    const hasCreation = data?.some(l => l.action_type === 'BOOKING_CREATED');
+    const logs = data ? data.map(log => ({ 
+      ...log, 
+      event_type: log.action_type, 
+      metadata: { details: log.details }, 
+      actor: { full_name: log.actor_name, role: log.actor_role } 
+    })) : [];
+
+    if (!hasCreation && booking) {
+      logs.unshift({
+        id: 'virtual-creation',
+        event_type: 'BOOKING_INITIATED',
+        details: 'Booking record successfully initiated in the Speedway Fleet Engine.',
+        created_at: booking.created_at,
+        actor: { full_name: 'System', role: 'SYSTEM' }
+      });
+    }
+
+    setAuditLogs(logs);
   };
 
   const notifyUser = async (userId, title, message, type, url) => {
@@ -144,15 +202,45 @@ const AdminBookingDetails = () => {
     if (!staffId) return;
     try {
       const { data: { user: admin } } = await supabase.auth.getUser();
-      const { error } = await supabase.from('bookings').update({ staff_id: staffId, assigned_by: admin?.id, assigned_at: new Date().toISOString() }).eq('id', id);
-      if (error) throw error;
+      
+      const updatePayload = { 
+        staff_id: staffId, 
+        assigned_by: admin?.id, 
+        assigned_at: new Date().toISOString(),
+        customer_name: booking.customer_name || booking.customer?.full_name,
+        contact_number: booking.contact_number || booking.customer?.phone_number
+      };
+
+      const { error } = await supabase.from('bookings').update(updatePayload).eq('id', id);
+      
+      if (error) {
+        console.error('Assignment Database Error:', error);
+        throw error;
+      }
       
       // Notify Staff
       await notifyUser(staffId, 'New Fleet Assigned! 🔧', `You have been assigned to lead the detailing session for ${booking.customer?.full_name}.`, 'TASK_ASSIGNED', `/staff/tasks`);
       
+      // LOG AUDIT
+      const staffName = staffList.find(s => s.id === staffId)?.full_name || 'Staff';
+      await supabase.from('audit_logs').insert({
+        booking_id: id,
+        action_type: 'STAFF_ASSIGNED',
+        actor_name: admin?.email || 'Admin',
+        actor_role: 'ADMIN',
+        details: `Assigned technician ${staffName} to lead this session.`
+      });
+
       toast.success('Technician Assigned');
       fetchBookingDetails(); fetchAuditLogs();
-    } catch (error) { toast.error('Assignment error'); }
+    } catch (error) { 
+      console.error('CRITICAL ASSIGNMENT FAILURE:', error);
+      if (error.code === 'PGRST204') {
+        toast.error('Schema Mismatch: Missing assignment columns in DB.');
+      } else {
+        toast.error(`Assignment error: ${error.message || 'Unknown server error'}`); 
+      }
+    }
   };
 
   const handleVerifyPayment = async (p) => {
@@ -163,6 +251,15 @@ const AdminBookingDetails = () => {
       
       await notifyUser(booking.customer_id, 'Payment Verified! 💰', `Your payment of ₱${p.amount.toLocaleString()} has been approved. Thank you!`, 'PAYMENT_APPROVED', `/my-bookings/${id}`);
       
+      // LOG AUDIT
+      await supabase.from('audit_logs').insert({
+        booking_id: id,
+        action_type: 'PAYMENT_VERIFIED',
+        actor_name: verifier?.email || 'Admin',
+        actor_role: 'ADMIN',
+        details: `Verified payment of ₱${p.amount.toLocaleString()} via ${p.method}.`
+      });
+
       toast.success('Payment Approved');
       fetchPayments(); fetchAuditLogs(); fetchBookingDetails();
     } catch (err) { toast.error('Verification failed'); }
@@ -204,8 +301,19 @@ const AdminBookingDetails = () => {
         await notifyUser(booking.customer_id, 'Unit Completed! ✨', `Your ${v.make} ${v.model} is now ready for pickup.`, 'VEHICLE_COMPLETED', `/my-bookings/${id}?vehicle=${vehicleId}`);
       }
 
+      // LOG AUDIT
+      const vehicle = vehicles.find(item => item.id === vehicleId);
+      const { data: { user: actor } } = await supabase.auth.getUser();
+      await supabase.from('audit_logs').insert({
+        booking_id: id,
+        action_type: 'VEHICLE_STATUS_UPDATE',
+        actor_name: actor?.email || 'Admin',
+        actor_role: 'ADMIN',
+        details: `Updated ${vehicle?.make} ${vehicle?.model} to: ${status.toUpperCase()}`
+      });
+
       toast.success(`Vehicle ${status}`);
-      fetchBookingDetails();
+      fetchBookingDetails(); fetchAuditLogs();
     } catch (err) { toast.error('Vehicle update failed'); }
   };
 
@@ -225,28 +333,54 @@ const AdminBookingDetails = () => {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.8fr 1.2fr', gap: '1.5rem' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
-          {/* PARENT STATUS CONTROL */}
-          <div style={{ ...cardStyle, border: '2px solid var(--admin-brand)', background: 'rgba(169, 27, 24, 0.03)' }}>
-            <h3 style={{ margin: '0 0 1.25rem 0', fontSize: '0.8rem', fontWeight: '900', textTransform: 'uppercase', color: 'var(--admin-brand)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Shield size={16} /> Appointment Lifecycle
-            </h3>
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-               {['scheduled', 'no_show', 'cancelled', 'completed'].map(s => (
-                 <button 
-                  key={s} 
-                  onClick={() => updateBookingStatus(s)} 
-                  style={{ 
-                    padding: '0.6rem 1.25rem', borderRadius: '0.75rem', 
-                    background: booking.status === s ? 'var(--admin-brand)' : 'var(--admin-bg)', 
-                    color: booking.status === s ? 'white' : 'var(--admin-text-primary)', 
-                    border: '1px solid var(--admin-border)', 
-                    fontWeight: '900', fontSize: '0.75rem', cursor: 'pointer',
-                    transition: 'all 0.3s ease'
-                  }}
-                 >
-                   {s.toUpperCase()}
-                 </button>
-               ))}
+          {/* 🔍 HIGH-PRIORITY VERIFICATION HUB */}
+          <div style={{ ...cardStyle, border: '2px solid var(--admin-info)', background: 'rgba(59, 130, 246, 0.03)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-info)', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <ShieldCheck size={20} /> Payment Verification Hub
+              </h3>
+              <span style={{ fontSize: '0.65rem', fontWeight: '900', padding: '0.3rem 0.6rem', borderRadius: '20px', background: 'var(--admin-info)', color: 'white' }}>
+                FOR REVIEW
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1.5rem', alignItems: 'start' }}>
+              {/* Receipt Preview */}
+              <div style={{ width: '120px', height: '160px', borderRadius: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', position: 'relative' }} onClick={() => bookingPayments[0]?.receipt_url && window.open(bookingPayments[0].receipt_url, '_blank')}>
+                {bookingPayments[0]?.receipt_url ? (
+                  <img src={bookingPayments[0].receipt_url} alt="Payment Receipt" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: 0.5 }}>
+                    <ImageIcon size={24} />
+                    <span style={{ fontSize: '0.6rem', fontWeight: '800' }}>No Receipt</span>
+                  </div>
+                )}
+              </div>
+
+              {/* OCR Results */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ padding: '1rem', background: 'var(--admin-bg)', borderRadius: '0.75rem', border: '1px solid var(--admin-border)', height: '100%' }}>
+                  <div style={{ ...labelStyle, color: 'var(--admin-info)' }}>Extracted Verification Metadata</div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: '850', color: 'var(--admin-text-primary)', whiteSpace: 'pre-wrap', fontFamily: 'monospace', marginTop: '0.5rem', lineHeight: '1.4' }}>
+                    {booking.notes || 'No OCR scan data attached to this booking record.'}
+                  </div>
+                </div>
+                {bookingPayments[0] && (
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button onClick={() => handleVerifyPayment(bookingPayments[0])} style={{ flex: 1, padding: '0.75rem', background: '#10b981', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>APPROVE PAYMENT</button>
+                    <button onClick={() => handleRejectPayment(bookingPayments[0])} style={{ flex: 1, padding: '0.75rem', background: '#ef4444', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>REJECT</button>
+                  </div>
+                )}
+                
+                {/* BILLING / MANUAL PAYMENT BUTTON */}
+                <button 
+                  onClick={() => setPaymentModal(true)}
+                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '0.6rem', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer', marginTop: bookingPayments[0] ? '0' : '0.75rem' }}
+                >
+                  <Banknote size={14} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} /> 
+                  RECORD MANUAL PAYMENT / BILLING ADJUSTMENT
+                </button>
+              </div>
             </div>
           </div>
 
@@ -282,15 +416,16 @@ const AdminBookingDetails = () => {
                    <div style={{ fontWeight: '950', fontSize: '1.1rem' }}>₱{v.subtotal?.toLocaleString()}</div>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-                {v.services?.map(s => (
-                  <span key={s.id} style={{ 
-                    padding: '0.35rem 0.75rem', borderRadius: '0.5rem', 
-                    border: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.02)', 
-                    fontSize: '0.75rem', fontWeight: '700', color: 'var(--admin-text-primary)' 
-                  }}>
-                    {s.service_name_snapshot}
-                  </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.5rem' }}>
+                {(v.services || []).map(s => (
+                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--admin-border)', borderRadius: '0.5rem' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>
+                      {s.service_name || s.service_name_snapshot}
+                    </span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-brand)' }}>
+                      ₱{(s.price || s.price_snapshot || 0).toLocaleString()}
+                    </span>
+                  </div>
                 ))}
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -417,12 +552,12 @@ const AdminBookingDetails = () => {
                    <User size={18} color="var(--admin-text-secondary)" />
                  </div>
                  <div>
-                   <div style={valueStyle}>{booking.customer?.full_name}</div>
+                   <div style={valueStyle}>{booking.customer_name || booking.customer?.full_name || 'Anonymous Customer'}</div>
                    <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>FLEET OWNER</div>
                  </div>
               </div>
               <div style={{ padding: '1rem', background: 'var(--admin-bg)', borderRadius: '1rem', border: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={labelStyle}>Contact</span><span style={{ fontSize: '0.8rem', fontWeight: '800' }}>{booking.customer?.phone_number || 'N/A'}</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={labelStyle}>Contact</span><span style={{ fontSize: '0.8rem', fontWeight: '800' }}>{booking.contact_number || booking.customer?.phone_number || 'N/A'}</span></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={labelStyle}>Email</span><span style={{ fontSize: '0.8rem', fontWeight: '800' }}>{booking.customer?.email}</span></div>
               </div>
             </div>

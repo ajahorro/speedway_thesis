@@ -13,7 +13,20 @@ const ConfirmationToast = ({
   variant = 'danger' 
 }) => {
   return (
-    <div style={s.container}>
+    <div style={{
+      ...s.container,
+      animation: t.visible ? 'toastEnter 0.35s cubic-bezier(0.21, 1.02, 0.73, 1) forwards' : 'toastExit 0.4s cubic-bezier(0.06, 0.71, 0.55, 1) forwards',
+    }}>
+      <style>{`
+        @keyframes toastEnter {
+          0% { transform: translateY(-20px) scale(0.95); opacity: 0; }
+          100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        @keyframes toastExit {
+          0% { transform: scale(1); opacity: 1; }
+          100% { transform: scale(0.9); opacity: 0; }
+        }
+      `}</style>
       <div style={s.header}>
         {Icon && (
           <div style={{

@@ -123,12 +123,17 @@ const AdminDashboard = () => {
         (b.refund_status !== 'PROCESSED') && (b.payments || []).some(p => p.status === 'PAID')
       ).length;
 
-      // 7. Recent Bookings (Explicit Join)
+      // 7. Recent Bookings (DEDUPLICATED)
       const { data: recent } = await supabase
         .from('bookings')
         .select('*, customer:profiles!bookings_customer_id_fkey(full_name)')
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(20); // Fetch extra to account for deduplication
+
+      // DEDUPLICATION ENGINE: Ensure unique IDs only
+      const uniqueBookings = Array.from(
+        new Map((recent || []).map(b => [b.id, b])).values()
+      ).slice(0, 5);
 
       setState({
         loading: false,
@@ -140,7 +145,7 @@ const AdminDashboard = () => {
           refundRequests: pendingRefunds || 0,
           unassignedBookings: unassigned || 0
         },
-        recentBookings: recent || []
+        recentBookings: uniqueBookings
       });
       
       logger.admin('Operational intelligence synchronized.');

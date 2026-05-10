@@ -14,7 +14,7 @@ export const showConfirmation = ({
   onConfirm, 
   variant = 'danger' 
 }) => {
-  toast((t) => (
+  toast.custom((t) => (
     <ConfirmationToast
       t={t}
       title={title}

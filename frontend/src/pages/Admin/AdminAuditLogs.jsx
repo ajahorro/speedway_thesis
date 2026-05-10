@@ -244,6 +244,14 @@ const AdminAuditLogs = () => {
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Description</label>
                 <p style={{ margin: 0, fontSize: '1rem', fontWeight: '600' }}>{formatDescription(selectedLog)}</p>
               </div>
+              {selectedLog.booking_id && (
+                <button 
+                  onClick={() => navigate(`/admin/bookings/${selectedLog.booking_id}`)}
+                  style={{ width: '100%', padding: '1rem', background: 'var(--admin-brand)', border: 'none', color: 'white', fontWeight: '900', borderRadius: 'var(--admin-radius-sm)', cursor: 'pointer', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                >
+                  <ExternalLink size={18} /> VIEW BOOKING DETAILS
+                </button>
+              )}
               <button onClick={() => setIsModalOpen(false)} style={{ width: '100%', padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', fontWeight: '900', borderRadius: 'var(--admin-radius-sm)', cursor: 'pointer' }}>CLOSE DETAIL</button>
             </div>
           </div>

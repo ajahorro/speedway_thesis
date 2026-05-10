@@ -31,28 +31,21 @@ const AdminPayments = () => {
       // One-shot join: payments -> bookings -> profiles (via explicit FK)
       const { data: paymentData, error: paymentError } = await supabase
         .from('payments')
-        .select(`
-          *,
-          booking:bookings(
-            customer_id, 
-            customer:profiles!bookings_customer_id_fkey(full_name, email), 
-            vehicles:booking_vehicles(*)
-          )
-        `)
+        .select(`*`)
         .order('created_at', { ascending: false });
 
       if (paymentError) throw paymentError;
 
-      const processed = (paymentData || []).filter(p => p.amount > 0).map(p => {
+      const processed = (paymentData || []).map(p => {
         let url = p.receipt_url;
         if (url && !url.startsWith('http')) {
-          const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(url);
+          const { data: { publicUrl } } = supabase.storage.from('payment-receipts').getPublicUrl(url);
           url = publicUrl;
         }
         return {
           ...p,
           receipt_url: url,
-          customer: p.booking?.customer || { full_name: 'Walk-in' }
+          customer_name: 'Fleet Transaction'
         };
       });
 
@@ -213,7 +206,7 @@ const AdminPayments = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '950', letterSpacing: '0.5px' }}>#{p.id.slice(0, 8).toUpperCase()}</div>
-                  <h3 style={{ margin: 0, fontWeight: '950', fontSize: isMobile ? '0.9rem' : '1rem', textTransform: 'uppercase' }}>{p.customer?.full_name}</h3>
+                  <h3 style={{ margin: 0, fontWeight: '950', fontSize: isMobile ? '0.9rem' : '1rem', textTransform: 'uppercase' }}>{p.customer_name}</h3>
                 </div>
                 <span style={{ flexShrink: 0, fontSize: '0.55rem', padding: '0.25rem 0.6rem', borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-bg)', color: p.status === 'PAID' ? '#10b981' : '#f59e0b', fontWeight: '950', height: 'fit-content', border: '1px solid currentColor', textTransform: 'uppercase' }}>{p.status.replace('_', ' ')}</span>
               </div>

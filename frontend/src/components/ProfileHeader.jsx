@@ -4,12 +4,21 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 
 const ProfileHeader = () => {
   const isMobile = useMediaQuery('(max-width: 1024px)');
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  
+  const firstName = profile?.first_name || user?.user_metadata?.first_name;
+  const lastName = profile?.last_name || user?.user_metadata?.last_name || '';
+  const displayName = firstName ? `${firstName} ${lastName}`.trim() : 'GUEST USER';
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
       <div style={{ textAlign: 'right', display: isMobile ? 'none' : 'block' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{profile?.full_name || 'DEFAULT ADMIN ACCOUNT'}</div>
-        <div style={{ fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '900', textTransform: 'uppercase', opacity: 0.6 }}>SYSTEM OPERATOR</div>
+        <div style={{ fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          {displayName}
+        </div>
+        <div style={{ fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '900', textTransform: 'uppercase', opacity: 0.6 }}>
+          {profile?.role === 'CUSTOMER' || user?.user_metadata?.role === 'CUSTOMER' ? 'CUSTOMER' : 'SYSTEM OPERATOR'}
+        </div>
       </div>
       <div style={{ 
         width: '32px', 
@@ -24,7 +33,7 @@ const ProfileHeader = () => {
         fontWeight: '950',
         color: 'var(--admin-brand)'
       }}>
-        {profile?.full_name?.charAt(0).toUpperCase() || 'A'}
+        {firstName?.charAt(0).toUpperCase() || 'G'}
       </div>
     </div>
   );

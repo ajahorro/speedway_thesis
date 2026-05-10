@@ -1,9 +1,11 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
+
+const { Resend } = require('resend');
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 const app = express();
 app.use(cors());
@@ -42,16 +44,6 @@ const supabaseAdmin = createClient(
     console.error('ERROR:', err.message);
   }
 })();
-
-
-// Setup transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS
-  }
-});
 
 const generateTemplate = (type, data) => {
   let subject = '';
@@ -92,21 +84,21 @@ app.post('/send-email', async (req, res) => {
   try {
     const { subject, html } = generateTemplate(type, data);
 
-    if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
-      await transporter.sendMail({
-        from: `"Speedway AutoxMoto" <${process.env.GMAIL_USER}>`,
+    if (resendClient) {
+      await resendClient.emails.send({
+        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
         to,
         subject,
         html
       });
-      console.log('✅ Email successfully delivered to inbox.');
+      console.log('✅ Email successfully delivered to inbox via Resend.');
     } else {
-      console.warn('⚠️ No SMTP credentials found. Logging to terminal only.');
+      console.warn('⚠️ No RESEND_API_KEY found. Logging to terminal only.');
     }
 
     return res.json({ success: true, message: 'Code logged to terminal and email attempted.' });
   } catch (err) {
-    console.warn(`⚠️ SMTP delivery failed, but your code is logged above! (${err.message})`);
+    console.warn(`⚠️ Email delivery failed, but your code is logged above! (${err.message})`);
     return res.json({ success: true, message: 'Email delivery failed, but check your terminal for the code!', dev_mode: true });
   }
 });
@@ -141,19 +133,19 @@ app.post('/admin/generate-invite', async (req, res) => {
     console.log(`🔗 Token Generated: ${token}`);
 
     // Send Email
-    if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
+    if (resendClient) {
       try {
-        await transporter.sendMail({
-          from: `"Speedway Admin" <${process.env.GMAIL_USER}>`,
+        await resendClient.emails.send({
+          from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
           to: email,
-          subject: `Speedway Administrative Invitation`,
+          subject: 'Speedway Administrative Invitation',
           html: `
             <div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 600px; border: 1px solid #eee;">
-              <h2 style="color: #A91B18;">SPEEDWAY AUTOXMOTO</h2>
+              <h2 style="color: #A91B18;">SPEEDWAY DETAIL STUDIO</h2>
               <p>You have been invited to join the team as an <strong>${role}</strong>.</p>
               <p>Click the button below to activate your account and set your password:</p>
               <div style="text-align: center; margin: 30px 0;">
-                <a href="${inviteLink}" style="background-color: #A91B18; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">ACTIVATE ACCOUNT</a>
+                <a href="${inviteLink}" style="background-color: #A91B18; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">CONFIRM EMAIL ADDRESS</a>
               </div>
               <p style="font-size: 11px; color: #888;">Link expires in 48 hours.</p>
             </div>
@@ -293,10 +285,70 @@ app.post('/invite/accept', async (req, res) => {
 
 
 
+// 🚀 CUSTOMER REGISTRATION SYSTEM (RESEND INTEGRATED)
+app.post('/customer/register', async (req, res) => {
+  const { email, password, firstName, lastName, phone } = req.body;
+  console.log(`\n🏎️ [CUSTOMER REGISTRATION] STARTING FLOW FOR: ${email}`);
+
+  try {
+    // 1. Use generateLink so Supabase DOES NOT send its default SMTP email
+    const { data, error } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'signup',
+      email,
+      password,
+      data: {
+        first_name: firstName,
+        last_name: lastName,
+        phone_number: phone,
+        role: 'CUSTOMER'
+      }
+    });
+
+    if (error) {
+      console.error('❌ Supabase Generate Link Error:', error.message);
+      return res.status(400).json({ success: false, error: error.message });
+    }
+
+    const confirmLink = data.properties?.action_link;
+    if (!confirmLink) {
+      throw new Error('Failed to generate action link from Supabase');
+    }
+
+    // 2. Dispatch via Resend
+    if (!resendClient) {
+      throw new Error('RESEND_API_KEY is not configured or Resend is not initialized');
+    }
+
+    await resendClient.emails.send({
+      from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+      to: email,
+      subject: 'WELCOME TO THE FLEET',
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 600px; border: 1px solid #eee;">
+          <h2 style="color: #A91B18;">SPEEDWAY DETAIL STUDIO</h2>
+          <h3 style="margin-top: 0; text-transform: uppercase;">WELCOME TO THE FLEET</h3>
+          <p>Hi ${firstName},</p>
+          <p>Thank you for creating an account with Speedway Detail Studio. Please confirm your email address to activate your customer portal.</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${confirmLink}" style="background-color: #A91B18; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">CONFIRM EMAIL ADDRESS</a>
+          </div>
+          <p style="font-size: 11px; color: #888;">If you did not request this, please ignore this email.</p>
+        </div>
+      `
+    });
+
+    console.log(`✅ Customer welcome email delivered to ${email}`);
+    return res.json({ success: true, message: 'Registration email sent' });
+
+  } catch (err) {
+    console.error(`❌ Registration Error: ${err.message}`);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log('\n' + '*'.repeat(50));
   console.log(`🚀 SPEEDWAY SHADOW BACKEND: http://localhost:${PORT}`);
-  console.log(`💡 ALL SYSTEM NOTIFICATIONS (BOOKINGS/STAFF/INVITES) WILL APPEAR HERE!`);
   console.log('*'.repeat(50) + '\n');
 }).on('error', (err) => {
   if (err.code === 'EADDRINUSE') {

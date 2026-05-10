@@ -39,28 +39,32 @@ const AdminBookings = () => {
 
       if (error) throw error;
 
-      const processedData = (data || []).map(b => {
-        const payments = b.payments || [];
-        const totalPaid = payments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
-        const isPendingVerification = payments.some(p => p.status === 'FOR_VERIFICATION');
-        
-        let calcStatus = 'UNPAID';
-        if (totalPaid >= b.total_amount && b.total_amount > 0) {
-          calcStatus = 'PAID';
-        } else if (isPendingVerification) {
-          calcStatus = 'VERIFYING';
-        } else if (totalPaid >= (b.total_amount * 0.3) && b.total_amount > 0) {
-          calcStatus = 'DOWNPAYMENT_PAID';
-        }
+      // DEDUPLICATION ENGINE: Resolve Cartesian Product from nested joins
+      const uniqueMap = new Map();
+      (data || []).forEach(b => {
+        if (!uniqueMap.has(b.id)) {
+          const payments = b.payments || [];
+          const totalPaid = payments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
+          const isPendingVerification = payments.some(p => p.status === 'FOR_VERIFICATION');
+          
+          let calcStatus = 'UNPAID';
+          if (totalPaid >= b.total_amount && b.total_amount > 0) {
+            calcStatus = 'PAID';
+          } else if (isPendingVerification) {
+            calcStatus = 'VERIFYING';
+          } else if (totalPaid >= (b.total_amount * 0.3) && b.total_amount > 0) {
+            calcStatus = 'DOWNPAYMENT_PAID';
+          }
 
-        return {
-          ...b,
-          calculatedPaymentStatus: calcStatus,
-          totalPaidAmount: totalPaid
-        };
+          uniqueMap.set(b.id, {
+            ...b,
+            calculatedPaymentStatus: calcStatus,
+            totalPaidAmount: totalPaid
+          });
+        }
       });
 
-      setState(prev => ({ ...prev, bookings: processedData, loading: false }));
+      setState(prev => ({ ...prev, bookings: Array.from(uniqueMap.values()), loading: false }));
       logger.admin('Booking Directory synchronized.');
     } catch (err) {
       logger.error('Booking Fetch Error', err);

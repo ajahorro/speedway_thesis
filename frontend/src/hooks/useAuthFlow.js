@@ -19,11 +19,11 @@ export const useAuthFlow = () => {
         ADMIN: '/admin',
         SUPER_ADMIN: '/admin',
         STAFF: '/staff',
-        CUSTOMER: '/dashboard'
+        CUSTOMER: '/customer'
       };
       // Only redirect if we're not currently in the middle of a password reset
       if (mode !== 'RESET') {
-        navigate(routes[profile.role] || '/dashboard');
+        navigate(routes[profile.role] || '/customer');
       }
     }
   }, [user, profile, mode, navigate]);
@@ -52,23 +52,32 @@ export const useAuthFlow = () => {
       if (userData.password.length < 6) {
         throw new Error('Password must be at least 6 characters long.');
       }
+      if (!userData.firstName || !userData.lastName) {
+        throw new Error('First and last name are required.');
+      }
 
       setVerificationEmail(userData.email);
 
-      // Call Supabase Auth directly - This triggers your beautiful HTML link email!
-      const { error } = await supabase.auth.signUp({
-        email: userData.email,
-        password: userData.password,
-        options: {
-          data: {
-            first_name: userData.firstName,
-            last_name: userData.lastName,
-            phone_number: userData.phone,
-          }
-        }
+      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      const response = await fetch(`${BACKEND_URL}/customer/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: userData.email,
+          password: userData.password,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          phone: userData.phone
+        })
       });
 
-      if (error) throw error;
+      const data = await response.json();
+      
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Registration failed.');
+      }
 
       toast.success('Registration successful!', {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', backdropFilter: 'blur(12px)' }
