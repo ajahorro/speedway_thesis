@@ -22,6 +22,15 @@ import AdminAcceptInvite from './pages/Admin/AdminAcceptInvite';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
+import CustomerLayout from './pages/Customer/CustomerLayout';
+import CustomerDashboard from './pages/Customer/CustomerDashboard';
+import CustomerBookAppointment from './pages/Customer/CustomerBookAppointment';
+import CustomerMyBookings from './pages/Customer/CustomerMyBookings';
+import CustomerBilling from './pages/Customer/CustomerBilling';
+import CustomerGarage from './pages/Customer/CustomerGarage';
+import CustomerNotifications from './pages/Customer/CustomerNotifications';
+import CustomerSettings from './pages/Customer/CustomerSettings';
+import CustomerBookingDetails from './pages/Customer/CustomerBookingDetails';
 import './index.css';
 
 // Suppress React Router v7 Future Flag Warnings
@@ -67,6 +76,25 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="profile" element={<AdminProfile />} />
             {/* Fallback for other admin routes */}
             <Route path="*" element={<div style={{ padding: '2rem' }}>Module under development</div>} />
+          </Route>
+
+          {/* Customer Routes */}
+          <Route 
+            path="/customer" 
+            element={
+              <ProtectedRoute allowedRoles={['CUSTOMER']}>
+                <CustomerLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<CustomerDashboard />} />
+            <Route path="book" element={<CustomerBookAppointment />} />
+            <Route path="bookings" element={<CustomerMyBookings />} />
+            <Route path="bookings/:id" element={<CustomerBookingDetails />} />
+            <Route path="billing" element={<CustomerBilling />} />
+            <Route path="garage" element={<CustomerGarage />} />
+            <Route path="notifications" element={<CustomerNotifications />} />
+            <Route path="settings" element={<CustomerSettings />} />
           </Route>
 
           {/* Global Fallback: Catch-all for unknown routes */}
