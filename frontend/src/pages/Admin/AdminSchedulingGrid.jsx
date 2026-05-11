@@ -16,8 +16,8 @@ const AdminSchedulingGrid = ({ onBack }) => {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Business Hours: 08:00 AM - 06:00 PM
-  const timeSlots = Array.from({ length: 11 }, (_, i) => i + 8);
+  // Expanded Command Hours: 06:00 AM - 11:00 PM
+  const timeSlots = Array.from({ length: 18 }, (_, i) => i + 6);
 
   const fetchGridData = async () => {
     setLoading(true);
@@ -75,7 +75,7 @@ const AdminSchedulingGrid = ({ onBack }) => {
   const renderTimeMarkers = () => (
     <div style={{ display: 'grid', gridTemplateColumns: `180px repeat(${timeSlots.length}, 1fr)`, borderBottom: '1px solid var(--admin-border)', background: 'var(--admin-sidebar)' }}>
       <div style={{ padding: '1rem', borderRight: '1px solid var(--admin-border)' }}></div>
-      {timeSlots.map(hour => (
+      {timeSlots.map((hour, i) => (
         <div key={hour} style={{ padding: '1rem', textAlign: 'center', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', borderRight: '1px solid var(--admin-border)', borderLeft: i === 0 ? 'none' : '1px solid var(--admin-border)' }}>
           {hour.toString().padStart(2, '0')}:00
         </div>
@@ -90,7 +90,7 @@ const AdminSchedulingGrid = ({ onBack }) => {
     // Estimate 2 hours per booking if not specified
     const duration = 2; 
     
-    const leftOffset = ((startHour - 8) + (startMinutes / 60)) * (100 / timeSlots.length);
+    const leftOffset = ((startHour - 6) + (startMinutes / 60)) * (100 / timeSlots.length);
     const width = duration * (100 / timeSlots.length);
 
     return (
@@ -178,9 +178,10 @@ const AdminSchedulingGrid = ({ onBack }) => {
         </div>
       </div>
 
-      <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: '4px', overflow: 'hidden' }}>
-        {renderTimeMarkers()}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: '4px', overflowX: 'auto' }}>
+        <div style={{ minWidth: '1200px' }}>
+          {renderTimeMarkers()}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
           {/* Unassigned Row */}
           {renderRow('Unassigned Bay', bookings.filter(b => !b.staff_id), true)}
           
@@ -199,6 +200,7 @@ const AdminSchedulingGrid = ({ onBack }) => {
           )}
         </div>
       </div>
+    </div>
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--admin-brand)', fontWeight: '950', letterSpacing: '2px' }}>

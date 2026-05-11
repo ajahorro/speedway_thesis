@@ -10,9 +10,11 @@ import {
 import PageHeader from '../../components/PageHeader';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 
 const AdminSalesReport = () => {
   const navigate = useNavigate();
+  const isMobile = useMediaQuery('(max-width: 1024px)');
   
   // BATCHED STATE
   const [state, setState] = useState({
@@ -294,31 +296,47 @@ const AdminSalesReport = () => {
         </div>
 
         {/* STRATEGIC GROWTH & FORECASTING (REQ-ADM-09) */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: '1.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2.2fr 1fr', gap: '1.5rem', alignItems: 'stretch' }}>
           <div style={cardStyle}>
-            <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--admin-text-primary)' }}>
-              <BarChart3 size={20} color="var(--admin-brand)" /> STRATEGIC GROWTH TREND
-            </h3>
-            <div style={{ height: '200px', display: 'flex', alignItems: 'flex-end', gap: '1rem', padding: '1rem 0', background: 'rgba(var(--admin-brand-rgb), 0.03)', borderRadius: 'var(--admin-radius-sm)', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--admin-text-primary)' }}>
+                <BarChart3 size={20} color="var(--admin-brand)" /> STRATEGIC GROWTH TREND
+              </h3>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'var(--admin-text-secondary)', opacity: 0.2 }}></div>
+                  <span style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>ACTUAL</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'var(--admin-brand)' }}></div>
+                  <span style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>PREDICTED</span>
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ height: '220px', display: 'flex', alignItems: 'flex-end', gap: '1rem', padding: '1rem 0 1rem 3rem', background: 'rgba(255,255,255,0.01)', borderRadius: 'var(--admin-radius-sm)', position: 'relative' }}>
+              <div style={{ position: 'absolute', left: '0.75rem', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1rem 0', color: 'var(--admin-text-secondary)', fontSize: '0.6rem', fontWeight: '900', opacity: 0.5 }}>
+                <span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span>
+              </div>
+              <div style={{ position: 'absolute', left: '3rem', right: '1rem', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1rem 0', pointerEvents: 'none' }}>
+                {[0, 1, 2, 3, 4].map(i => <div key={i} style={{ width: '100%', height: '1px', background: 'var(--admin-border)', opacity: 0.3 }}></div>)}
+              </div>
               {forecastData.trend.map((t, i) => (
-                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', height: '100%', justifyContent: 'flex-end' }}>
+                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', height: '100%', justifyContent: 'flex-end', zIndex: 1 }}>
                   <div style={{ 
                     width: '100%', 
                     height: `${(t.val / (forecastData.trend[6].val * 1.1)) * 100}%`, 
-                    background: i === 6 ? 'var(--admin-brand)' : 'var(--admin-text-secondary)',
+                    background: i === 6 ? 'linear-gradient(to bottom, var(--admin-brand), rgba(230, 30, 42, 0.1))' : 'var(--admin-text-secondary)',
                     opacity: i === 6 ? 1 : 0.2,
                     borderRadius: '2px 2px 0 0'
                   }}></div>
                   <span style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>D{t.day}</span>
                 </div>
               ))}
-              <div style={{ position: 'absolute', top: '1rem', right: '1rem', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.25rem 0.75rem', borderRadius: '2px', textTransform: 'uppercase' }}>
-                +Predictive Growth Active
-              </div>
             </div>
           </div>
 
-          <div style={{ ...cardStyle, background: 'var(--admin-bg)', borderStyle: 'dashed' }}>
+          <div style={{ ...cardStyle, background: 'var(--admin-bg)', borderStyle: 'dashed', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
              <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>30-Day Revenue Forecast</h3>
              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 <div>
@@ -330,8 +348,8 @@ const AdminSalesReport = () => {
                     <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)' }}>CONFIDENCE SCORE</span>
                     <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-brand)' }}>{forecastData.confidence}%</span>
                   </div>
-                  <div style={{ width: '100%', height: '4px', background: 'var(--admin-border)', borderRadius: '2px' }}>
-                    <div style={{ width: `${forecastData.confidence}%`, height: '100%', background: 'var(--admin-brand)', borderRadius: '2px' }}></div>
+                  <div style={{ width: '100%', height: '8px', background: 'var(--admin-border)', borderRadius: '4px' }}>
+                    <div style={{ width: `${forecastData.confidence}%`, height: '100%', background: 'var(--admin-brand)', borderRadius: '4px' }}></div>
                   </div>
                 </div>
              </div>

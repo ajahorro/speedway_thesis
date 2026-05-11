@@ -133,6 +133,7 @@ const AdminBookingDetails = () => {
       toast.error('Data pipeline error. Check console.'); 
     } finally { 
       setLoading(false); 
+      window.scrollTo(0, 0);
     }
   };
 
@@ -346,9 +347,9 @@ const AdminBookingDetails = () => {
     } catch (err) { toast.error('Vehicle update failed'); }
   };
 
-  const cardStyle = { background: 'var(--admin-card)', borderRadius: '1.25rem', border: '1px solid var(--admin-border)', padding: '1.5rem', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', color: 'var(--admin-text-primary)' };
-  const labelStyle = { fontSize: '0.7rem', fontWeight: '850', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem', letterSpacing: '0.5px' };
-  const valueStyle = { fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' };
+  const cardStyle = { background: 'var(--admin-card)', borderRadius: '4px', border: '1px solid var(--admin-border)', padding: '1.5rem', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', color: 'var(--admin-text-primary)' };
+  const labelStyle = { fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem', letterSpacing: '1px' };
+  const valueStyle = { fontSize: '0.95rem', fontWeight: '950', color: 'var(--admin-text-primary)' };
 
   if (loading || !booking) return <LoadingState message="Synchronizing fleet records..." />;
 
@@ -358,304 +359,314 @@ const AdminBookingDetails = () => {
   const isLocked = booking.status === 'cancelled';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '5rem' }}>
-      <PageHeader showBack onBack={() => navigate(-1)} badge={`ID: ${id.slice(0, 8).toUpperCase()}`} title="ADMINISTRATIVE CONSOLE" subtitle="Manage high-level fleet logistics and financial verification." />
+    <div style={{ 
+      width: '100%', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      gap: '1.5rem', 
+      padding: '0.5rem 1.5rem 10rem 1.5rem',
+      position: 'relative'
+    }}>
+      
+      {/* 1. COMPACT CONSOLE HEADER (ALIGNED TO 1200px GUTTER) */}
+      <PageHeader 
+        showBack onBack={() => navigate(-1)} 
+        badge="ADMINISTRATIVE CONSOLE" 
+        title={`SW-BKG-${id.slice(0, 8).toUpperCase()}`} 
+        subtitle={`Detailed operational record for session initialized on ${new Date(booking.created_at).toLocaleDateString()}.`} 
+        titleStyle={{ fontSize: '1.85rem', fontWeight: '950', letterSpacing: '-1.5px' }}
+      />
 
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.8fr 1.2fr', gap: '1.5rem' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* 2. TWO-COLUMN STABILIZED GRID (70/30 SPLIT) */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: isMobile ? '1fr' : '7fr 3fr', 
+        gap: '1.5rem',
+        alignItems: 'start'
+      }}>
+        
+        {/* === MAIN COLUMN: FINANCIALS & FLEET ASSETS === */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
           
-          {/* 🔍 HIGH-PRIORITY VERIFICATION HUB - Only show if there is something to verify */}
-          {pendingVerification && !isLocked && (
-             <div style={{ ...cardStyle, border: '2px solid var(--admin-info)', background: 'rgba(59, 130, 246, 0.03)', marginBottom: '1.5rem' }}>
-               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-info)', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  <ShieldCheck size={20} /> Payment Verification Hub
-                </h3>
-                <span style={{ fontSize: '0.65rem', fontWeight: '900', padding: '0.3rem 0.6rem', borderRadius: '20px', background: 'var(--admin-info)', color: 'white' }}>
-                  FOR REVIEW
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1.5rem', alignItems: 'start' }}>
-                {/* Receipt Preview */}
-                <div style={{ width: '120px', height: '160px', borderRadius: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', position: 'relative' }} onClick={() => pendingVerification.receipt_url && window.open(pendingVerification.receipt_url, '_blank')}>
-                  {pendingVerification.receipt_url ? (
-                    <img src={pendingVerification.receipt_url} alt="Payment Receipt" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: 0.5 }}>
-                      <ImageIcon size={24} />
-                      <span style={{ fontSize: '0.6rem', fontWeight: '800' }}>No Receipt</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* OCR Results & Customer Notes */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <div style={{ padding: '1rem', background: 'var(--admin-bg)', borderRadius: '0.75rem', border: '1px solid var(--admin-border)', height: '100%' }}>
-                    <div style={{ ...labelStyle, color: 'var(--admin-info)' }}>Digital Receipt Intelligence</div>
-                    {booking.ocr_metadata && Object.keys(booking.ocr_metadata).length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>
-                          <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '700' }}>REF NO:</span>
-                          <span style={{ color: 'var(--admin-text-primary)', fontWeight: '950', fontFamily: 'monospace' }}>{booking.ocr_metadata.referenceNo}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>
-                          <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '700' }}>EXTRACTED AMOUNT:</span>
-                          <span style={{ color: 'var(--admin-brand)', fontWeight: '950' }}>₱{Number(booking.ocr_metadata.amount).toLocaleString()}</span>
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontStyle: 'italic', marginTop: '0.25rem' }}>
-                          "{booking.ocr_metadata.description}"
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontStyle: 'italic', marginTop: '0.5rem' }}>
-                        No digital OCR intelligence available for this record.
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: '1rem' }}>
-                    <button onClick={() => handleVerifyPayment(pendingVerification)} style={{ flex: 1, padding: '0.75rem', background: '#10b981', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>APPROVE PAYMENT</button>
-                    <button onClick={() => handleRejectPayment(pendingVerification)} style={{ flex: 1, padding: '0.75rem', background: '#ef4444', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>REJECT</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Customer Special Instructions (Moved outside the hub) */}
-          {booking.notes && (
-            <div style={{ ...cardStyle, padding: '1.25rem', border: '1px dashed var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.02)', marginBottom: '1.5rem' }}>
-              <div style={{ ...labelStyle, color: 'var(--admin-brand)' }}>Customer Special Instructions</div>
-              <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginTop: '0.5rem' }}>
-                {booking.notes}
-              </div>
-            </div>
-          )}
-
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, fontWeight: '950', fontSize: '1.1rem', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', letterSpacing: '1px' }}>
-              Fleet Assets ({vehicles.length})
-            </h3>
-            <span style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--admin-brand)' }}>
-              Total: ₱{booking.total_amount?.toLocaleString()}
-            </span>
-          </div>
-
-          {vehicles.map(v => (
-            <div key={v.id} style={cardStyle}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--admin-border)', paddingBottom: '1rem', marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--admin-border)' }}>
-                    <Car size={22} color="var(--admin-brand)" />
-                  </div>
-                  <div>
-                    <h4 style={{ margin: 0, fontWeight: '900', fontSize: '1.1rem' }}>{v.make} {v.model}</h4>
-                    <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>{v.plate_number} · {v.vehicle_type}</span>
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                   <div style={{ 
-                     fontSize: '0.65rem', fontWeight: '950', padding: '0.3rem 0.6rem', borderRadius: '4px', border: '1px solid currentColor', marginBottom: '0.25rem',
-                     background: v.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : (v.status === 'in_progress' ? 'rgba(168, 85, 247, 0.1)' : 'rgba(255,255,255,0.05)'),
-                     color: v.status === 'completed' ? '#10b981' : (v.status === 'in_progress' ? '#a855f7' : 'var(--admin-text-secondary)')
-                   }}>
-                     {v.status.toUpperCase()}
-                   </div>
-                   <div style={{ fontWeight: '950', fontSize: '1.1rem' }}>₱{v.subtotal?.toLocaleString()}</div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.5rem' }}>
-                {(v.services || []).map(s => (
-                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--admin-border)', borderRadius: '0.5rem' }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>
-                      {s.service_name || s.service_name_snapshot}
-                    </span>
-                    <span style={{ fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-brand)' }}>
-                      ₱{(s.price || s.price_snapshot || 0).toLocaleString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
-                 {v.status !== 'completed' && !isLocked && (
-                   <button 
-                    onClick={() => updateVehicleStatus(v.id, v.status === 'in_progress' ? 'completed' : 'in_progress')} 
-                    style={{ 
-                      flex: 1, padding: '0.85rem', background: v.status === 'in_progress' ? '#10b981' : 'var(--admin-brand)', 
-                      color: 'white', borderRadius: '0.75rem', border: 'none', fontWeight: '950', 
-                      cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                      gap: '0.6rem', transition: 'all 0.3s ease' 
-                    }}
-                   >
-                     {v.status === 'in_progress' ? <><CheckCircle2 size={18} /> MARK COMPLETED</> : <><Play size={18} /> START SERVICE</>}
-                   </button>
-                 )}
-              </div>
-            </div>
-          ))}
-
-          {/* FINANCIAL AUDIT LEDGER */}
+          {/* A. FINANCIAL LEDGER (TABLE FORMAT) */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '900', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Banknote size={18} /> Financial Ledger
+              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Banknote size={16} color="var(--admin-brand)" /> Financial Ledger
               </h3>
               <div style={{ fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{booking.total_amount?.toLocaleString()}</div>
             </div>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {bookingPayments.map((p, idx) => (
-                <div key={p.id} style={{ 
-                  background: 'var(--admin-bg)', borderRadius: '1rem', 
-                  border: '1px solid var(--admin-border)', overflow: 'hidden'
-                }}>
-                  <div style={{ display: 'flex', gap: '1rem', padding: '1rem' }}>
-                    {p.receipt_url && (
-                      <div style={{ width: '80px', height: '80px', borderRadius: '0.75rem', overflow: 'hidden', flexShrink: 0, border: '1px solid var(--admin-border)' }}>
-                        <img 
-                          src={p.receipt_url} 
-                          alt="Receipt" 
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }} 
-                          onClick={() => window.open(p.receipt_url, '_blank')}
-                        />
-                      </div>
-                    )}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <div style={{ fontWeight: '900', fontSize: '0.85rem' }}>PAYMENT #{idx + 1} • {p.method}</div>
-                          <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>{new Date(p.created_at).toLocaleString()}</div>
-                        </div>
-                        <div style={{ 
-                          fontSize: '0.6rem', fontWeight: '950', padding: '0.2rem 0.5rem', borderRadius: '4px',
-                          background: p.status === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : (p.status === 'FOR_VERIFICATION' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'),
-                          color: p.status === 'PAID' ? '#10b981' : (p.status === 'FOR_VERIFICATION' ? '#f59e0b' : '#ef4444'),
-                          border: '1px solid currentColor'
+
+            <div style={{ overflowX: 'auto', marginBottom: '1.5rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', tableLayout: 'fixed' }}>
+                <thead>
+                  <tr style={{ background: 'var(--admin-bg)', borderBottom: '1px solid var(--admin-border)' }}>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>DATE</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>METHOD</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>STATUS</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>AMOUNT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bookingPayments.map((p) => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid var(--admin-border)' }}>
+                      <td style={{ padding: '1.25rem 0.75rem' }}>
+                        <div style={{ fontWeight: '800', color: '#fff', fontSize: '0.85rem' }}>{new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#A0A0A0', fontWeight: '600', marginTop: '0.25rem' }}>{new Date(p.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
+                      </td>
+                      <td style={{ padding: '0.75rem', fontWeight: '800' }}>{p.method}</td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                        <span style={{ 
+                          fontSize: '0.55rem', fontWeight: '950', padding: '0.2rem 0.5rem', borderRadius: '2px',
+                          background: p.status === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                          color: p.status === 'PAID' ? '#10b981' : '#f59e0b'
                         }}>
                           {p.status.toUpperCase()}
-                        </div>
-                      </div>
-                      <div style={{ fontWeight: '950', fontSize: '1.1rem', marginTop: '0.25rem' }}>₱{p.amount?.toLocaleString()}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            
-            <div style={{ 
-              marginTop: '1.5rem', padding: '1.25rem', 
-              background: balance === 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)', 
-              color: balance === 0 ? '#10b981' : '#f59e0b', 
-              borderRadius: '1rem', textAlign: 'center', 
-              fontWeight: '950', fontSize: '0.9rem',
-              border: `1px solid ${balance === 0 ? '#10b981' : '#f59e0b'}`,
-              marginBottom: balance > 0 ? '1rem' : 0
-            }}>
-              {balance === 0 ? 'SESSION FULLY SETTLED' : `OUTSTANDING BALANCE: ₱${balance.toLocaleString()}`}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '950' }}>₱{p.amount?.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {bookingPayments.length === 0 && (
+                    <tr><td colSpan="4" style={{ padding: '2rem', textAlign: 'center', opacity: 0.5 }}>NO TRANSACTIONS LOGGED</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
-            {/* INLINE MANUAL PAYMENT RECORDING - Only if not cancelled */}
+            <div style={{ 
+              padding: '1.25rem', background: balance === 0 ? 'rgba(16, 185, 129, 0.03)' : 'rgba(245, 158, 11, 0.03)', 
+              borderRadius: '0.75rem', textAlign: 'center', border: `1px solid ${balance === 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'}`,
+              color: balance === 0 ? '#10b981' : '#f59e0b', fontSize: '0.85rem', fontWeight: '950',
+              textTransform: 'uppercase', letterSpacing: '1px'
+            }}>
+              {balance === 0 ? '✓ ACCOUNT SETTLED' : `⚠ BALANCE DUE: ₱${balance.toLocaleString()}`}
+            </div>
+
             {balance > 0 && !isLocked && (
-              <div style={{ paddingTop: '1rem', borderTop: '1px dashed var(--admin-border)' }}>
-                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <div style={{ position: 'relative', flex: 1 }}>
-                      <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: '900', color: 'var(--admin-text-secondary)', fontSize: '0.75rem' }}>₱</span>
-                      <input 
-                        type="number" 
-                        placeholder="Manual Payment Amount..."
-                        value={paymentAmount}
-                        onChange={(e) => setPaymentAmount(e.target.value)}
-                        style={{ width: '100%', padding: '0.75rem 1rem 0.75rem 2rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', fontWeight: '900', fontSize: '0.85rem', outline: 'none' }} 
-                      />
+              <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem' }}>
+                <input 
+                  type="number" placeholder="Enter Amount..." value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)}
+                  style={{ flex: 1, padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '0.5rem', color: 'white', fontWeight: '900', outline: 'none' }} 
+                />
+                <button onClick={handleRecordPayment} style={{ padding: '0 1.5rem', background: 'var(--admin-brand)', color: 'white', borderRadius: '0.5rem', border: 'none', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer' }}>RECORD PAYMENT</button>
+              </div>
+            )}
+          </div>
+
+          {/* B. FLEET ASSETS */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Car size={16} color="var(--admin-brand)" /> Fleet Units ({vehicles.length})
+              </h3>
+              <div style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)' }}>BOOKING SUB-TOTAL: ₱{booking.total_amount?.toLocaleString()}</div>
+            </div>
+
+            {vehicles.length === 0 ? (
+              <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.3, background: 'var(--admin-bg)', borderRadius: '0.75rem', border: '1px dashed var(--admin-border)' }}>
+                <Box size={32} style={{ marginBottom: '1rem' }} />
+                <div style={{ fontSize: '0.8rem', fontWeight: '900' }}>NO ASSETS REGISTERED FOR THIS SESSION</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                {vehicles.map(v => (
+                  <div key={v.id} style={{ background: 'var(--admin-bg)', padding: '1.25rem', borderRadius: '1rem', border: '1px solid var(--admin-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <div style={{ width: '40px', height: '40px', borderRadius: '4px', background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--admin-border)' }}>
+                          <Car size={20} color="var(--admin-brand)" />
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: '950', fontSize: '1rem' }}>{v.make} {v.model}</div>
+                          <div style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>{v.plate_number} • {v.vehicle_type}</div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: '950', color: 'var(--admin-brand)', fontSize: '1.1rem', marginBottom: '0.25rem' }}>₱{v.subtotal?.toLocaleString()}</div>
+                        <button 
+                          onClick={() => updateVehicleStatus(v.id, v.status === 'in_progress' ? 'completed' : 'in_progress')}
+                          style={{ 
+                            background: v.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : 'var(--admin-bg)', 
+                            border: `1px solid ${v.status === 'completed' ? '#10b981' : 'var(--admin-border)'}`, 
+                            padding: '0.4rem 0.8rem', borderRadius: '4px', color: v.status === 'completed' ? '#10b981' : 'var(--admin-text-secondary)', 
+                            cursor: 'pointer', fontSize: '0.6rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem'
+                          }}
+                        >
+                          {v.status === 'completed' ? <><CheckCircle2 size={12} /> COMPLETED</> : <><Play size={12} /> {v.status === 'in_progress' ? 'FINISH' : 'START'}</>}
+                        </button>
+                      </div>
                     </div>
-                    <button 
-                      disabled={submittingPayment || !paymentAmount}
-                      onClick={handleRecordPayment}
-                      style={{ padding: '0 1.25rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer', opacity: submittingPayment ? 0.5 : 1, textTransform: 'uppercase' }}
-                    >
-                      {submittingPayment ? '...' : 'RECORD'}
-                    </button>
-                 </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* === SIDEBAR COLUMN: PERSONNEL, IDENTITY & SUPPORT === */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
+          
+          {/* A. CUSTOMER IDENTITY */}
           <div style={cardStyle}>
-            <h3 style={{ margin: '0 0 1.25rem 0', fontSize: '0.8rem', fontWeight: '900', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <User size={16} /> Technician Assigned
-            </h3>
-            {booking.staff_id ? (
-              <div style={{ background: 'var(--admin-bg)', padding: '1.25rem', borderRadius: '1rem', border: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                 <div>
-                   <div style={valueStyle}>{booking.assigned_staff?.full_name}</div>
-                   <div style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>Active Lead Technician</div>
-                 </div>
-                 {!isLocked && <button onClick={() => setBooking({...booking, staff_id: null})} style={{ color: 'var(--admin-brand)', background: 'none', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>REASSIGN</button>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--admin-border)' }}>
+                <User size={22} color="var(--admin-text-secondary)" />
               </div>
-            ) : (
-              <select 
-                disabled={isLocked}
-                onChange={(e) => handleAssignStaff(e.target.value)} 
-                style={{ 
-                  width: '100%', padding: '1rem', borderRadius: '1rem', 
-                  background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', 
-                  color: '#fff', fontWeight: '900', outline: 'none',
-                  opacity: isLocked ? 0.5 : 1
-                }}
-              >
-                <option value="">{isLocked ? 'Booking Cancelled' : 'Select Technician...'}</option>
-                {!isLocked && staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-              </select>
-            )}
-          </div>
-
-          <div style={cardStyle}>
-            <h3 style={{ margin: '0 0 1.25rem 0', fontSize: '0.8rem', fontWeight: '900', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <ClipboardList size={16} /> Customer Profile
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                 <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--admin-border)' }}>
-                   <User size={18} color="var(--admin-text-secondary)" />
-                 </div>
-                 <div>
-                   <div style={valueStyle}>{booking.customer_name || booking.customer?.full_name || 'Anonymous Customer'}</div>
-                   <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>FLEET OWNER</div>
-                 </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '950', color: 'white' }}>{booking.customer?.full_name}</h3>
+                <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-brand)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Fleet Account Holder</span>
               </div>
-              <div style={{ padding: '1rem', background: 'var(--admin-bg)', borderRadius: '1rem', border: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={labelStyle}>Contact</span><span style={{ fontSize: '0.8rem', fontWeight: '800' }}>{booking.contact_number || booking.customer?.phone_number || 'N/A'}</span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={labelStyle}>Email</span><span style={{ fontSize: '0.8rem', fontWeight: '800' }}>{booking.customer?.email}</span></div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div>
+                <div style={labelStyle}>Registered Contact</div>
+                <div style={{ fontSize: '0.9rem', fontWeight: '800' }}>{booking.customer?.phone_number || 'N/A'}</div>
+              </div>
+              <div>
+                <div style={labelStyle}>Primary Email ID</div>
+                <div style={{ fontSize: '0.9rem', fontWeight: '800' }}>{booking.customer?.email}</div>
               </div>
             </div>
           </div>
 
-          <div style={cardStyle}>
-            <h3 style={{ margin: '0 0 1.25rem 0', fontSize: '0.8rem', fontWeight: '900', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <MessageCircle size={16} /> Live Support
-            </h3>
-            <div style={{ height: '350px', overflow: 'hidden', borderRadius: '1rem' }}>
+          {/* B. HANDLING NOTES */}
+          {booking.notes && (
+            <div style={{ ...cardStyle, borderLeft: '4px solid var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.02)' }}>
+              <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.75rem', fontWeight: '950', color: 'var(--admin-brand)', textTransform: 'uppercase' }}>Fleet Handling Notes</h3>
+              <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', lineHeight: 1.5, color: 'var(--admin-text-primary)' }}>{booking.notes}</p>
+            </div>
+          )}
+
+          {/* C. TECHNICIAN ASSIGNMENT */}
+          <div style={{ ...cardStyle, opacity: (booking.status === 'in_progress' || isLocked) ? 0.5 : 1, pointerEvents: (booking.status === 'in_progress' || isLocked) ? 'none' : 'auto', position: 'relative' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)' }}>Technician Assignment</h3>
+              {booking.status === 'in_progress' && <span style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-brand)', background: 'rgba(230, 30, 42, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '2px' }}>SESSION ONGOING - LOCKED</span>}
+            </div>
+            
+            {booking.staff_id ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--admin-bg)', padding: '1rem', borderRadius: '4px', border: '1px solid var(--admin-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <ShieldCheck size={18} color="var(--admin-brand)" />
+                  <span style={{ fontSize: '0.9rem', fontWeight: '950' }}>{booking.assigned_staff?.full_name}</span>
+                </div>
+                {!isLocked && booking.status !== 'in_progress' && (
+                  <button 
+                    onClick={() => {
+                      toast((t) => (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '0.5rem' }}>
+                          <span style={{ fontWeight: '950', fontSize: '0.9rem', color: '#fff' }}>CONFIRM REASSIGNMENT?</span>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button 
+                              onClick={async () => {
+                                setBooking({...booking, staff_id: null});
+                                toast.dismiss(t.id);
+                                toast.success('Technician cleared. Ready for reassignment.');
+                              }}
+                              style={{ background: 'var(--admin-brand)', color: 'white', border: 'none', padding: '0.4rem 1rem', borderRadius: '2px', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer' }}
+                            >
+                              YES, REASSIGN
+                            </button>
+                            <button 
+                              onClick={() => toast.dismiss(t.id)}
+                              style={{ background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', padding: '0.4rem 1rem', borderRadius: '2px', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer' }}
+                            >
+                              CANCEL
+                            </button>
+                          </div>
+                        </div>
+                      ), { duration: 5000, position: 'top-center', style: { background: '#15171A', border: '1px solid var(--admin-border)', borderRadius: '4px', padding: '1rem' } });
+                    }} 
+                    style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-brand)', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.5px' }}
+                  >
+                    REASSIGN
+                  </button>
+                )}
+              </div>
+            ) : (
+              <select 
+                onChange={(e) => handleAssignStaff(e.target.value)} 
+                style={{ width: '100%', padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '950', outline: 'none' }}
+              >
+                <option value="">SELECT TECHNICIAN...</option>
+                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+              </select>
+            )}
+          </div>
+
+          {/* D. DIGITAL VERIFICATION */}
+          {pendingVerification && !isLocked && (
+            <div style={{ ...cardStyle, border: '2px solid var(--admin-info)', background: 'rgba(59, 130, 246, 0.02)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <h3 style={{ margin: 0, fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-info)', textTransform: 'uppercase' }}>Payment Verification</h3>
+                <span style={{ fontSize: '0.55rem', fontWeight: '950', background: 'var(--admin-info)', color: 'white', padding: '0.2rem 0.6rem', borderRadius: '2px' }}>FOR REVIEW</span>
+              </div>
+              <div 
+                onClick={() => window.open(pendingVerification.receipt_url, '_blank')}
+                style={{ width: '100%', height: '180px', borderRadius: '0.75rem', background: 'black', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', marginBottom: '1rem' }}
+              >
+                <img src={pendingVerification.receipt_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Receipt" />
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button onClick={() => handleVerifyPayment(pendingVerification)} style={{ flex: 1, padding: '0.85rem', background: '#10b981', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>APPROVE</button>
+                <button onClick={() => handleRejectPayment(pendingVerification)} style={{ flex: 1, padding: '0.85rem', background: '#ef4444', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>REJECT</button>
+              </div>
+            </div>
+          )}
+
+          {/* E. SUPPORT & LOGS */}
+          <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '1.25rem', borderBottom: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <MessageCircle size={18} color="var(--admin-brand)" />
+              <h3 style={{ margin: 0, fontSize: '0.8rem', fontWeight: '950', textTransform: 'uppercase' }}>Live Support</h3>
+            </div>
+            <div style={{ height: '350px' }}>
               <BookingChat bookingId={id} />
             </div>
           </div>
 
           <div style={cardStyle}>
-             <h3 style={{ margin: '0 0 1.25rem 0', fontSize: '0.8rem', fontWeight: '900', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-               <History size={16} /> Audit Timeline
-             </h3>
-             <div style={{ maxHeight: '300px', overflowY: 'auto', paddingRight: '0.5rem' }}>
-               <BookingAuditTrail logs={auditLogs} />
-             </div>
+            <h3 style={{ margin: '0 0 1.25rem 0', fontSize: '0.8rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <History size={18} /> Audit Trail
+            </h3>
+            <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+              <BookingAuditTrail logs={auditLogs} />
+            </div>
           </div>
         </div>
       </div>
 
+      {/* 3. STICKY COMMAND BAR */}
+      {(!isLocked && (booking.status === 'pending' || booking.status === 'confirmed' || booking.status === 'in_progress')) && (
+        <div style={{ 
+          position: 'fixed', bottom: 0, left: isMobile ? 0 : '260px', right: 0, 
+          background: '#15171A', borderTop: '2px solid var(--admin-brand)', 
+          padding: '1.25rem 2.5rem', zIndex: 1000, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          boxShadow: '0 -10px 40px rgba(0,0,0,0.4)', backdropFilter: 'blur(15px)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2.5rem' }}>
+            <div>
+              <div style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', letterSpacing: '1px' }}>SESSION STATUS</div>
+              <div style={{ fontSize: '1rem', fontWeight: '950', color: 'var(--admin-brand)', textTransform: 'uppercase' }}>{booking.status}</div>
+            </div>
+            <div style={{ width: '1px', height: '35px', background: 'var(--admin-border)' }}></div>
+            <div>
+              <div style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', letterSpacing: '1px' }}>TOTAL REVENUE</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: '950', color: 'white' }}>₱{booking.total_amount?.toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '1.25rem' }}>
+            {booking.status === 'pending' && <button onClick={() => updateBookingStatus('confirmed')} style={{ padding: '0.85rem 2rem', background: '#10b981', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>CONFIRM BOOKING</button>}
+            {booking.status === 'confirmed' && <button onClick={() => updateBookingStatus('in_progress')} style={{ padding: '0.85rem 2rem', background: 'var(--admin-brand)', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>START SESSION</button>}
+            {booking.status === 'in_progress' && <button onClick={() => updateBookingStatus('completed')} style={{ padding: '0.85rem 2rem', background: '#a855f7', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>MARK COMPLETED</button>}
+            <button onClick={() => updateBookingStatus('cancelled')} style={{ padding: '0.85rem 1.5rem', background: 'transparent', color: '#ef4444', borderRadius: '6px', border: '1px solid #ef4444', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer' }}>CANCEL SESSION</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
 
 export default AdminBookingDetails;

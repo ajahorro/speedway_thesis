@@ -49,9 +49,15 @@ const BookingChat = ({ bookingId }) => {
     return () => { supabase.removeChannel(channel); };
   }, [bookingId]); // eslint-disable-line
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom (Strictly for live updates only)
+  const prevMsgCount = useRef(0);
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length > prevMsgCount.current) {
+      const isInitialFetch = prevMsgCount.current === 0;
+      prevMsgCount.current = messages.length;
+      if (isInitialFetch) return; // Strictly ignore the first batch of history
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // --- SEND MESSAGE ---

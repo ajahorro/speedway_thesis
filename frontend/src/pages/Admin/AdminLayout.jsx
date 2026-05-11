@@ -247,7 +247,7 @@ const AdminLayout = () => {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: isMobile ? '0.75rem 1rem' : '1rem 2.5rem',
+          padding: isMobile ? '0.6rem 1rem' : '0.75rem 2.5rem',
           borderBottom: '1px solid var(--admin-border)',
           background: 'var(--admin-card)',
           position: 'sticky',
