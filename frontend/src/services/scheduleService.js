@@ -59,12 +59,23 @@ export const getAvailableSlots = async (dateStr) => {
     const startOfDay = `${dateStr}T00:00:00`;
     const endOfDay = `${dateStr}T23:59:59`;
 
+    // 1. Check for Blocked Slots (REQ-ADM-07)
+    const { data: blocks } = await supabase
+      .from('blocked_slots')
+      .select('*')
+      .eq('block_date', dateStr);
+    
+    if (blocks && blocks.some(b => !b.start_time)) {
+      console.log('ScheduleService: Whole day is blocked.');
+      return []; // Whole day blocked
+    }
+
     const { data: bookings, error } = await supabase
       .from('bookings')
       .select('start_datetime')
       .gte('start_datetime', startOfDay)
       .lte('start_datetime', endOfDay)
-      .neq('status', 'cancelled');
+      .neq('status', 'CANCELLED');
 
     if (error) throw error;
 
@@ -98,6 +109,26 @@ export const getAvailableSlots = async (dateStr) => {
         
         // Block slots if they are in the past or exactly current hour
         if (slotH <= currentHour) return false;
+      }
+
+      // 3. Check against Time-Specific Blocks
+      if (blocks && blocks.length > 0) {
+        const parseSlotH = (slotStr) => {
+          let [time, modifier] = slotStr.split(' ');
+          let h = parseInt(time.split(':')[0], 10);
+          if (modifier === 'PM' && h < 12) h += 12;
+          if (modifier === 'AM' && h === 12) h = 0;
+          return h;
+        };
+        const sH = parseSlotH(slot);
+        
+        const isBlocked = blocks.some(b => {
+          if (!b.start_time) return false; // Handled by whole-day check
+          const bStart = parseInt(b.start_time.split(':')[0], 10);
+          const bEnd = parseInt(b.end_time.split(':')[0], 10);
+          return sH >= bStart && sH < bEnd;
+        });
+        if (isBlocked) return false;
       }
       
       return true;

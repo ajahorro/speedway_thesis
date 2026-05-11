@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase';
 import {
   LayoutDashboard, ClipboardList, CheckSquare, Calendar,
   Bell, Undo, BarChart2, History, Users, User,
-  Settings, LogOut, Menu, X
+  Settings, LogOut, Menu, X, ShieldAlert
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ProfileHeader from '../../components/ProfileHeader';
@@ -76,6 +76,7 @@ const AdminLayout = () => {
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart2 },
     { name: 'Audit Logs', path: '/admin/audit-logs', icon: History },
     { name: 'Accounts Management', path: '/admin/accounts', icon: Users },
+    { name: 'Slot Management', path: '/admin/slots', icon: ShieldAlert },
     { name: 'Users', path: '/admin/users', icon: User },
     { name: 'Notifications', path: '/admin/notifications', icon: Bell },
 

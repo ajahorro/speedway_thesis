@@ -19,6 +19,9 @@ import AdminSettings from './pages/Admin/AdminSettings';
 import AdminNotifications from './pages/Admin/AdminNotifications';
 import AdminProfile from './pages/Admin/AdminProfile';
 import AdminAcceptInvite from './pages/Admin/AdminAcceptInvite';
+import AdminSlotManagement from './pages/Admin/AdminSlotManagement';
+import StaffLayout from './pages/Staff/StaffLayout';
+import StaffDashboard from './pages/Staff/StaffDashboard';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -73,9 +76,25 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="users" element={<AdminUserManagement />} />
             <Route path="settings" element={<AdminSettings />} />
             <Route path="notifications" element={<AdminNotifications />} />
+            <Route path="slots" element={<AdminSlotManagement />} />
             <Route path="profile" element={<AdminProfile />} />
             {/* Fallback for other admin routes */}
             <Route path="*" element={<div style={{ padding: '2rem' }}>Module under development</div>} />
+          </Route>
+
+          {/* Staff Routes */}
+          <Route 
+            path="/staff" 
+            element={
+              <ProtectedRoute allowedRoles={['STAFF']}>
+                <StaffLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<StaffDashboard />} />
+            <Route path="tasks" element={<StaffDashboard />} />
+            <Route path="history" element={<div style={{ padding: '2rem' }}>Historical logs coming soon</div>} />
+            <Route path="profile" element={<div style={{ padding: '2rem' }}>Profile management coming soon</div>} />
           </Route>
 
           {/* Customer Routes */}

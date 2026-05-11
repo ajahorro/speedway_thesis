@@ -132,6 +132,18 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             />
           </div>
 
+          <div>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+              Special Instructions / Notes (Optional)
+            </label>
+            <textarea 
+              value={bookingData.notes || ''}
+              onChange={(e) => setBookingData({ ...bookingData, notes: e.target.value })}
+              placeholder="e.g. Please take extra care of the leather seats..."
+              style={{ ...inputStyle, minHeight: '100px', resize: 'none' }}
+            />
+          </div>
+
         </div>
 
         {/* Right Col: Time Slots & Vehicle Details */}

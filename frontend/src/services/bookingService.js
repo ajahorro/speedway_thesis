@@ -29,7 +29,8 @@ export const createBooking = async (customerId, bookingData) => {
       status: 'scheduled',
       total_amount: totalAmount,
       notes: bookingData.notes || '',
-      contact_number: bookingData.contactNumber
+      contact_number: bookingData.contactNumber,
+      ocr_metadata: bookingData.payment?.ocrData || {} // PERSIST OCR RESULTS
     })
     .select()
     .single();

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
 import { ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { createBooking } from '../../services/bookingService';
 import toast from 'react-hot-toast';
@@ -10,11 +10,15 @@ import Step4ReviewPayment from '../../components/BookingWizard/Step4ReviewPaymen
 import BookingSuccess from '../../components/BookingWizard/BookingSuccess';
 
 const CustomerBookAppointment = () => {
+  const location = useLocation();
   const { user, profile } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [activeVehicleIndex, setActiveVehicleIndex] = useState(0);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Initialize with location state if available (for "Book Again" feature)
+  const prefillData = location.state?.prefill;
 
   // Global Wizard State
   const [bookingData, setBookingData] = useState({
@@ -23,7 +27,18 @@ const CustomerBookAppointment = () => {
     date: '',
     time: '',
     notes: '',
-    vehicles: [
+    vehicles: prefillData ? prefillData.vehicles.map(v => ({
+      id: crypto.randomUUID(),
+      type: v.vehicle_type || '',
+      brand: v.make || '',
+      model: v.model || '',
+      plateNumber: v.plate_number || '',
+      services: v.services?.map(s => ({
+        service_id: s.service_id,
+        service_name: s.service_name,
+        price: s.price
+      })) || []
+    })) : [
       {
         id: crypto.randomUUID(),
         type: '',
@@ -34,12 +49,21 @@ const CustomerBookAppointment = () => {
       }
     ],
     payment: {
-      method: 'GCash', // GCash or Cash
-      type: 'Full', // Full or Downpayment
+      method: 'GCash', 
+      type: 'Full', 
       proofOfPayment: null,
       ocrData: null
     }
   });
+
+  React.useEffect(() => {
+    if (prefillData) {
+      toast.success('Previous configuration loaded!', {
+        icon: '🔄',
+        style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)' }
+      });
+    }
+  }, [prefillData]);
 
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1));

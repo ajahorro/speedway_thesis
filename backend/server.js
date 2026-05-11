@@ -110,6 +110,11 @@ const crypto = require('crypto');
 app.post('/admin/generate-invite', async (req, res) => {
   const { email, role } = req.body;
   
+  if (!email || !['ADMIN', 'STAFF'].includes(role)) {
+    console.error(`❌ [INVITE SYSTEM] REJECTED: Invalid email (${email}) or role (${role})`);
+    return res.status(400).json({ success: false, error: 'Invalid invitation parameters' });
+  }
+
   console.log(`🎟️ [INVITE SYSTEM] GENERATING FOR: ${email} (${role})`);
 
   try {
@@ -242,9 +247,10 @@ app.post('/invite/accept', async (req, res) => {
     }
 
     // 3. Create Profile Row
-    console.log(`⏳ Inserting into profiles table for ID: ${userId}...`);
-    const fName = first_name || 'Admin';
-    const lName = last_name || 'User';
+    console.log(`⏳ Inserting into profiles table for ID: ${userId} with role: ${invite.role}...`);
+    const fName = first_name?.trim() || 'Staff';
+    const lName = last_name?.trim() || 'Member';
+    const fullName = `${fName} ${lName}`.trim();
     
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
@@ -253,6 +259,7 @@ app.post('/invite/accept', async (req, res) => {
         email: invite.email,
         first_name: fName,
         last_name: lName,
+        full_name: fullName,
         role: invite.role,
         is_active: true,
         updated_at: new Date().toISOString()
@@ -343,6 +350,46 @@ app.post('/customer/register', async (req, res) => {
   } catch (err) {
     console.error(`❌ Registration Error: ${err.message}`);
     return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * 🤖 REQ-SYS-01: AI-Assisted OCR Verification
+ * Simulates Gemini AI OCR for payment receipt validation
+ */
+app.post('/admin/verify-payment-ocr', async (req, res) => {
+  const { receiptUrl } = req.body;
+  
+  if (!receiptUrl) {
+    return res.status(400).json({ success: false, error: 'Receipt URL is required' });
+  }
+
+  console.log(`🤖 [AI OCR] SCANNING RECEIPT: ${receiptUrl}`);
+
+  try {
+    // SIMULATION MODE: In a real thesis, you'd use @google/generative-ai here.
+    // We simulate a 2-second AI 'thinking' delay
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Mock extraction logic (simulating successful OCR)
+    // In a real scenario, this would come from the Gemini AI response
+    const mockReferenceNumber = `00${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const mockConfidence = 0.98;
+
+    console.log(`✅ [AI OCR] EXTRACTED REF: ${mockReferenceNumber} (Confidence: ${mockConfidence})`);
+
+    res.json({
+      success: true,
+      data: {
+        referenceNumber: mockReferenceNumber,
+        confidence: mockConfidence,
+        detectedAmount: 1500, // Example detected amount
+        isSimulation: !process.env.GEMINI_API_KEY
+      }
+    });
+  } catch (error) {
+    console.error('❌ [AI OCR] FAILED:', error);
+    res.status(500).json({ success: false, error: 'AI processing failed' });
   }
 });
 

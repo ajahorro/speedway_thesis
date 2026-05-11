@@ -10,6 +10,7 @@ import {
 import PageHeader from '../../components/PageHeader';
 import { logger } from '../../utils/logger';
 import toast from 'react-hot-toast';
+import { calculatePaymentStatus, getPaymentStatusUI } from '../../utils/paymentUtils';
 
 // MEMOIZED SUB-COMPONENTS: Prevent entire dashboard from re-rendering on single metric change
 const MetricCard = React.memo(({ title, value, icon: Icon, color, subtext, trendIcon: TrendIcon, onClick, gradient }) => (
@@ -77,9 +78,13 @@ const AdminDashboard = () => {
       totalRevenue: 0,
       pendingPayments: 0,
       refundRequests: 0,
-      unassignedBookings: 0
+      unassignedBookings: 0,
+      overdueServices: 0,
+      successRate: 0,
+      shopLoad: 0
     },
-    recentBookings: []
+    recentBookings: [],
+    priorityItems: []
   });
 
   const fetchDashboardData = useCallback(async () => {
@@ -104,36 +109,69 @@ const AdminDashboard = () => {
       const { data: payments } = await supabase.from('payments').select('amount').eq('status', 'PAID');
       const revenue = (payments || []).reduce((sum, p) => sum + Number(p.amount), 0);
 
+      // 4. Success Rate Calculation
+      const { data: allVehicles } = await supabase.from('booking_vehicles').select('status');
+      const completed = allVehicles?.filter(v => v.status === 'COMPLETED').length || 0;
+      const totalUnits = allVehicles?.length || 1; // Avoid div by zero
+      const sRate = Math.round((completed / totalUnits) * 100);
+
+      // 5. Shop Load (Active vs Total assigned)
+      const activeUnits = allVehicles?.filter(v => v.status === 'IN_PROGRESS').length || 0;
+      const sLoad = Math.round((activeUnits / totalUnits) * 100);
+
       // 4. Needs Attention - Pending Payments
       const { count: pendingPay } = await supabase
         .from('payments')
         .select('*', { count: 'exact', head: true })
-        .eq('status', 'PENDING');
+        .eq('status', 'FOR_VERIFICATION');
 
       // 5. Needs Attention - Unassigned Bookings
       const { count: unassigned } = await supabase
         .from('bookings')
         .select('*', { count: 'exact', head: true })
         .is('staff_id', null)
-        .neq('status', 'cancelled');
+        .neq('status', 'CANCELLED');
 
       // 6. Needs Attention - Refund Requests
-      const { data: cancels } = await supabase.from('bookings').select('*, payments(*)').eq('status', 'cancelled');
+      const { data: cancels } = await supabase.from('bookings').select('*, payments(*)').eq('status', 'CANCELLED');
       const pendingRefunds = (cancels || []).filter(b => 
         (b.refund_status !== 'PROCESSED') && (b.payments || []).some(p => p.status === 'PAID')
       ).length;
 
+      // 7. Needs Attention - Overdue Services
+      // Definition: Past start time but not completed/cancelled
+      const { count: overdue } = await supabase
+        .from('bookings')
+        .select('*', { count: 'exact', head: true })
+        .lt('start_datetime', new Date().toISOString())
+        .not('status', 'in', '("COMPLETED","CANCELLED")');
+
       // 7. Recent Bookings (DEDUPLICATED)
       const { data: recent } = await supabase
         .from('bookings')
-        .select('*, customer:profiles!bookings_customer_id_fkey(full_name)')
+        .select(`
+          *, 
+          customer:profiles!bookings_customer_id_fkey(full_name),
+          vehicles:booking_vehicles(id, status),
+          payments:payments(*)
+        `)
         .order('created_at', { ascending: false })
-        .limit(20); // Fetch extra to account for deduplication
+        .limit(20); 
 
       // DEDUPLICATION ENGINE: Ensure unique IDs only
       const uniqueBookings = Array.from(
         new Map((recent || []).map(b => [b.id, b])).values()
       ).slice(0, 5);
+
+      // 8. Priority Item Aggregation (for the Queue)
+      const pItems = [];
+      // Add unassigned
+      const { data: unassignedItems } = await supabase.from('bookings').select('id, customer:profiles!bookings_customer_id_fkey(full_name), start_datetime').is('staff_id', null).neq('status', 'CANCELLED').limit(2);
+      unassignedItems?.forEach(item => pItems.push({ id: item.id, type: 'STAFF', title: `Unassigned Fleet: ${item.customer?.full_name}`, sub: `Scheduled for ${new Date(item.start_datetime).toLocaleDateString()}`, color: '#3b82f6' }));
+      
+      // Add pending payments
+      const { data: pendingItems } = await supabase.from('payments').select('id, amount, bookings(customer:profiles!bookings_customer_id_fkey(full_name))').eq('status', 'FOR_VERIFICATION').limit(2);
+      pendingItems?.forEach(item => pItems.push({ id: item.id, type: 'PAYMENT', title: `Verification Needed: ₱${item.amount}`, sub: item.bookings?.customer?.full_name, color: '#f59e0b' }));
 
       setState({
         loading: false,
@@ -143,9 +181,13 @@ const AdminDashboard = () => {
           totalRevenue: revenue,
           pendingPayments: pendingPay || 0,
           refundRequests: pendingRefunds || 0,
-          unassignedBookings: unassigned || 0
+          unassignedBookings: unassigned || 0,
+          overdueServices: overdue || 0,
+          successRate: sRate,
+          shopLoad: sLoad
         },
-        recentBookings: uniqueBookings
+        recentBookings: uniqueBookings,
+        priorityItems: pItems
       });
       
       logger.admin('Operational intelligence synchronized.');
@@ -192,6 +234,20 @@ const AdminDashboard = () => {
           subtext="Verified Transactions"
           icon={CreditCard}
         />
+        <MetricCard 
+          title="Service Success Rate"
+          value={`${state.stats.successRate}%`}
+          color="#10b981"
+          subtext="Completed vs Total"
+          icon={CheckCircle2}
+        />
+        <MetricCard 
+          title="Active Shop Load"
+          value={`${state.stats.shopLoad}%`}
+          color="#3b82f6"
+          subtext="Technician Utilization"
+          icon={RefreshCcw}
+        />
       </div>
 
       {/* Needs Attention Area */}
@@ -201,7 +257,7 @@ const AdminDashboard = () => {
           <h2 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>Needs Immediate Attention</h2>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
           <AttentionCard 
             count={state.stats.pendingPayments}
             label="Pending Verifications"
@@ -211,22 +267,57 @@ const AdminDashboard = () => {
             onClick={() => navigate('/admin/payments')}
           />
           <AttentionCard 
+            count={state.stats.unassignedBookings}
+            label="Unassigned Fleets"
+            icon={Users}
+            color="#3b82f6"
+            bg="rgba(59, 130, 246, 0.1)"
+            onClick={() => navigate('/admin/bookings?filter=unassigned')}
+          />
+          <AttentionCard 
+            count={state.stats.overdueServices}
+            label="Overdue Services"
+            icon={AlertCircle}
+            color="#E61E2A"
+            bg="rgba(230, 30, 42, 0.1)"
+            onClick={() => navigate('/admin/bookings?filter=overdue')}
+          />
+          <AttentionCard 
             count={state.stats.refundRequests}
-            label="Refund Requests"
+            label="Pending Refunds"
             icon={RefreshCcw}
             color="#ef4444"
             bg="rgba(239, 68, 68, 0.1)"
             onClick={() => navigate('/admin/refunds')}
           />
-          <AttentionCard 
-            count={state.stats.unassignedBookings}
-            label="Unassigned Bookings"
-            icon={Users}
-            color="#3b82f6"
-            bg="rgba(59, 130, 246, 0.1)"
-            onClick={() => navigate('/admin/bookings')}
-          />
         </div>
+
+        {/* Priority Queue List */}
+        {state.priorityItems.length > 0 && (
+          <div style={{ background: 'rgba(230, 30, 42, 0.03)', border: '1px solid rgba(230, 30, 42, 0.1)', borderRadius: '4px', padding: '1rem', marginTop: '0.5rem' }}>
+            <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#E61E2A', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{ width: '6px', height: '6px', background: '#E61E2A', borderRadius: '50%', animation: 'pulse 1.5s infinite' }}></div>
+              Live Priority Queue
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {state.priorityItems.map((item, idx) => (
+                <div 
+                  key={idx} 
+                  onClick={() => navigate(item.type === 'STAFF' ? `/admin/bookings/${item.id}` : '/admin/payments')}
+                  style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: '2px', padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
+                  className="priority-row"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{ fontSize: '0.6rem', fontWeight: '950', padding: '0.2rem 0.5rem', background: `${item.color}15`, color: item.color, borderRadius: '2px', textTransform: 'uppercase' }}>{item.type}</div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{item.title}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>• {item.sub}</div>
+                  </div>
+                  <ChevronRight size={14} color="var(--admin-text-secondary)" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Recent Activity */}
@@ -246,12 +337,32 @@ const AdminDashboard = () => {
               <div key={b.id} onClick={() => navigate(`/admin/bookings/${b.id}`)} style={{ padding: '1.25rem 1.5rem', borderBottom: idx === state.recentBookings.length - 1 ? 'none' : '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: '1.25rem', cursor: 'pointer' }} className="activity-row">
                 <div style={{ width: '40px', height: '40px', borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-brand)', fontWeight: '900', border: '1px solid var(--admin-border)' }}>{b.customer?.full_name?.charAt(0) || '#'}</div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>{b.customer?.full_name}</div>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>#{b.id.slice(0, 8).toUpperCase()}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>{b.customer?.full_name}</div>
+                    {b.vehicles?.length > 1 && (
+                      <span style={{ fontSize: '0.65rem', fontWeight: '950', background: 'rgba(var(--admin-brand-rgb), 0.1)', color: 'var(--admin-brand)', padding: '0.2rem 0.5rem', borderRadius: '4px', textTransform: 'uppercase' }}>
+                        Fleet: {b.vehicles.length} Units
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>#{b.id.slice(0, 8).toUpperCase()}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>•</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '800', textTransform: 'uppercase' }}>
+                      {b.vehicles?.filter(v => v.status === 'COMPLETED').length || 0} / {b.vehicles?.length || 0} UNITS READY
+                    </div>
+                  </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: '0.85rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>₱{Number(b.total_amount).toLocaleString()}</div>
-                  <div style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '800', textTransform: 'uppercase' }}>{b.status}</div>
+                  <div style={{ 
+                    fontSize: '0.65rem', 
+                    fontWeight: '950', 
+                    textTransform: 'uppercase',
+                    color: getPaymentStatusUI(calculatePaymentStatus(b)).color
+                  }}>
+                    {getPaymentStatusUI(calculatePaymentStatus(b)).label}
+                  </div>
                 </div>
               </div>
             ))}
@@ -262,7 +373,9 @@ const AdminDashboard = () => {
       <style>{`
         .attention-card:hover { border-color: var(--admin-brand) !important; background: var(--admin-bg) !important; transform: translateY(-2px); }
         .activity-row:hover { background: var(--admin-bg); }
+        .priority-row:hover { border-color: #E61E2A !important; transform: translateX(4px); }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
       `}</style>
     </div>
   );

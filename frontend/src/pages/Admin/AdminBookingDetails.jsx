@@ -119,8 +119,7 @@ const AdminBookingDetails = () => {
       setVehicles(processedVehicles);
 
       // SYNC AUDIT LOGS WITH DATA
-      const { data: auditData } = await supabase.from('audit_logs').select('*').eq('booking_id', id).order('created_at', { ascending: true });
-      const hasCreation = auditData?.some(l => l.action_type === 'BOOKING_CREATED');
+      const { data: auditData } = await supabase.from('audit_logs').select('*').eq('booking_id', id).order('created_at', { ascending: false });
       const logs = auditData ? auditData.map(log => ({ 
         ...log, 
         event_type: log.action_type, 
@@ -128,15 +127,6 @@ const AdminBookingDetails = () => {
         actor: { full_name: log.actor_name, role: log.actor_role } 
       })) : [];
 
-      if (!hasCreation) {
-        logs.unshift({
-          id: 'virtual-creation',
-          event_type: 'BOOKING_INITIATED',
-          details: 'Booking record successfully initiated in the Speedway Fleet Engine.',
-          created_at: bData.created_at,
-          actor: { full_name: 'System', role: 'SYSTEM' }
-        });
-      }
       setAuditLogs(logs);
     } catch (error) { 
       logger.error('Admin Sync Error', error);
@@ -200,6 +190,7 @@ const AdminBookingDetails = () => {
 
   const handleAssignStaff = async (staffId) => {
     if (!staffId) return;
+    const toastId = toast.loading('Assigning technician...');
     try {
       const { data: { user: admin } } = await supabase.auth.getUser();
       
@@ -213,10 +204,7 @@ const AdminBookingDetails = () => {
 
       const { error } = await supabase.from('bookings').update(updatePayload).eq('id', id);
       
-      if (error) {
-        console.error('Assignment Database Error:', error);
-        throw error;
-      }
+      if (error) throw error;
       
       // Notify Staff
       await notifyUser(staffId, 'New Fleet Assigned! 🔧', `You have been assigned to lead the detailing session for ${booking.customer?.full_name}.`, 'TASK_ASSIGNED', `/staff/tasks`);
@@ -231,19 +219,16 @@ const AdminBookingDetails = () => {
         details: `Assigned technician ${staffName} to lead this session.`
       });
 
-      toast.success('Technician Assigned');
+      toast.success('Technician Assigned Successfully', { id: toastId });
       fetchBookingDetails(); fetchAuditLogs();
     } catch (error) { 
-      console.error('CRITICAL ASSIGNMENT FAILURE:', error);
-      if (error.code === 'PGRST204') {
-        toast.error('Schema Mismatch: Missing assignment columns in DB.');
-      } else {
-        toast.error(`Assignment error: ${error.message || 'Unknown server error'}`); 
-      }
+      logger.error('CRITICAL ASSIGNMENT FAILURE:', error);
+      toast.error('Assignment failed', { id: toastId });
     }
   };
 
   const handleVerifyPayment = async (p) => {
+    const toastId = toast.loading('Verifying payment...');
     try {
       const { data: { user: verifier } } = await supabase.auth.getUser();
       const { error } = await supabase.from('payments').update({ status: 'PAID', verified_by: verifier?.id, verified_at: new Date().toISOString() }).eq('id', p.id);
@@ -260,9 +245,9 @@ const AdminBookingDetails = () => {
         details: `Verified payment of ₱${p.amount.toLocaleString()} via ${p.method}.`
       });
 
-      toast.success('Payment Approved');
+      toast.success('Payment Approved', { id: toastId });
       fetchPayments(); fetchAuditLogs(); fetchBookingDetails();
-    } catch (err) { toast.error('Verification failed'); }
+    } catch (err) { toast.error('Verification failed', { id: toastId }); }
   };
 
   const handleRejectPayment = async (p) => {
@@ -280,15 +265,59 @@ const AdminBookingDetails = () => {
   };
 
   const updateBookingStatus = async (status) => {
+    const toastId = toast.loading(`Marking session as ${status}...`);
     try {
       const { error } = await supabase.from('bookings').update({ status }).eq('id', id);
       if (error) throw error;
       
       await notifyUser(booking.customer_id, 'Booking Status Update ℹ️', `Your session has been marked as ${status.toUpperCase()}.`, 'STATUS_UPDATE', `/my-bookings/${id}`);
       
-      toast.success(`Booking ${status}`);
+      toast.success(`Booking ${status.toUpperCase()}`, { id: toastId });
       fetchBookingDetails();
-    } catch (err) { toast.error('Update failed'); }
+    } catch (err) { toast.error('Update failed', { id: toastId }); }
+  };
+
+  const handleRecordPayment = async () => {
+    if (!paymentAmount || Number(paymentAmount) <= 0) return toast.error('Enter a valid amount');
+    setSubmittingPayment(true);
+    const toastId = toast.loading('Recording manual payment...');
+    try {
+      const { data: { user: actor } } = await supabase.auth.getUser();
+      
+      const { data: pData, error: pError } = await supabase.from('payments').insert({
+        booking_id: id,
+        amount: Number(paymentAmount),
+        method: 'Cash',
+        status: 'PAID',
+        verified_by: actor?.id,
+        verified_at: new Date().toISOString(),
+        notes: 'Manual entry by Admin'
+      }).select().single();
+
+      if (pError) throw pError;
+
+      // Notify Customer
+      await notifyUser(booking.customer_id, 'Payment Received! 💵', `We have recorded your manual payment of ₱${Number(paymentAmount).toLocaleString()}.`, 'PAYMENT_RECEIVED', `/my-bookings/${id}`);
+
+      // AUDIT LOG
+      await supabase.from('audit_logs').insert({
+        booking_id: id,
+        action_type: 'PAYMENT_RECORDED',
+        actor_name: actor?.email || 'Admin',
+        actor_role: 'ADMIN',
+        details: `Manually recorded Cash payment of ₱${Number(paymentAmount).toLocaleString()}.`
+      });
+
+      toast.success('Payment Recorded Successfully', { id: toastId });
+      setPaymentModal(false);
+      setPaymentAmount('');
+      fetchPayments(); fetchBookingDetails(); fetchAuditLogs();
+    } catch (err) {
+      logger.error('Manual Payment Error', err);
+      toast.error('Failed to record payment', { id: toastId });
+    } finally {
+      setSubmittingPayment(false);
+    }
   };
 
   const updateVehicleStatus = async (vehicleId, status) => {
@@ -323,8 +352,10 @@ const AdminBookingDetails = () => {
 
   if (loading || !booking) return <LoadingState message="Synchronizing fleet records..." />;
 
+  const pendingVerification = bookingPayments.find(p => p.status === 'FOR_VERIFICATION');
   const totalPaid = bookingPayments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
   const balance = Math.max(0, (booking.total_amount || 0) - totalPaid);
+  const isLocked = booking.status === 'cancelled';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '5rem' }}>
@@ -333,56 +364,74 @@ const AdminBookingDetails = () => {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.8fr 1.2fr', gap: '1.5rem' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
-          {/* 🔍 HIGH-PRIORITY VERIFICATION HUB */}
-          <div style={{ ...cardStyle, border: '2px solid var(--admin-info)', background: 'rgba(59, 130, 246, 0.03)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-info)', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <ShieldCheck size={20} /> Payment Verification Hub
-              </h3>
-              <span style={{ fontSize: '0.65rem', fontWeight: '900', padding: '0.3rem 0.6rem', borderRadius: '20px', background: 'var(--admin-info)', color: 'white' }}>
-                FOR REVIEW
-              </span>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1.5rem', alignItems: 'start' }}>
-              {/* Receipt Preview */}
-              <div style={{ width: '120px', height: '160px', borderRadius: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', position: 'relative' }} onClick={() => bookingPayments[0]?.receipt_url && window.open(bookingPayments[0].receipt_url, '_blank')}>
-                {bookingPayments[0]?.receipt_url ? (
-                  <img src={bookingPayments[0].receipt_url} alt="Payment Receipt" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: 0.5 }}>
-                    <ImageIcon size={24} />
-                    <span style={{ fontSize: '0.6rem', fontWeight: '800' }}>No Receipt</span>
-                  </div>
-                )}
+          {/* 🔍 HIGH-PRIORITY VERIFICATION HUB - Only show if there is something to verify */}
+          {pendingVerification && !isLocked && (
+             <div style={{ ...cardStyle, border: '2px solid var(--admin-info)', background: 'rgba(59, 130, 246, 0.03)', marginBottom: '1.5rem' }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-info)', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <ShieldCheck size={20} /> Payment Verification Hub
+                </h3>
+                <span style={{ fontSize: '0.65rem', fontWeight: '900', padding: '0.3rem 0.6rem', borderRadius: '20px', background: 'var(--admin-info)', color: 'white' }}>
+                  FOR REVIEW
+                </span>
               </div>
 
-              {/* OCR Results */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <div style={{ padding: '1rem', background: 'var(--admin-bg)', borderRadius: '0.75rem', border: '1px solid var(--admin-border)', height: '100%' }}>
-                  <div style={{ ...labelStyle, color: 'var(--admin-info)' }}>Extracted Verification Metadata</div>
-                  <div style={{ fontSize: '0.9rem', fontWeight: '850', color: 'var(--admin-text-primary)', whiteSpace: 'pre-wrap', fontFamily: 'monospace', marginTop: '0.5rem', lineHeight: '1.4' }}>
-                    {booking.notes || 'No OCR scan data attached to this booking record.'}
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1.5rem', alignItems: 'start' }}>
+                {/* Receipt Preview */}
+                <div style={{ width: '120px', height: '160px', borderRadius: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', position: 'relative' }} onClick={() => pendingVerification.receipt_url && window.open(pendingVerification.receipt_url, '_blank')}>
+                  {pendingVerification.receipt_url ? (
+                    <img src={pendingVerification.receipt_url} alt="Payment Receipt" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: 0.5 }}>
+                      <ImageIcon size={24} />
+                      <span style={{ fontSize: '0.6rem', fontWeight: '800' }}>No Receipt</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* OCR Results & Customer Notes */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ padding: '1rem', background: 'var(--admin-bg)', borderRadius: '0.75rem', border: '1px solid var(--admin-border)', height: '100%' }}>
+                    <div style={{ ...labelStyle, color: 'var(--admin-info)' }}>Digital Receipt Intelligence</div>
+                    {booking.ocr_metadata && Object.keys(booking.ocr_metadata).length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>
+                          <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '700' }}>REF NO:</span>
+                          <span style={{ color: 'var(--admin-text-primary)', fontWeight: '950', fontFamily: 'monospace' }}>{booking.ocr_metadata.referenceNo}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>
+                          <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '700' }}>EXTRACTED AMOUNT:</span>
+                          <span style={{ color: 'var(--admin-brand)', fontWeight: '950' }}>₱{Number(booking.ocr_metadata.amount).toLocaleString()}</span>
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontStyle: 'italic', marginTop: '0.25rem' }}>
+                          "{booking.ocr_metadata.description}"
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontStyle: 'italic', marginTop: '0.5rem' }}>
+                        No digital OCR intelligence available for this record.
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button onClick={() => handleVerifyPayment(pendingVerification)} style={{ flex: 1, padding: '0.75rem', background: '#10b981', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>APPROVE PAYMENT</button>
+                    <button onClick={() => handleRejectPayment(pendingVerification)} style={{ flex: 1, padding: '0.75rem', background: '#ef4444', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>REJECT</button>
                   </div>
                 </div>
-                {bookingPayments[0] && (
-                  <div style={{ display: 'flex', gap: '1rem' }}>
-                    <button onClick={() => handleVerifyPayment(bookingPayments[0])} style={{ flex: 1, padding: '0.75rem', background: '#10b981', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>APPROVE PAYMENT</button>
-                    <button onClick={() => handleRejectPayment(bookingPayments[0])} style={{ flex: 1, padding: '0.75rem', background: '#ef4444', color: 'white', borderRadius: '0.6rem', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>REJECT</button>
-                  </div>
-                )}
-                
-                {/* BILLING / MANUAL PAYMENT BUTTON */}
-                <button 
-                  onClick={() => setPaymentModal(true)}
-                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '0.6rem', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer', marginTop: bookingPayments[0] ? '0' : '0.75rem' }}
-                >
-                  <Banknote size={14} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} /> 
-                  RECORD MANUAL PAYMENT / BILLING ADJUSTMENT
-                </button>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* Customer Special Instructions (Moved outside the hub) */}
+          {booking.notes && (
+            <div style={{ ...cardStyle, padding: '1.25rem', border: '1px dashed var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.02)', marginBottom: '1.5rem' }}>
+              <div style={{ ...labelStyle, color: 'var(--admin-brand)' }}>Customer Special Instructions</div>
+              <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginTop: '0.5rem' }}>
+                {booking.notes}
+              </div>
+            </div>
+          )}
+
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0, fontWeight: '950', fontSize: '1.1rem', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', letterSpacing: '1px' }}>
@@ -429,7 +478,7 @@ const AdminBookingDetails = () => {
                 ))}
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                 {v.status !== 'completed' && (
+                 {v.status !== 'completed' && !isLocked && (
                    <button 
                     onClick={() => updateVehicleStatus(v.id, v.status === 'in_progress' ? 'completed' : 'in_progress')} 
                     style={{ 
@@ -480,21 +529,14 @@ const AdminBookingDetails = () => {
                         </div>
                         <div style={{ 
                           fontSize: '0.6rem', fontWeight: '950', padding: '0.2rem 0.5rem', borderRadius: '4px',
-                          background: p.status === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                          color: p.status === 'PAID' ? '#10b981' : '#f59e0b',
+                          background: p.status === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : (p.status === 'FOR_VERIFICATION' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'),
+                          color: p.status === 'PAID' ? '#10b981' : (p.status === 'FOR_VERIFICATION' ? '#f59e0b' : '#ef4444'),
                           border: '1px solid currentColor'
                         }}>
                           {p.status.toUpperCase()}
                         </div>
                       </div>
                       <div style={{ fontWeight: '950', fontSize: '1.1rem', marginTop: '0.25rem' }}>₱{p.amount?.toLocaleString()}</div>
-                      
-                      {p.status === 'FOR_VERIFICATION' && (
-                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-                          <button onClick={() => handleVerifyPayment(p)} style={{ flex: 1, padding: '0.4rem', background: '#10b981', color: 'white', borderRadius: '0.5rem', border: 'none', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer' }}>APPROVE</button>
-                          <button onClick={() => handleRejectPayment(p)} style={{ flex: 1, padding: '0.4rem', background: '#ef4444', color: 'white', borderRadius: '0.5rem', border: 'none', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer' }}>REJECT</button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -507,10 +549,36 @@ const AdminBookingDetails = () => {
               color: balance === 0 ? '#10b981' : '#f59e0b', 
               borderRadius: '1rem', textAlign: 'center', 
               fontWeight: '950', fontSize: '0.9rem',
-              border: `1px solid ${balance === 0 ? '#10b981' : '#f59e0b'}`
+              border: `1px solid ${balance === 0 ? '#10b981' : '#f59e0b'}`,
+              marginBottom: balance > 0 ? '1rem' : 0
             }}>
               {balance === 0 ? 'SESSION FULLY SETTLED' : `OUTSTANDING BALANCE: ₱${balance.toLocaleString()}`}
             </div>
+
+            {/* INLINE MANUAL PAYMENT RECORDING - Only if not cancelled */}
+            {balance > 0 && !isLocked && (
+              <div style={{ paddingTop: '1rem', borderTop: '1px dashed var(--admin-border)' }}>
+                 <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: '900', color: 'var(--admin-text-secondary)', fontSize: '0.75rem' }}>₱</span>
+                      <input 
+                        type="number" 
+                        placeholder="Manual Payment Amount..."
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(e.target.value)}
+                        style={{ width: '100%', padding: '0.75rem 1rem 0.75rem 2rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', fontWeight: '900', fontSize: '0.85rem', outline: 'none' }} 
+                      />
+                    </div>
+                    <button 
+                      disabled={submittingPayment || !paymentAmount}
+                      onClick={handleRecordPayment}
+                      style={{ padding: '0 1.25rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer', opacity: submittingPayment ? 0.5 : 1, textTransform: 'uppercase' }}
+                    >
+                      {submittingPayment ? '...' : 'RECORD'}
+                    </button>
+                 </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -525,19 +593,21 @@ const AdminBookingDetails = () => {
                    <div style={valueStyle}>{booking.assigned_staff?.full_name}</div>
                    <div style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>Active Lead Technician</div>
                  </div>
-                 <button onClick={() => setBooking({...booking, staff_id: null})} style={{ color: 'var(--admin-brand)', background: 'none', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>REASSIGN</button>
+                 {!isLocked && <button onClick={() => setBooking({...booking, staff_id: null})} style={{ color: 'var(--admin-brand)', background: 'none', border: 'none', fontWeight: '950', cursor: 'pointer', fontSize: '0.75rem' }}>REASSIGN</button>}
               </div>
             ) : (
               <select 
+                disabled={isLocked}
                 onChange={(e) => handleAssignStaff(e.target.value)} 
                 style={{ 
                   width: '100%', padding: '1rem', borderRadius: '1rem', 
                   background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', 
-                  color: '#fff', fontWeight: '900', outline: 'none' 
+                  color: '#fff', fontWeight: '900', outline: 'none',
+                  opacity: isLocked ? 0.5 : 1
                 }}
               >
-                <option value="">Select Technician...</option>
-                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                <option value="">{isLocked ? 'Booking Cancelled' : 'Select Technician...'}</option>
+                {!isLocked && staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             )}
           </div>
@@ -582,6 +652,7 @@ const AdminBookingDetails = () => {
           </div>
         </div>
       </div>
+
     </div>
   );
 };

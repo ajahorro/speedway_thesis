@@ -103,7 +103,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
 
         const requiredAmount = bookingData.payment.type === 'Full' ? grandTotal : Math.ceil(grandTotal * 0.3);
 
-        setReceiptDetails({
+        const resultObj = {
           referenceNo: text.match(/(?:REF|ID)\.?\s*([0-9\sA-Z]{8,})/i)?.[1].trim() || `REF-${Math.floor(Math.random() * 1000000000)}`,
           amount: extractedAmount || requiredAmount,
           requiredAmount: requiredAmount,
@@ -113,7 +113,15 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
           recipientMatch: recipientMatch,
           integrity: 95 + Math.floor(Math.random() * 5),
           description: `DEEP SCAN COMPLETE: Detected ${matches.length} financial markers. ${recipientMatch ? 'Recipient verified.' : 'Receipt structure valid.'}`
-        });
+        };
+
+        setReceiptDetails(resultObj);
+        
+        // SYNC TO MASTER STATE
+        setBookingData(prev => ({
+          ...prev,
+          payment: { ...prev.payment, ocrData: resultObj }
+        }));
 
 
 

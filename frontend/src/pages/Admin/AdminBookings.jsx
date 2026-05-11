@@ -7,6 +7,7 @@ import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { logger } from '../../utils/logger';
 import toast from 'react-hot-toast';
+import { calculatePaymentStatus, getPaymentStatusUI } from '../../utils/paymentUtils';
 
 const AdminBookings = () => {
   const navigate = useNavigate();
@@ -43,23 +44,9 @@ const AdminBookings = () => {
       const uniqueMap = new Map();
       (data || []).forEach(b => {
         if (!uniqueMap.has(b.id)) {
-          const payments = b.payments || [];
-          const totalPaid = payments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
-          const isPendingVerification = payments.some(p => p.status === 'FOR_VERIFICATION');
-          
-          let calcStatus = 'UNPAID';
-          if (totalPaid >= b.total_amount && b.total_amount > 0) {
-            calcStatus = 'PAID';
-          } else if (isPendingVerification) {
-            calcStatus = 'VERIFYING';
-          } else if (totalPaid >= (b.total_amount * 0.3) && b.total_amount > 0) {
-            calcStatus = 'DOWNPAYMENT_PAID';
-          }
-
           uniqueMap.set(b.id, {
             ...b,
-            calculatedPaymentStatus: calcStatus,
-            totalPaidAmount: totalPaid
+            calculatedPaymentStatus: calculatePaymentStatus(b)
           });
         }
       });
@@ -76,13 +63,20 @@ const AdminBookings = () => {
   useEffect(() => {
     fetchBookings();
     
+    // Check for URL filters
+    const params = new URLSearchParams(location.search);
+    const filter = params.get('filter');
+    if (filter === 'unassigned') {
+      setState(prev => ({ ...prev, filterStatus: 'unassigned' }));
+    }
+
     // Live synchronization channel
     const channel = supabase.channel('admin-bookings-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => fetchBookings())
       .subscribe();
       
     return () => { supabase.removeChannel(channel); };
-  }, [fetchBookings]);
+  }, [fetchBookings, location.search]);
 
   // MEMOIZED FILTERING: Only re-calculates when data or search changes
   const filteredBookings = useMemo(() => {
@@ -94,7 +88,12 @@ const AdminBookings = () => {
         ${b.vehicles?.map(v => v.plate_number).join(' ') || ''} 
       `.toLowerCase().includes(state.searchTerm.toLowerCase());
       
-      const matchesStatus = state.filterStatus === 'all' || b.status === state.filterStatus;
+      let matchesStatus = state.filterStatus === 'all' || b.status === state.filterStatus;
+      
+      // SPECIAL FILTER: UNASSIGNED
+      if (state.filterStatus === 'unassigned') {
+        matchesStatus = !b.staff_id && b.status !== 'cancelled';
+      }
       
       return matchesSearch && matchesStatus;
     });
@@ -111,11 +110,7 @@ const AdminBookings = () => {
   };
 
   const getPaymentStatus = (booking) => {
-    const status = booking.calculatedPaymentStatus || 'UNPAID';
-    if (status === 'PAID') return { label: 'FULLY PAID', color: '#10b981' };
-    if (status === 'VERIFYING') return { label: 'VERIFYING', color: '#8b5cf6' };
-    if (status === 'DOWNPAYMENT_PAID') return { label: 'DOWNPAYMENT', color: '#3b82f6' };
-    return { label: 'UNPAID', color: '#ef4444' };
+    return getPaymentStatusUI(booking.calculatedPaymentStatus);
   };
 
   const containerStyle = {
@@ -148,6 +143,24 @@ const AdminBookings = () => {
               onChange={(e) => setState(prev => ({ ...prev, searchTerm: e.target.value }))}
               style={{ border: 'none', background: 'transparent', color: 'var(--admin-text-primary)', width: '100%', outline: 'none', fontSize: '0.9rem', fontWeight: '700', textTransform: 'uppercase' }} 
             />
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.4rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', overflowX: 'auto' }}>
+            {['all', 'unassigned', 'scheduled', 'ongoing', 'completed', 'cancelled'].map(f => (
+              <button 
+                key={f}
+                onClick={() => setState(prev => ({ ...prev, filterStatus: f }))}
+                style={{ 
+                  padding: '0.5rem 0.85rem', borderRadius: '6px', border: 'none',
+                  background: state.filterStatus === f ? 'var(--admin-brand)' : 'transparent',
+                  color: state.filterStatus === f ? 'white' : 'var(--admin-text-secondary)',
+                  fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {f}
+              </button>
+            ))}
           </div>
         </div>
       </div>

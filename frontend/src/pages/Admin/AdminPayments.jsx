@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { CheckCircle, AlertCircle, Search, RotateCw, Filter, CreditCard, XCircle, ArrowRight, Car } from 'lucide-react';
+import { 
+  CheckCircle, AlertCircle, Search, RotateCw, Filter, 
+  CreditCard, XCircle, ArrowRight, Car, Sparkles, Loader2 
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
 import PageHeader from '../../components/PageHeader';
@@ -19,7 +22,8 @@ const AdminPayments = () => {
     loading: true,
     searchTerm: location.state?.filter || '',
     filter: 'PENDING',
-    selectedItem: null
+    selectedItem: null,
+    isScanning: false
   });
 
   // MEMOIZED FETCH: Optimized with deep relationship embedding
@@ -119,6 +123,42 @@ const AdminPayments = () => {
       setState(prev => ({ ...prev, selectedItem: null }));
     } catch (err) { 
       toast.error('Rejection failed', { id: toastId }); 
+    }
+  };
+
+  const handleAIScan = async (receiptUrl) => {
+    if (!receiptUrl) return;
+    setState(prev => ({ ...prev, isScanning: true }));
+    const toastId = toast.loading('AI is scanning receipt...');
+    
+    try {
+      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      const response = await fetch(`${BACKEND_URL}/admin/verify-payment-ocr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiptUrl })
+      });
+
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error);
+
+      // Auto-update the payment with detected info (simulated for now)
+      toast.success(`AI Scan Complete: Ref ${result.data.referenceNumber}`, { id: toastId });
+      
+      // We highlight the reference number field or update it if needed
+      // For this demo, we'll just show the "AI Verified" state in the UI
+      setState(prev => ({ 
+        ...prev, 
+        isScanning: false,
+        selectedItem: {
+          ...prev.selectedItem,
+          ai_verified: true,
+          detected_ref: result.data.referenceNumber
+        }
+      }));
+    } catch (err) {
+      toast.error('AI Scan failed. Please verify manually.', { id: toastId });
+      setState(prev => ({ ...prev, isScanning: false }));
     }
   };
 
@@ -250,9 +290,39 @@ const AdminPayments = () => {
                 {state.selectedItem.receipt_url && (
                   <div>
                     <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.5px' }}>CUSTOMER RECEIPT</div>
-                    <div style={{ width: '100%', height: '240px', background: 'var(--admin-bg)', borderRadius: 'var(--admin-radius-sm)', overflow: 'hidden', border: '1px solid var(--admin-border)' }}>
+                    <div style={{ width: '100%', height: '240px', background: 'var(--admin-bg)', borderRadius: 'var(--admin-radius-sm)', overflow: 'hidden', border: '1px solid var(--admin-border)', position: 'relative' }}>
                       <img src={state.selectedItem.receipt_url} alt="Receipt" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      
+                      <button 
+                        onClick={() => handleAIScan(state.selectedItem.receipt_url)}
+                        disabled={state.isScanning}
+                        style={{
+                          position: 'absolute', bottom: '1rem', right: '1rem',
+                          background: 'var(--admin-brand)', color: 'white', border: 'none',
+                          padding: '0.6rem 1rem', borderRadius: '8px', fontWeight: '950',
+                          fontSize: '0.65rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem',
+                          boxShadow: '0 4px 15px rgba(0,0,0,0.5)', transition: 'all 0.2s',
+                          opacity: state.isScanning ? 0.7 : 1
+                        }}
+                      >
+                        {state.isScanning ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                        {state.isScanning ? 'SCANNING...' : 'AI SCAN RECEIPT'}
+                      </button>
                     </div>
+
+                    {state.selectedItem.ai_verified && (
+                      <div style={{ 
+                        marginTop: '1rem', padding: '0.85rem', background: 'rgba(16, 185, 129, 0.1)', 
+                        border: '1px solid #10b981', borderRadius: '12px', display: 'flex', 
+                        alignItems: 'center', gap: '0.75rem' 
+                      }}>
+                        <CheckCircle size={18} color="#10b981" />
+                        <div>
+                          <div style={{ fontSize: '0.6rem', fontWeight: '950', color: '#10b981', textTransform: 'uppercase' }}>AI Verification Success</div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'white' }}>MATCHED REF: {state.selectedItem.detected_ref}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Search, ChevronRight, Car } from 'lucide-react';
+import { Calendar, Search, ChevronRight, Car, RotateCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useBookings } from '../../hooks/useBookings';
@@ -32,6 +32,11 @@ const CustomerMyBookings = () => {
       case 'cancelled': return '#ef4444';
       default: return 'var(--admin-text-secondary)';
     }
+  };
+
+  const handleBookAgain = (e, booking) => {
+    e.stopPropagation(); // Don't trigger the card's navigate
+    navigate('/customer/book', { state: { prefill: booking } });
   };
 
   return (
@@ -157,13 +162,29 @@ const CustomerMyBookings = () => {
                 </div>
 
                 {/* Total & Action */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Total</div>
                     <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{(b.total_amount || 0).toLocaleString()}</div>
                   </div>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <ChevronRight size={18} color="var(--admin-text-primary)" />
+                  
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {(b.status === 'completed' || b.status === 'cancelled') && (
+                      <button 
+                        onClick={(e) => handleBookAgain(e, b)}
+                        style={{ 
+                          width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(169, 27, 24, 0.1)', 
+                          border: '1px solid var(--admin-brand)', display: 'flex', alignItems: 'center', 
+                          justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' 
+                        }}
+                        title="Book Again"
+                      >
+                        <RotateCw size={18} color="var(--admin-brand)" />
+                      </button>
+                    )}
+                    <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <ChevronRight size={18} color="var(--admin-text-primary)" />
+                    </div>
                   </div>
                 </div>
               </div>

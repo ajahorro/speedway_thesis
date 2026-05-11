@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import {
   AlertTriangle, CreditCard, ArrowRight, Clock,
   CheckCircle, XCircle, Search, Filter, MessageCircle,
-  Car, Calendar, User, Eye, Download, Box
+  Car, Calendar, User, Eye, Download, Box, ExternalLink
 } from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
@@ -23,7 +23,8 @@ const AdminRefunds = () => {
     searchQuery: '',
     filter: 'PENDING',
     selectedItem: null,
-    confirmRefundItem: null
+    confirmRefundItem: null,
+    refundReason: ''
   });
 
   const fetchRefundData = useCallback(async () => {
@@ -88,7 +89,10 @@ const AdminRefunds = () => {
     try {
       const { error } = await supabase
         .from('bookings')
-        .update({ refund_status: 'PROCESSED' })
+        .update({ 
+          refund_status: 'PROCESSED',
+          refund_notes: state.refundReason 
+        })
         .eq('id', item.id);
 
       if (error) throw error;
@@ -205,12 +209,13 @@ const AdminRefunds = () => {
               </div>
 
               <div>
-                <div style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Fleet Units</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  {state.selectedItem.vehicles?.map(v => (
-                    <div key={v.id} style={{ fontSize: '0.75rem', fontWeight: '800', background: 'var(--admin-bg)', padding: '0.5rem', borderRadius: 'var(--admin-radius-sm)' }}>{v.make} {v.model} ({v.plate_number})</div>
-                  ))}
-                </div>
+                <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Reason for Refund</label>
+                <textarea 
+                  placeholder="e.g. Technical issue / Double payment..."
+                  value={state.refundReason}
+                  onChange={(e) => setState(prev => ({ ...prev, refundReason: e.target.value }))}
+                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', minHeight: '80px', resize: 'none', fontSize: '0.8rem', fontWeight: '700' }}
+                />
               </div>
 
               <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid var(--admin-border)' }}>
@@ -218,8 +223,21 @@ const AdminRefunds = () => {
                   <span style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>Refundable Total</span>
                   <span style={{ fontWeight: '950', fontSize: '1.5rem' }}>₱{state.selectedItem.totalPaid.toLocaleString()}</span>
                 </div>
+                <button 
+                  onClick={() => navigate(`/admin/bookings/${state.selectedItem.id}`)}
+                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', marginBottom: '0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                >
+                  <ExternalLink size={14} /> VIEW BOOKING DETAILS
+                </button>
+
                 {state.selectedItem.refundStatus === 'PENDING' && (
-                  <button onClick={() => setState(prev => ({ ...prev, confirmRefundItem: state.selectedItem }))} style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer' }}>MARK AS REFUNDED</button>
+                  <button 
+                    disabled={!state.refundReason}
+                    onClick={() => setState(prev => ({ ...prev, confirmRefundItem: state.selectedItem }))} 
+                    style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', opacity: !state.refundReason ? 0.5 : 1 }}
+                  >
+                    MARK AS REFUNDED
+                  </button>
                 )}
               </div>
             </div>
