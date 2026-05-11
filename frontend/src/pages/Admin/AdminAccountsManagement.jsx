@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import ReactDOM from 'react-dom';
 import { supabase } from '../../lib/supabase';
 import PageHeader from '../../components/PageHeader';
 import { 
@@ -270,9 +271,15 @@ const AdminAccountsManagement = () => {
       </div>
 
       {/* INVITATION MODAL */}
-      {isModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(8px)' }}>
-          <div style={{ background: 'var(--admin-card)', padding: '2rem', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', maxWidth: '500px', width: '90%' }}>
+      {isModalOpen && ReactDOM.createPortal(
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.85)', 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', 
+          zIndex: 9999, backdropFilter: 'blur(8px)' 
+        }}>
+          <div style={{ background: 'var(--admin-card)', padding: '2rem', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', maxWidth: '500px', width: '95%', position: 'relative' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
               <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.25rem', textTransform: 'uppercase' }}>INVITE NEW {activeTab}</h2>
               <button onClick={() => setIsModalOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><X size={24} /></button>
@@ -320,7 +327,8 @@ const AdminAccountsManagement = () => {
               </button>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       <style>{`

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
   Save, Upload, Clock, CreditCard, Sparkles, MapPin, 
-  Building2, QrCode, Trash2, Gauge, Tag, RefreshCcw 
+  Building2, QrCode, Trash2, Gauge, Tag, RefreshCcw, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import PageHeader from '../../components/PageHeader';
@@ -31,6 +31,19 @@ const AdminSettings = () => {
     slots_per_hour: 2
   });
 
+  // Helper to convert "08:00 AM" to "08:00" for time input
+  const formatForInput = (timeStr) => {
+    if (!timeStr) return "08:00";
+    if (/^\d{2}:\d{2}$/.test(timeStr)) return timeStr;
+    const parts = timeStr.split(' ');
+    if (parts.length !== 2) return timeStr;
+    const [time, modifier] = parts;
+    let [hours, minutes] = time.split(':');
+    if (modifier === 'PM' && hours !== '12') hours = parseInt(hours, 10) + 12;
+    if (modifier === 'AM' && hours === '12') hours = '00';
+    return `${hours.toString().padStart(2, '0')}:${minutes}`;
+  };
+
   const fetchSettings = async () => {
     setFetching(true);
     try {
@@ -44,10 +57,22 @@ const AdminSettings = () => {
       if (error) {
         // Fallback to local storage
         const saved = localStorage.getItem('speedway_business_settings');
-        if (saved) setSettings(prev => ({ ...prev, ...JSON.parse(saved) }));
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setSettings(prev => ({ 
+            ...prev, 
+            ...parsed,
+            opening_hour: formatForInput(parsed.opening_hour),
+            closing_hour: formatForInput(parsed.closing_hour)
+          }));
+        }
         logger.warn('Using local settings fallback.');
       } else {
-        setSettings(data);
+        setSettings({
+          ...data,
+          opening_hour: formatForInput(data.opening_hour),
+          closing_hour: formatForInput(data.closing_hour)
+        });
         logger.admin('Global studio parameters synchronized.');
       }
     } catch (err) {
@@ -216,9 +241,8 @@ const AdminSettings = () => {
               <div>
                 <label style={labelStyle}>Opening Hour</label>
                 <input 
-                  type="text" 
+                  type="time" 
                   value={settings.opening_hour}
-                  placeholder="e.g. 08:00 AM"
                   onChange={(e) => setSettings({...settings, opening_hour: e.target.value})}
                   style={inputStyle} 
                 />
@@ -226,9 +250,8 @@ const AdminSettings = () => {
               <div>
                 <label style={labelStyle}>Closing Hour</label>
                 <input 
-                  type="text" 
+                  type="time" 
                   value={settings.closing_hour}
-                  placeholder="e.g. 06:00 PM"
                   onChange={(e) => setSettings({...settings, closing_hour: e.target.value})}
                   style={inputStyle} 
                 />
@@ -242,7 +265,7 @@ const AdminSettings = () => {
                 <input 
                   type="number" 
                   min="1" max="10"
-                  value={settings.slots_per_hour}
+                  value={settings.slots_per_hour || 2}
                   onChange={(e) => setSettings({...settings, slots_per_hour: parseInt(e.target.value)})}
                   style={{ ...inputStyle, width: '80px', textAlign: 'center', fontSize: '1.25rem' }} 
                 />

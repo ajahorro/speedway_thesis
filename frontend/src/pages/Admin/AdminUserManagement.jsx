@@ -113,7 +113,7 @@ const AdminUserManagement = () => {
   const getRoleBadge = (role) => {
     switch (role) {
       case 'ADMIN': return { color: '#ef4444', label: 'ADMINISTRATOR', icon: <Shield size={10} /> };
-      case 'STAFF': return { color: '#3b82f6', label: 'OPERATIONS', icon: <UserCog size={10} /> };
+      case 'STAFF': return { color: '#3b82f6', label: 'STAFF', icon: <UserCog size={10} /> };
       default: return { color: 'var(--admin-text-secondary)', label: 'CUSTOMER', icon: <User size={10} /> };
     }
   };
@@ -157,7 +157,7 @@ const AdminUserManagement = () => {
             </div>
             
             <div style={{ display: 'flex', background: 'var(--admin-card)', padding: '0.25rem', borderRadius: '4px', border: '1px solid var(--admin-border)' }}>
-              {['ALL', 'ADMIN', 'STAFF', 'CUSTOMER'].map((role) => (
+              {['ALL', 'CUSTOMER', 'STAFF', 'ADMIN'].map((role) => (
                 <button
                   key={role}
                   onClick={() => setRoleFilter(role)}
@@ -175,11 +175,11 @@ const AdminUserManagement = () => {
             </div>
           </div>
 
-          {/* User Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(380px, 1fr))', gap: '1.25rem' }}>
+          {/* User Grid - RE-DESIGNED TO SQUARES */}
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1.25rem' }}>
             {loading ? (
-              [1,2,3,4,5,6].map(i => (
-                <div key={i} style={{ height: '200px', background: 'var(--admin-card)', borderRadius: '4px', border: '1px solid var(--admin-border)' }} className="animate-pulse"></div>
+              [1,2,3,4,5,6,7,8].map(i => (
+                <div key={i} style={{ height: '240px', background: 'var(--admin-card)', borderRadius: '4px', border: '1px solid var(--admin-border)' }} className="animate-pulse"></div>
               ))
             ) : filteredUsers.length > 0 ? (
               filteredUsers.map((user) => {
@@ -190,62 +190,52 @@ const AdminUserManagement = () => {
                     className="user-card"
                     style={{ 
                       background: 'var(--admin-card)', border: '1px solid var(--admin-border)', 
-                      borderRadius: '4px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem'
+                      borderRadius: '4px', padding: '1.5rem', display: 'flex', flexDirection: 'column', 
+                      alignItems: 'center', textAlign: 'center', position: 'relative', gap: '1rem'
                     }}
                   >
-                    <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'flex-start' }}>
-                      <div style={{ 
-                        width: '56px', height: '56px', borderRadius: '4px', 
-                        background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', 
-                        justifyContent: 'center', color: roleBadge.color, 
-                        fontSize: '1.5rem', fontWeight: '950', border: `1px solid ${roleBadge.color}44`
-                      }}>
-                        {user.full_name?.charAt(0) || <User size={24} />}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                          <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', color: 'white' }}>{user.full_name}</h3>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.6rem', fontWeight: '950', color: roleBadge.color, background: `${roleBadge.color}11`, padding: '0.15rem 0.5rem', borderRadius: '2px', border: `1px solid ${roleBadge.color}33` }}>
-                            {roleBadge.icon} {roleBadge.label}
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.8rem', fontWeight: '700' }}>
-                            <Mail size={12} /> {user.email}
-                          </div>
-                          {user.phone_number && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.8rem', fontWeight: '700' }}>
-                              <Phone size={12} /> {user.phone_number}
-                            </div>
-                          )}
-                        </div>
+                    {/* Compact History Action */}
+                    <button 
+                      onClick={() => handleSeeHistory(user)}
+                      title="View Booking History"
+                      style={{ 
+                        position: 'absolute', top: '1rem', right: '1rem',
+                        padding: '0.4rem', borderRadius: '4px', background: 'var(--admin-bg)', 
+                        color: 'var(--admin-text-secondary)', border: '1px solid var(--admin-border)', cursor: 'pointer',
+                        transition: '0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = 'var(--admin-brand)'}
+                      onMouseLeave={(e) => e.currentTarget.style.color = 'var(--admin-text-secondary)'}
+                    >
+                      <History size={14} />
+                    </button>
+
+                    <div style={{ 
+                      width: '64px', height: '64px', borderRadius: '4px', 
+                      background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', 
+                      justifyContent: 'center', color: roleBadge.color, 
+                      fontSize: '1.75rem', fontWeight: '950', border: `1px solid ${roleBadge.color}44`,
+                      marginBottom: '0.5rem'
+                    }}>
+                      {user.full_name?.charAt(0).toUpperCase() || <User size={28} />}
+                    </div>
+
+                    <div style={{ width: '100%' }}>
+                      <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1rem', fontWeight: '950', color: 'white', textTransform: 'uppercase' }}>{user.full_name}</h3>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.55rem', fontWeight: '950', color: roleBadge.color, background: `${roleBadge.color}11`, padding: '0.15rem 0.5rem', borderRadius: '2px', border: `1px solid ${roleBadge.color}33`, textTransform: 'uppercase' }}>
+                        {roleBadge.icon} {roleBadge.label}
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.75rem', borderTop: '1px solid var(--admin-border)', paddingTop: '1.25rem' }}>
-                      <select 
-                        value={user.role}
-                        onChange={(e) => handleUpdateRole(user.id, e.target.value)}
-                        style={{ 
-                          flex: 1, background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', 
-                          borderRadius: '4px', padding: '0.6rem', color: 'white', fontSize: '0.75rem', fontWeight: '900'
-                        }}
-                      >
-                        <option value="CUSTOMER">CUSTOMER</option>
-                        <option value="STAFF">STAFF</option>
-                        <option value="ADMIN">ADMIN</option>
-                      </select>
-                      
-                      <button 
-                        onClick={() => handleSeeHistory(user)}
-                        title="View Booking History"
-                        style={{ 
-                          padding: '0 1rem', borderRadius: '4px', background: 'var(--admin-bg)', 
-                          color: 'var(--admin-brand)', border: '1px solid var(--admin-border)', cursor: 'pointer'
-                        }}
-                      >
-                        <History size={16} />
-                      </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', width: '100%', borderTop: '1px solid var(--admin-border)', paddingTop: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.7rem', fontWeight: '700' }}>
+                        <Mail size={10} /> {user.email}
+                      </div>
+                      {user.phone_number && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.7rem', fontWeight: '700' }}>
+                          <Phone size={10} /> {user.phone_number}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

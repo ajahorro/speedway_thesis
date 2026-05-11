@@ -16,7 +16,7 @@ const CustomerDashboard = () => {
           Welcome back, {profile?.first_name || 'Driver'}
         </h1>
         <p style={{ color: 'var(--admin-text-secondary)', margin: 0, fontSize: '0.9rem', fontWeight: '600' }}>
-          Here is the current status of your fleet and upcoming operations.
+          Here is the current status of your fleet and upcoming services.
         </p>
       </div>
 

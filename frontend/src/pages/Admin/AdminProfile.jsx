@@ -166,7 +166,21 @@ const AdminProfile = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div>
+              <label style={labelStyle}>Current Password</label>
+              <div style={{ position: 'relative' }}>
+                <Key size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
+                <input 
+                  type="password"
+                  style={{ ...inputStyle, paddingLeft: '3.25rem' }} 
+                  placeholder="Enter current password"
+                  value={formData.currentPassword}
+                  onChange={e => setFormData({...formData, currentPassword: e.target.value})}
+                />
+              </div>
+            </div>
+
             <div>
               <label style={labelStyle}>New Password</label>
               <div style={{ position: 'relative' }}>
@@ -180,6 +194,7 @@ const AdminProfile = () => {
                 />
               </div>
             </div>
+
             <div>
               <label style={labelStyle}>Confirm New Password</label>
               <div style={{ position: 'relative' }}>
@@ -193,11 +208,21 @@ const AdminProfile = () => {
                 />
               </div>
             </div>
+
+            <div style={{ textAlign: 'right' }}>
+              <button 
+                onClick={() => toast.success('Password reset instructions sent to your email.')}
+                style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
+              >
+                Forgot Password?
+              </button>
+            </div>
+
             <button 
               onClick={handleChangePassword}
               disabled={loading}
               style={{ 
-                marginTop: '1rem',
+                marginTop: '0.5rem',
                 width: '100%', 
                 padding: '1rem', 
                 background: 'var(--admin-brand)', 

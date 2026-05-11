@@ -1,13 +1,19 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { Search, Clock, CreditCard, ExternalLink, RotateCw, Filter, Calendar, ArrowRight, User } from 'lucide-react';
+import { 
+  Clock, User, ChevronLeft, ChevronRight, 
+  AlertCircle, LayoutGrid, Calendar, Users,
+  Maximize2, ExternalLink, RefreshCcw, Search, CreditCard, RotateCw, Filter, ArrowRight
+} from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { logger } from '../../utils/logger';
 import toast from 'react-hot-toast';
 import { calculatePaymentStatus, getPaymentStatusUI } from '../../utils/paymentUtils';
+
+import AdminSchedulingGrid from './AdminSchedulingGrid';
 
 const AdminBookings = () => {
   const navigate = useNavigate();
@@ -19,7 +25,8 @@ const AdminBookings = () => {
     bookings: [],
     loading: true,
     searchTerm: location.state?.filter || '',
-    filterStatus: 'all'
+    filterStatus: 'all',
+    view: 'list' // New view state
   });
 
   // MEMOIZED FETCH: Prevents unnecessary function recreation
@@ -130,7 +137,15 @@ const AdminBookings = () => {
         title="BOOKING DIRECTORY"
         subtitle="Manage and monitor all vehicle detailing appointments."
         onRefresh={fetchBookings}
+        actionLabel={state.view === 'list' ? "SWITCH TO GRID VIEW" : "SWITCH TO LIST VIEW"}
+        onAction={() => setState(prev => ({ ...prev, view: prev.view === 'list' ? 'grid' : 'list' }))}
+        actionIcon={state.view === 'list' ? <LayoutGrid size={18} /> : <RotateCw size={18} />}
       />
+
+      {state.view === 'grid' ? (
+        <AdminSchedulingGrid onBack={() => setState(prev => ({ ...prev, view: 'list' }))} />
+      ) : (
+        <>
 
       <div style={{ background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', overflow: 'hidden', border: '1px solid var(--admin-border)', padding: '1rem' }}>
         <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '0.75rem' }}>
@@ -275,6 +290,8 @@ const AdminBookings = () => {
             </tbody>
           </table>
         </div>
+      )}
+        </>
       )}
     </div>
   );
