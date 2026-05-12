@@ -45,9 +45,9 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
       if (config.slots_per_hour) maxBays = config.slots_per_hour;
     }
 
-    // 1. Fetch ALL bookings and blocks for the day
-    const startOfDay = `${dateStr}T00:00:00Z`;
-    const endOfDay = `${dateStr}T23:59:59Z`;
+    // 1. Fetch ALL bookings and blocks for the day (Local String Matching)
+    const startOfDay = `${dateStr}T00:00:00`;
+    const endOfDay = `${dateStr}T23:59:59`;
 
     const { data: bookings } = await supabase
       .from('bookings')
@@ -71,7 +71,7 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
     }
 
     const now = new Date();
-    const localToday = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+    const localToday = now.toLocaleDateString('en-CA');
     const isToday = dateStr === localToday;
     const currentHour = now.getHours();
 

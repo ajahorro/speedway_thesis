@@ -64,12 +64,12 @@ export const segregateBookings = (bookings = [], config = SHOP_CONFIG) => {
  */
 export const calculateOccupancy = (hour, dateStr, activeBookings = [], blocks = [], config = SHOP_CONFIG) => {
   let count = 0;
-  const checkTime = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00Z`);
+  const checkTime = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00`);
   
   // Check Bookings (Granular Vehicle Occupancy)
   activeBookings.forEach(b => {
-    const start = new Date(b.start_datetime);
-    const end = new Date(b.end_datetime);
+    const start = new Date(b.start_datetime.substring(0, 19));
+    const end = new Date(b.end_datetime.substring(0, 19));
     
     if (checkTime >= start && checkTime < end) {
       // RELEASE LOGIC: Only count vehicles that are NOT completed

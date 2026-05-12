@@ -15,10 +15,7 @@ const DetailTimeline = ({
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {hours.map((hour) => {
         const allHourBookings = getBookingsForHour(hour);
-        const transientBookings = allHourBookings.filter(b => {
-          const duration = (new Date(b.end_datetime) - new Date(b.start_datetime)) / (1000 * 60);
-          return duration < config.FULL_DAY_THRESHOLD_MINUTES;
-        });
+        const transientBookings = allHourBookings;
         const block = getBlockForHour(hour);
         const occupancy = allHourBookings.reduce((sum, b) => sum + (b.vehicles?.length || 1), 0);
         const isFullyBooked = occupancy >= config.MAX_BAYS;
@@ -78,30 +75,57 @@ const DetailTimeline = ({
                 </div>
               )}
 
-              {transientBookings.map((booking, bIdx) => (
-                <div 
-                  key={booking.id} 
-                  onClick={() => onBookingClick(booking.id)} 
-                  style={{ 
-                    background: 'var(--admin-bg)', border: `1px solid ${COLORS.BORDER}`, 
-                    borderLeft: `4px solid ${bIdx === 0 ? COLORS.BRAND : '#8b5cf6'}`, 
-                    borderRadius: '4px', padding: '1rem', cursor: 'pointer',
-                    transition: '0.2s', zIndex: 2,
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <Tag size={12} color={bIdx === 0 ? COLORS.BRAND : '#8b5cf6'} />
-                      <span style={{ fontSize: '0.6rem', fontWeight: '950', textTransform: 'uppercase', color: COLORS.MUTED }}>Session Assigned</span>
+              {transientBookings.map((booking) => {
+                const vehicle = booking.vehicles?.[0] || {};
+                const plateNumber = vehicle.plate_number || 'NO PLATE';
+                const vehicleInfo = `${vehicle.brand || ''} ${vehicle.model || ''}`.trim() || 'Generic Vehicle';
+                const serviceName = vehicle.services?.[0]?.service_name || 'Standard Service';
+                
+                // 🎨 STATUS-BASED COLORS (REQ-ADM-08)
+                const statusColors = {
+                  'pending': '#f59e0b',
+                  'confirmed': '#10b981',
+                  'in_progress': '#3b82f6',
+                  'completed': '#6b7280'
+                };
+                const accentColor = statusColors[booking.status?.toLowerCase()] || COLORS.BRAND;
+
+                return (
+                  <div 
+                    key={booking.id} 
+                    onClick={() => onBookingClick(booking.id)} 
+                    title={`Staff: ${booking.staff?.full_name || 'Unassigned'} | Total: ₱${booking.total_amount || 0}`}
+                    style={{ 
+                      background: 'var(--admin-card-light)', 
+                      border: `1px solid ${COLORS.BORDER}`, 
+                      borderLeft: `4px solid ${accentColor}`, 
+                      borderRadius: '4px', padding: '0.85rem 1.25rem', 
+                      cursor: 'pointer', transition: '0.2s', zIndex: 2,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      display: 'flex', flexDirection: 'column', gap: '0.25rem'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'translateX(4px)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'translateX(0)'}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <div style={{ padding: '0.2rem 0.4rem', background: `${accentColor}22`, color: accentColor, borderRadius: '2px', fontSize: '0.55rem', fontWeight: '950', textTransform: 'uppercase' }}>
+                          {booking.status || 'SCHEDULED'}
+                        </div>
+                        <span style={{ fontSize: '0.65rem', fontWeight: '950', color: COLORS.MUTED }}>{plateNumber}</span>
+                      </div>
+                      <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'white', opacity: 0.8 }}>{vehicleInfo}</span>
                     </div>
-                    <div style={{ fontSize: '0.6rem', fontWeight: '900', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '2px', color: COLORS.MUTED }}>
-                      {booking.vehicles?.length || 0} UNITS
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '0.25rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontSize: '0.9rem', fontWeight: '950', color: 'white' }}>{booking.customer?.full_name}</span>
+                        <span style={{ fontSize: '0.65rem', fontWeight: '800', color: accentColor, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{serviceName}</span>
+                      </div>
                     </div>
                   </div>
-                  <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1rem', fontWeight: '950', color: 'white' }}>{booking.customer?.full_name}</h3>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );

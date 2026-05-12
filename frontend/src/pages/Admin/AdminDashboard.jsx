@@ -91,14 +91,14 @@ const AdminDashboard = () => {
     setState(prev => ({ ...prev, loading: true }));
     try {
       logger.admin('Synchronizing dashboard intelligence...');
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA');
 
       // 1. Today's Bookings
       const { count: todayCount } = await supabase
         .from('bookings')
         .select('*', { count: 'exact', head: true })
-        .gte('start_datetime', `${today}T00:00:00.000Z`)
-        .lte('start_datetime', `${today}T23:59:59.999Z`);
+        .gte('start_datetime', `${today}T00:00:00`)
+        .lte('start_datetime', `${today}T23:59:59`);
 
       // 2. Total Bookings
       const { count: totalCount } = await supabase
@@ -132,11 +132,11 @@ const AdminDashboard = () => {
         .is('staff_id', null)
         .not('status', 'ilike', 'cancelled');
 
-      // 6. Needs Attention - Flagged for Review (Financial Discrepancies)
+      // 6. Needs Attention - Flagged for Review (Rejected Payments)
       const { count: flaggedCount } = await supabase
-        .from('bookings')
+        .from('payments')
         .select('*', { count: 'exact', head: true })
-        .eq('payment_status', 'Flagged for Review');
+        .eq('status', 'REJECTED');
 
       // 7. Needs Attention - Overdue Services
       // Definition: Past start time but not completed/cancelled
@@ -194,18 +194,21 @@ const AdminDashboard = () => {
 
       pendingItems?.forEach(item => pItems.push({ id: item.id, type: 'PAYMENT', title: `Verification Needed: ₱${item.amount}`, sub: item.bookings?.customer?.full_name, color: '#f59e0b' }));
 
-      // Add flagged items (Supreme Court)
-      const { data: flaggedItemsRaw } = await supabase.from('bookings').select('id, customer_id').eq('payment_status', 'Flagged for Review').limit(2);
+      // Add rejected payments
+      const { data: rejectedRaw } = await supabase.from('payments').select('id, amount, booking_id').eq('status', 'REJECTED').limit(2);
       
-      const flaggedItems = [];
-      if (flaggedItemsRaw && flaggedItemsRaw.length > 0) {
-        for (const item of flaggedItemsRaw) {
-          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).single();
-          flaggedItems.push({ ...item, customer: { full_name: profile?.full_name || 'Unknown' } });
+      const rejectedItems = [];
+      if (rejectedRaw && rejectedRaw.length > 0) {
+        for (const item of rejectedRaw) {
+          const { data: b } = await supabase.from('bookings').select('customer_id').eq('id', item.booking_id).single();
+          if (b) {
+            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', b.customer_id).single();
+            rejectedItems.push({ ...item, bookings: { customer: { full_name: profile?.full_name || 'Unknown' } } });
+          }
         }
       }
 
-      flaggedItems.forEach(item => pItems.push({ id: item.id, type: 'AUDIT', title: `Audit Required: ${item.customer?.full_name}`, sub: 'Payment mismatch detected.', color: '#ef4444' }));
+      rejectedItems.forEach(item => pItems.push({ id: item.id, type: 'ALERT', title: `Rejected Payment: ₱${item.amount}`, sub: item.bookings?.customer?.full_name, color: '#ef4444' }));
 
       setState({
         loading: false,

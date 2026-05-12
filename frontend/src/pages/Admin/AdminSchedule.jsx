@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { 
-  Calendar as CalendarIcon, ShieldAlert, Lock, Zap, CheckCircle2
-} from 'lucide-react';
+import { Calendar as CalendarIcon, ShieldAlert, Lock, Zap, CheckCircle2, RotateCw } from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -26,7 +24,10 @@ const AdminSchedule = () => {
   const isMobile = useMediaQuery('(max-width: 1024px)');
   
   // State: Navigation & Context
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
   const [viewDate, setViewDate] = useState(new Date());
   
   // State: Data
@@ -55,6 +56,19 @@ const AdminSchedule = () => {
 
   useEffect(() => {
     fetchDailyContext();
+
+    // 🛡️ REAL-TIME SYNCHRONIZATION (REQ-ADM-02)
+    const channel = supabase.channel('admin-schedule-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => {
+        fetchDailyContext();
+        fetchMonthData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'blocked_slots' }, () => {
+        fetchDailyContext();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [selectedDate]);
 
   const fetchMonthData = async () => {
@@ -81,22 +95,35 @@ const AdminSchedule = () => {
   const fetchDailyContext = async () => {
     setLoading(true);
     try {
-      // Widen the net to catch bookings that overlap the local day (UTC offset buffer)
-      const fetchStart = `${selectedDate}T00:00:00-12:00`;
-      const fetchEnd = `${selectedDate}T23:59:59+12:00`;
+      // 🛡️ 3-DAY BUFFER: Fetch yesterday, today, and tomorrow to capture any timezone shifts
+      const d = new Date(selectedDate);
+      const prev = new Date(d); prev.setDate(d.getDate() - 1);
+      const next = new Date(d); next.setDate(d.getDate() + 1);
       
-      const { data: bookingsData, error: bookingsError } = await supabase
+      const fetchStart = `${prev.toLocaleDateString('en-CA')}T00:00:00Z`;
+      const fetchEnd = `${next.toLocaleDateString('en-CA')}T23:59:59Z`;
+      
+      const { data: bookingsRaw, error: bookingsError } = await supabase
         .from('bookings')
         .select(`
           *,
-          customer:profiles!bookings_customer_id_fkey(full_name, email, phone_number),
-          vehicles:booking_vehicles(*)
+          staff:profiles!bookings_staff_id_fkey(full_name),
+          vehicles:booking_vehicles(*, services:booking_vehicle_services(service_name))
         `)
         .lte('start_datetime', fetchEnd)
         .gte('end_datetime', fetchStart)
         .not('status', 'ilike', 'cancelled');
 
       if (bookingsError) throw bookingsError;
+
+      // 🛡️ MANUAL PROFILE RESOLUTION
+      const bookingsData = [];
+      if (bookingsRaw && bookingsRaw.length > 0) {
+        for (const b of bookingsRaw) {
+          const { data: profile } = await supabase.from('profiles').select('full_name, email, phone_number').eq('id', b.customer_id).single();
+          bookingsData.push({ ...b, customer: profile || { full_name: 'System/Guest User' } });
+        }
+      }
 
       const { data: blocksData, error: blocksError } = await supabase
         .from('blocked_slots')
@@ -203,12 +230,11 @@ const AdminSchedule = () => {
 
   const getBookingsForHour = (hour) => {
     return bookings.filter(b => {
-      const bStart = new Date(b.start_datetime);
-      const bEnd = new Date(b.end_datetime);
+      // 🛡️ NAIVE LOCAL COMPARISON: Treat DB string as a wall-clock anchor
+      const bStart = new Date(b.start_datetime.substring(0, 19));
+      const bEnd = new Date(b.end_datetime.substring(0, 19));
       
-      // 🛡️ TIMEZONE RELAXATION: Construct comparison in UTC to match Supabase storage
-      const [y, m, d] = selectedDate.split('-').map(Number);
-      const checkTime = new Date(Date.UTC(y, m - 1, d, hour, 0, 0, 0));
+      const checkTime = new Date(`${selectedDate}T${String(hour).padStart(2, '0')}:00:00`);
       
       return checkTime >= bStart && checkTime < bEnd;
     });
@@ -230,7 +256,15 @@ const AdminSchedule = () => {
         title="SERVICE SCHEDULE" 
         subtitle="Manage resource occupancy and daily throughput."
         onRefresh={fetchDailyContext}
-      />
+      >
+        <button 
+          onClick={() => { fetchDailyContext(); fetchMonthData(); toast.success('Syncing pipeline...'); }}
+          style={{ background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-secondary)', padding: '0.6rem 1rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+        >
+          <RotateCw size={14} className={loading ? 'animate-spin' : ''} />
+          EMERGENCY SYNC
+        </button>
+      </PageHeader>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '350px 1fr', gap: '2rem', marginTop: '0.5rem' }}>
         {/* Left Panel: Calendar & Controls */}
@@ -267,7 +301,7 @@ const AdminSchedule = () => {
             {/* Days Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: 'var(--admin-border)' }}>
               {(() => {
-                const today = new Date().toISOString().split('T')[0];
+                const today = new Date().toLocaleDateString('en-CA');
                 const year  = viewDate.getFullYear();
                 const month = viewDate.getMonth();
                 const firstDay = new Date(year, month, 1).getDay();
@@ -410,7 +444,7 @@ const AdminSchedule = () => {
           <div style={{ padding: '1.5rem' }}>
             <OccupancyShelf 
               bookings={bookings} 
-              onBookingClick={(id) => navigate(`/admin/bookings/${id}`)} 
+                  onBookingClick={(id) => navigate(`/admin/bookings/${id}`)}
               config={settings}
             />
 
