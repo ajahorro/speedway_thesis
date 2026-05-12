@@ -69,7 +69,7 @@ const AdminSchedule = () => {
         .select('id, start_datetime, end_datetime, status')
         .lte('start_datetime', lastDay)
         .gte('end_datetime', firstDay)
-        .neq('status', 'CANCELLED');
+        .not('status', 'ilike', 'cancelled');
 
       if (error) throw error;
       setAllMonthBookings(data || []);
@@ -81,9 +81,10 @@ const AdminSchedule = () => {
   const fetchDailyContext = async () => {
     setLoading(true);
     try {
-      const startOfDay = `${selectedDate}T00:00:00Z`;
-      const endOfDay = `${selectedDate}T23:59:59Z`;
-
+      // Widen the net to catch bookings that overlap the local day (UTC offset buffer)
+      const fetchStart = `${selectedDate}T00:00:00-12:00`;
+      const fetchEnd = `${selectedDate}T23:59:59+12:00`;
+      
       const { data: bookingsData, error: bookingsError } = await supabase
         .from('bookings')
         .select(`
@@ -91,9 +92,9 @@ const AdminSchedule = () => {
           customer:profiles!bookings_customer_id_fkey(full_name, email, phone_number),
           vehicles:booking_vehicles(*)
         `)
-        .lte('start_datetime', endOfDay)
-        .gte('end_datetime', startOfDay)
-        .neq('status', 'CANCELLED');
+        .lte('start_datetime', fetchEnd)
+        .gte('end_datetime', fetchStart)
+        .not('status', 'ilike', 'cancelled');
 
       if (bookingsError) throw bookingsError;
 
@@ -204,8 +205,11 @@ const AdminSchedule = () => {
     return bookings.filter(b => {
       const bStart = new Date(b.start_datetime);
       const bEnd = new Date(b.end_datetime);
-      const checkTime = new Date(selectedDate);
-      checkTime.setHours(hour, 0, 0, 0);
+      
+      // 🛡️ TIMEZONE RELAXATION: Construct comparison in UTC to match Supabase storage
+      const [y, m, d] = selectedDate.split('-').map(Number);
+      const checkTime = new Date(Date.UTC(y, m - 1, d, hour, 0, 0, 0));
+      
       return checkTime >= bStart && checkTime < bEnd;
     });
   };
@@ -276,7 +280,11 @@ const AdminSchedule = () => {
                   const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const isToday = dateStr === today;
                   const isSelected = dateStr === selectedDate;
-                  const hasBookings = allMonthBookings.some(b => new Date(b.start_datetime).toISOString().split('T')[0] === dateStr);
+                  const hasBookings = allMonthBookings.some(b => {
+                    const d = new Date(b.start_datetime);
+                    const bDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    return bDate === dateStr;
+                  });
 
                   cells.push(
                     <div

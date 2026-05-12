@@ -15,7 +15,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
   const canProceed = vehicle?.type && 
                     vehicle?.brand?.trim()?.length >= 1 && 
                     vehicle?.model?.trim()?.length >= 1 && 
-                    vehicle?.plateNumber?.trim()?.length >= 1 && 
+                    vehicle?.plateNumber?.trim()?.length >= 3 && 
                     currentServices.length > 0;
 
   // Generate helpful tooltip for disabled button
@@ -23,7 +23,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
     if (!vehicle?.type) return "Please select a vehicle type";
     if (!vehicle?.brand?.trim()) return "Please enter the vehicle brand";
     if (!vehicle?.model?.trim()) return "Please enter the vehicle model";
-    if (!vehicle?.plateNumber?.trim()) return "Please enter the plate number";
+    if (!vehicle?.plateNumber?.trim() || vehicle.plateNumber.length < 3) return "Plate number must be at least 3 characters";
     if (currentServices.length === 0) return "Please select at least one service";
     return "";
   };
@@ -85,8 +85,17 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           
           {/* Use Same Vehicle Toggle */}
           {vehicle?.useSameVehicle !== undefined && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.5rem 1rem', borderRadius: '20px', border: '1px solid var(--admin-brand)' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-brand)', textTransform: 'uppercase' }}>Use Same Vehicle?</span>
+            <div style={{ 
+              display: 'flex', alignItems: 'center', gap: '1rem', 
+              background: 'rgba(var(--admin-brand-rgb), 0.05)', 
+              padding: '0.6rem 1.25rem', borderRadius: '8px', 
+              border: `1px solid ${vehicle.useSameVehicle ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
+              transition: 'all 0.3s ease'
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: '950', color: vehicle.useSameVehicle ? 'var(--admin-brand)' : 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Asset Lock</span>
+                <span style={{ fontSize: '0.8rem', fontWeight: '800', color: 'white' }}>Use Same Vehicle</span>
+              </div>
               <button
                 onClick={() => {
                   const updatedVehicles = [...bookingData.vehicles];
@@ -94,14 +103,15 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                   setBookingData({ ...bookingData, vehicles: updatedVehicles });
                 }}
                 style={{
-                  width: '44px', height: '22px', borderRadius: '11px', background: vehicle.useSameVehicle ? 'var(--admin-brand)' : '#333',
-                  position: 'relative', border: 'none', cursor: 'pointer', transition: 'all 0.3s ease'
+                  width: '40px', height: '20px', borderRadius: '10px', background: vehicle.useSameVehicle ? 'var(--admin-brand)' : '#333',
+                  position: 'relative', border: 'none', cursor: 'pointer', transition: 'all 0.3s ease',
+                  boxShadow: vehicle.useSameVehicle ? '0 0 10px rgba(var(--admin-brand-rgb), 0.4)' : 'none'
                 }}
               >
                 <div style={{
-                  width: '18px', height: '18px', borderRadius: '50%', background: 'white',
-                  position: 'absolute', top: '2px', left: vehicle.useSameVehicle ? '24px' : '2px',
-                  transition: 'all 0.3s ease', boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                  width: '14px', height: '14px', borderRadius: '50%', background: 'white',
+                  position: 'absolute', top: '3px', left: vehicle.useSameVehicle ? '23px' : '3px',
+                  transition: 'all 0.3s ease'
                 }} />
               </button>
             </div>

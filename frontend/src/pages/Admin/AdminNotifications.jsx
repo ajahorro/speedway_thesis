@@ -146,7 +146,8 @@ const AdminNotifications = () => {
       // Step 3: Insert one notification row per profile
       const broadcastNotifications = profiles.map(p => ({
         user_id: p.id,
-        type: 'ANNOUNCEMENT',
+        title: 'System Announcement 📣',
+        notification_type: 'ANNOUNCEMENT',
         message: broadcastForm.message,
         is_read: false
       }));
@@ -162,8 +163,9 @@ const AdminNotifications = () => {
       const { error: auditError } = await supabase
         .from('audit_logs')
         .insert({
-          actor_id: user.id,
-          action: 'BROADCAST_SENT',
+          action_type: 'BROADCAST_SENT',
+          actor_name: user.email,
+          actor_role: 'ADMIN',
           details: `Global broadcast transmitted to ${profiles.length} users. Message: "${broadcastForm.message.substring(0, 100)}${broadcastForm.message.length > 100 ? '...' : ''}"`,
           created_at: new Date().toISOString()
         });
@@ -327,10 +329,11 @@ const AdminNotifications = () => {
                   <Bell size={20} color={notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)'} />
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '0.65rem', fontWeight: '950', color: notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)' }}>{notif.type}</span>
+                      <span style={{ fontSize: '0.65rem', fontWeight: '950', color: notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)' }}>{notif.notification_type || notif.type}</span>
                       <span style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)' }}>{new Date(notif.created_at).toLocaleString()}</span>
                     </div>
-                    <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700' }}>{notif.message}</p>
+                    <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white' }}>{notif.title || 'Signal Received'}</p>
+                    <p style={{ margin: 0, fontSize: '0.85rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>{notif.message}</p>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>

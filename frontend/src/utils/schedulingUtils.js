@@ -64,7 +64,7 @@ export const segregateBookings = (bookings = [], config = SHOP_CONFIG) => {
  */
 export const calculateOccupancy = (hour, dateStr, activeBookings = [], blocks = [], config = SHOP_CONFIG) => {
   let count = 0;
-  const checkTime = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00`);
+  const checkTime = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00Z`);
   
   // Check Bookings (Granular Vehicle Occupancy)
   activeBookings.forEach(b => {

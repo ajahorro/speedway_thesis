@@ -36,6 +36,7 @@ const AdminPayments = () => {
       const { data: paymentData, error: paymentError } = await supabase
         .from('payments')
         .select(`*`)
+        .neq('method', 'Cash')
         .order('created_at', { ascending: false });
 
       if (paymentError) throw paymentError;

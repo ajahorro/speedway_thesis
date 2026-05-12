@@ -45,8 +45,12 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
       }));
       
       try {
+        const targetAmount = bookingData.payment.type === 'Full' ? grandTotal : Math.ceil(grandTotal * 0.3);
+        
         const formData = new FormData();
         formData.append('receipt', file);
+        formData.append('bookingId', bookingData.id || 'PENDING');
+        formData.append('requiredAmount', targetAmount);
 
         const response = await fetch('http://localhost:3000/api/ocr/verify-receipt', {
           method: 'POST',
@@ -59,10 +63,9 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         if (!result.success) throw new Error(result.error);
 
         const extractedData = result.data;
-        const requiredAmount = bookingData.payment.type === 'Full' ? grandTotal : Math.ceil(grandTotal * 0.3);
         
-        // VALIDATION: Compare extracted amount with required amount
-        const isAmountMatched = extractedData.amount >= (requiredAmount * 0.95); // 5% margin for rounding
+        // 🛡️ THESIS FLOW: Use the Authoritative Backend Status
+        const isAmountMatched = result.isMatch;
 
         setScanStep('FINALIZING AUDIT...');
         await new Promise(resolve => setTimeout(resolve, 800));
@@ -111,6 +114,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
   );
 
   const handleConfirmSubmit = () => {
+    if (isSubmitting) return;
     setShowConfirm(false);
     onSubmit();
   };
@@ -556,7 +560,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
               <button 
                 onClick={handleConfirmSubmit}
                 disabled={isSubmitting}
-                style={{ flex: 1, padding: '1rem', background: 'var(--admin-brand)', border: 'none', borderRadius: 'var(--admin-radius-md)', fontWeight: '900', color: '#fff', cursor: isSubmitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                style={{ flex: 1, padding: '1rem', background: 'var(--admin-brand)', border: 'none', borderRadius: 'var(--admin-radius-md)', fontWeight: '900', color: '#fff', cursor: isSubmitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: isSubmitting ? 0.7 : 1 }}
               >
                 {isSubmitting ? (
                   <>

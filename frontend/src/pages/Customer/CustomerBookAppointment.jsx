@@ -11,10 +11,10 @@ import Step4ReviewPayment from '../../components/BookingWizard/Step4ReviewPaymen
 import BookingSuccess from '../../components/BookingWizard/BookingSuccess';
 import { SERVICES_DATA } from '../../data/servicesCatalog';
 
-// Utility for Data Integrity: Find service in catalog and get current price
-const getCatalogService = (id, type) => {
+// Utility for Data Integrity: Find service in catalog by name and get current price
+const getCatalogServiceByName = (name, type) => {
   for (const cat in SERVICES_DATA) {
-    const svc = SERVICES_DATA[cat].find(s => s.id === id);
+    const svc = SERVICES_DATA[cat].find(s => s.name === name);
     if (svc) {
       const price = svc.prices[type] || 0;
       return { ...svc, price };
@@ -55,8 +55,7 @@ const CustomerBookAppointment = () => {
         brand: v.brand || '',
         model: v.model || '',
         plateNumber: (v.plate_number || '').toUpperCase(),
-        useSameVehicle: true, // Default to true for rebookings
-        services: v.services?.map(s => getCatalogService(s.service_id, vType)).filter(Boolean) || []
+        services: v.services?.map(s => getCatalogServiceByName(s.service_name, vType)).filter(Boolean) || []
       };
     }) : [
       {
@@ -146,7 +145,7 @@ const CustomerBookAppointment = () => {
         </button>
         <div>
           <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: '950', color: 'white', textTransform: 'uppercase' }}>Book Appointment</h1>
-          {isRebooking && <div style={{ fontSize: '0.75rem', color: 'var(--admin-brand)', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.2rem' }}>🔄 Fast-Track Rebooking Active</div>}
+          {isRebooking && <div className="pulse-animation" style={{ fontSize: '0.75rem', color: 'var(--admin-brand)', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.2rem' }}>🔄 Fast-Track Rebooking Active</div>}
         </div>
       </div>
 

@@ -435,8 +435,53 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
 
     console.log(`✅ [AI OCR] EXTRACTION SUCCESSFUL:`, extractedData);
 
+    // 🛡️ FINANCIAL INTEGRITY GUARD: Comparison Logic
+    const extractedAmount = parseFloat(extractedData.amount);
+    const requiredAmount = parseFloat(req.body.requiredAmount);
+    const bookingId = req.body.bookingId;
+    
+    // Check for mismatch (handling minor precision differences)
+    const isMatch = Math.abs(extractedAmount - requiredAmount) < 1.0;
+    
+    // THESIS FLOW: Mismatches are 'Flagged for Review', Matches are 'Confirmed'
+    const finalStatus = isMatch ? 'Confirmed' : 'Flagged for Review';
+
+    console.log(`🔍 [AUDIT] Comparison: Extracted ₱${extractedAmount} vs Required ₱${requiredAmount}`);
+    console.log(`📊 [AUDIT] Result: ${isMatch ? '✅ MATCH' : '⚠️ MISMATCH'} -> Status: ${finalStatus}`);
+
+    // Update the booking in Supabase using Service Role
+    const { error: updateError } = await supabaseAdmin
+      .from('bookings')
+      .update({ 
+        payment_status: finalStatus,
+        ocr_metadata: {
+          ...extractedData,
+          requiredAmount,
+          isMatch,
+          auditedAt: new Date().toISOString()
+        }
+      })
+      .eq('id', bookingId);
+
+    if (updateError) throw updateError;
+
+    // Record in Master Audit Log
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        booking_id: bookingId,
+        action_type: 'AI_VERIFICATION_COMPLETE',
+        actor_name: 'AI_AUDITOR',
+        actor_role: 'SYSTEM',
+        details: `AI extracted ₱${extractedAmount}. Required ₱${requiredAmount}. Match: ${isMatch}. Status: ${finalStatus}`
+      });
+    } catch (logErr) {
+      console.warn('⚠️ Audit logging failed, but booking was updated.');
+    }
+
     res.json({
       success: true,
+      status: finalStatus,
+      isMatch: isMatch,
       data: extractedData
     });
 
@@ -447,6 +492,30 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
       error: 'AI analysis failed. Please ensure the photo is clear and try again.' 
     });
   }
+});
+
+/**
+ * 🛡️ REQ-ADM-12: Simulated AI Audit for Admin Dashboard
+ * Provides an immediate, reliable 'Audit Simulation' for thesis defense.
+ */
+app.post('/admin/verify-payment-ocr', async (req, res) => {
+  const { receiptUrl } = req.body;
+  console.log(`🤖 [ADMIN AI] SIMULATING SCAN FOR: ${receiptUrl?.substring(0, 50)}...`);
+
+  // Simulate AI Processing Latency
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  const mockRef = Math.random().toString().slice(2, 11);
+  
+  res.json({
+    success: true,
+    data: {
+      referenceNumber: `GC-${mockRef}`,
+      confidence: 0.98,
+      isMatch: true,
+      isSimulation: true
+    }
+  });
 });
 
 app.listen(PORT, () => {

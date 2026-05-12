@@ -14,6 +14,13 @@ import { emitEvent, EVENTS } from './eventEngine';
  */
 export const createBooking = async (customerId, bookingData) => {
   const vehicles = bookingData.vehicles || [];
+  
+  // 🛡️ INTEGRITY SHIELD: Prevent 'Ghost Bookings' (REQ-SYS-01)
+  if (vehicles.length === 0) {
+    console.error('CRITICAL: Attempted to create a booking without any vehicles.');
+    throw new Error('SYSTEM ERROR: No vehicles provided for this booking session. Operation aborted for integrity.');
+  }
+
   const totalAmount = vehicles.reduce((total, v) => {
     return total + (v.services || []).reduce((sub, s) => sub + s.price, 0);
   }, 0);

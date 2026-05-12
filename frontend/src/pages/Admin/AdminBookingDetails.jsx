@@ -6,7 +6,7 @@ import {
   History, CheckCircle, XCircle, AlertCircle, MessageCircle,
   Hash, Calendar, Phone, Shield, Activity, Play, CheckCircle2,
   Package, Truck, Trash2, Banknote, Loader2, Eye, ArrowRight, X, UserX, Box,
-  Send, ShieldCheck, ShieldAlert, Image as ImageIcon, Plus, Zap
+  Send, ShieldCheck, ShieldAlert, Image as ImageIcon, Plus, Zap, TrendingUp
 } from 'lucide-react';
 import { SERVICES_DATA } from '../../data/servicesCatalog';
 import { calculateOccupancy, filterActiveBookings } from '../../utils/schedulingUtils';
@@ -31,6 +31,7 @@ const AdminBookingDetails = () => {
   const [paymentModal, setPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
   const [serviceModal, setServiceModal] = useState({ open: false, vehicleId: null });
   const [historyModal, setHistoryModal] = useState(false);
   const [userBookings, setUserBookings] = useState([]);
@@ -314,6 +315,15 @@ const AdminBookingDetails = () => {
 
   const handleRecordPayment = async () => {
     if (!paymentAmount || Number(paymentAmount) <= 0) return toast.error('Enter a valid amount');
+    
+    // 🛡️ LEDGER HARD CAP (REQ-ADM-05)
+    if (Number(paymentAmount) > balance) {
+      return toast.error(`Excess payment detected. Maximum allowed: ₱${balance.toLocaleString()}`, {
+        icon: '⚠️',
+        style: { border: '2px solid #ef4444', background: '#15171A', color: '#fff' }
+      });
+    }
+
     setSubmittingPayment(true);
     const toastId = toast.loading('Recording manual payment...');
     try {
@@ -375,7 +385,7 @@ const AdminBookingDetails = () => {
         .lte('start_datetime', newEndDatetime)
         .gte('end_datetime', booking.start_datetime);
 
-      const { data: blocks } = await supabase.from('blocked_slots').select('*').eq('date', booking.start_datetime.split('T')[0]);
+      const { data: blocks } = await supabase.from('blocked_slots').select('*').eq('block_date', booking.start_datetime.split('T')[0]);
 
       // Check each hour from now until the new end time
       const startH = new Date(booking.start_datetime).getHours();
@@ -416,8 +426,9 @@ const AdminBookingDetails = () => {
         details: `Added ${service.name} to ${v.make} ${v.model}. Duration extended by ${extraMinutes}m.`
       });
 
-      toast.success('Service added and schedule synchronized.', { id: toastId });
+      toast.success(`Service Added: ${service.name}. Total updated.`, { id: toastId });
       fetchBookingDetails();
+      fetchPayments(); // Refresh balance
       setServiceModal({ open: false, vehicleId: null });
     } catch (err) {
       toast.error(err.message || 'Validation failed', { id: toastId });
@@ -513,6 +524,7 @@ const AdminBookingDetails = () => {
   const pendingVerification = bookingPayments.find(p => p.status === 'FOR_VERIFICATION');
   const totalPaid = bookingPayments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
   const balance = Math.max(0, (booking.total_amount || 0) - totalPaid);
+  const surplus = Math.max(0, totalPaid - (booking.total_amount || 0));
   const isLocked = booking.status === 'cancelled';
 
   return (
@@ -615,36 +627,66 @@ const AdminBookingDetails = () => {
               </table>
             </div>
 
+            {/* 💰 DYNAMIC FINANCIAL LEDGER - REQ-ADM-05 */}
             <div style={{ 
               padding: '1rem', 
-              background: balance === 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)', 
+              background: surplus > 0 ? 'rgba(59, 130, 246, 0.05)' : (balance <= 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)'), 
               borderRadius: '4px', 
               textAlign: 'center', 
-              border: `1px solid ${balance === 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
-              color: balance === 0 ? '#10b981' : '#f59e0b', 
+              border: `1px solid ${surplus > 0 ? 'rgba(59, 130, 246, 0.3)' : (balance <= 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)')}`,
+              color: surplus > 0 ? '#3b82f6' : (balance <= 0 ? '#10b981' : '#ef4444'), 
               fontSize: '0.8rem', 
               fontWeight: '950',
               textTransform: 'uppercase', 
               letterSpacing: '0.8px',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '0.75rem'
+              gap: '0.4rem',
+              marginBottom: '1rem'
             }}>
-              {balance === 0 ? (
-                <><CheckCircle2 size={16} /> ACCOUNT SETTLED • NO BALANCE DUE</>
-              ) : (
-                <><AlertCircle size={16} /> ATTENTION: OUTSTANDING BALANCE ₱{balance.toLocaleString()}</>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                {surplus > 0 ? (
+                  <><TrendingUp size={16} /> ACCOUNT OVERPAID • SURPLUS: ₱{surplus.toLocaleString()}</>
+                ) : (
+                  balance <= 0 ? (
+                    <><CheckCircle2 size={16} /> ACCOUNT SETTLED • FULLY PAID</>
+                  ) : (
+                    <><ShieldAlert size={16} /> ATTENTION: OUTSTANDING BALANCE ₱{balance.toLocaleString()}</>
+                  )
+                )}
+              </div>
+              {balance <= 0 && !isLocked && (
+                <button 
+                  onClick={() => setShowManualInput(!showManualInput)}
+                  style={{ background: 'transparent', border: 'none', color: 'inherit', fontSize: '0.6rem', fontWeight: '950', textDecoration: 'underline', cursor: 'pointer', opacity: 0.6, marginTop: '0.25rem' }}
+                >
+                  {showManualInput ? 'HIDE OVERRIDE' : 'ENABLE MANUAL ENTRY OVERRIDE'}
+                </button>
               )}
             </div>
 
-            {balance > 0 && !isLocked && (
-              <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem' }}>
-                <input 
-                  type="number" placeholder="Enter Amount..." value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)}
-                  style={{ flex: 1, padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '0.5rem', color: 'white', fontWeight: '900', outline: 'none' }} 
-                />
-                <button onClick={handleRecordPayment} style={{ padding: '0 1.5rem', background: 'var(--admin-brand)', color: 'white', borderRadius: '0.5rem', border: 'none', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer' }}>RECORD PAYMENT</button>
+            {/* Re-activates if balance > 0 OR override is enabled */}
+            {(balance > 0 || showManualInput) && !isLocked && (
+              <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.75rem', animation: 'fadeIn 0.3s ease' }}>
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <div style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-brand)', fontWeight: '950' }}>₱</div>
+                  <input 
+                    type="number" 
+                    placeholder={balance > 0 ? "Record Top-up Payment..." : "Record Manual Override..."}
+                    value={paymentAmount} 
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    style={{ width: '100%', padding: '0.85rem 0.85rem 0.85rem 2rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '0.5rem', color: 'white', fontWeight: '900', outline: 'none' }} 
+                  />
+                </div>
+                <button 
+                  onClick={handleRecordPayment} 
+                  disabled={submittingPayment}
+                  style={{ padding: '0 1.5rem', background: 'var(--admin-brand)', color: 'white', borderRadius: '0.5rem', border: 'none', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer', opacity: submittingPayment ? 0.5 : 1 }}
+                >
+                  {submittingPayment ? 'SAVING...' : 'RECORD PAYMENT'}
+                </button>
               </div>
             )}
           </div>
@@ -694,29 +736,35 @@ const AdminBookingDetails = () => {
                             <button 
                               onClick={() => updateVehicleStatus(v.id, v.status === 'in_progress' ? 'completed' : 'in_progress')}
                               style={{ 
-                                background: v.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : 'var(--admin-bg)', 
-                                border: `1px solid ${v.status === 'completed' ? '#10b981' : 'var(--admin-border)'}`, 
-                                padding: '0.4rem 0.8rem', borderRadius: '4px', color: v.status === 'completed' ? '#10b981' : 'var(--admin-text-secondary)', 
-                                cursor: 'pointer', fontSize: '0.6rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem'
+                                background: v.status === 'completed' ? '#10b981' : (v.status === 'in_progress' ? '#a855f7' : 'var(--admin-brand)'), 
+                                border: 'none',
+                                padding: '0.45rem 1rem', borderRadius: '4px', color: 'white', 
+                                cursor: 'pointer', fontSize: '0.65rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                boxShadow: '0 4px 10px rgba(0,0,0,0.3)', transition: 'all 0.2s ease'
                               }}
+                              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                             >
-                              {v.status === 'completed' ? <><CheckCircle2 size={12} /> COMPLETED</> : <><Play size={12} /> {v.status === 'in_progress' ? 'FINISH' : 'START'}</>}
+                              {v.status === 'completed' ? <><CheckCircle2 size={12} /> READY</> : <>{v.status === 'in_progress' ? <><Loader2 size={12} className="animate-spin" /> FINISH</> : <><Play size={12} /> START SERVICE</>}</>}
                             </button>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* SERVICES LIST */}
+                    {/* SERVICES LIST - REQ-ADM-03 */}
                     <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      {v.services?.map((s, idx) => (
+                      {(!v.services || v.services.length === 0) ? (
+                        <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.2)', fontWeight: '700', fontStyle: 'italic' }}>No Services Assigned</div>
+                      ) : v.services.map((s, idx) => (
                         <div key={idx} style={{ 
-                          padding: '0.3rem 0.7rem', background: 'rgba(255,255,255,0.02)', 
-                          border: '1px solid var(--admin-border)', borderRadius: '4px',
+                          padding: '0.35rem 0.75rem', background: 'rgba(var(--admin-brand-rgb), 0.1)', 
+                          border: '1px solid rgba(var(--admin-brand-rgb), 0.2)', borderRadius: '4px',
                           display: 'flex', alignItems: 'center', gap: '0.5rem'
                         }}>
-                          <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'white', textTransform: 'uppercase' }}>{s.service_name}</span>
-                          <span style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{s.price?.toLocaleString()}</span>
+                          <div style={{ width: '6px', height: '6px', background: 'var(--admin-brand)', borderRadius: '50%' }} />
+                          <span style={{ fontSize: '0.7rem', fontWeight: '900', color: 'white', textTransform: 'uppercase' }}>{s.service_name}</span>
+                          <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-brand)', marginLeft: '0.5rem', opacity: 0.8 }}>₱{s.price?.toLocaleString()}</span>
                         </div>
                       ))}
                     </div>
@@ -795,59 +843,108 @@ const AdminBookingDetails = () => {
           </div>
 
           {/* AI VISION AUDIT PANEL (REQ-SYS-01) */}
+          {/* 🛡️ FINANCIAL CONFLICT RESOLUTION (REQ-SYS-01) */}
           {booking.ocr_metadata && Object.keys(booking.ocr_metadata).length > 0 && (
             <div style={{ 
               ...cardStyle, 
-              border: booking.ocr_metadata.status === 'MISMATCHED' ? '2px solid #f59e0b' : '1px solid var(--admin-border)',
-              boxShadow: booking.ocr_metadata.status === 'MISMATCHED' ? '0 0 20px rgba(245, 158, 11, 0.15)' : 'none',
-              animation: booking.ocr_metadata.status === 'MISMATCHED' ? 'pulse-border 2s infinite' : 'none'
+              border: booking.payment_status === 'Flagged for Review' ? '2px solid #ef4444' : (booking.ocr_metadata.isMatch ? '1px solid var(--admin-success)' : '1px solid var(--admin-border)'),
+              boxShadow: booking.payment_status === 'Flagged for Review' ? '0 0 25px rgba(239, 68, 68, 0.2)' : 'none',
+              transition: 'all 0.3s ease'
             }}>
-              <style>{`
-                @keyframes pulse-border {
-                  0% { border-color: #f59e0b; }
-                  50% { border-color: rgba(245, 158, 11, 0.2); }
-                  100% { border-color: #f59e0b; }
-                }
-              `}</style>
               
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  <Zap size={18} color={booking.ocr_metadata.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-brand)'} />
-                  <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'white', letterSpacing: '1px' }}>AI Vision Audit</h3>
+                  <Zap size={18} color={booking.payment_status === 'Flagged for Review' ? '#ef4444' : 'var(--admin-brand)'} />
+                  <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'white', letterSpacing: '1px' }}>AI Financial Audit</h3>
                 </div>
-                <div style={{ fontSize: '0.55rem', fontWeight: '950', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>GEMINI 1.5 FLASH</div>
+                <div style={{ fontSize: '0.55rem', fontWeight: '950', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>GEMINI-1.5-FLASH</div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <div>
-                  <div style={labelStyle}>Extracted Reference</div>
-                  <div style={{ ...valueStyle, color: 'var(--admin-brand)', fontFamily: 'monospace', letterSpacing: '1px' }}>
-                    {booking.ocr_metadata.referenceNo || 'N/A'}
+                  <div style={labelStyle}>Audit Status</div>
+                  <div style={{ 
+                    fontSize: '0.85rem', fontWeight: '950', 
+                    color: booking.payment_status === 'Flagged for Review' ? '#ef4444' : 'var(--admin-success)',
+                    textTransform: 'uppercase', letterSpacing: '0.5px'
+                  }}>
+                    {booking.payment_status}
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div>
-                    <div style={labelStyle}>AI Detected</div>
-                    <div style={{ ...valueStyle, color: booking.ocr_metadata.status === 'MISMATCHED' ? '#f59e0b' : '#fff' }}>
+                    <div style={labelStyle}>Extracted Amount</div>
+                    <div style={{ ...valueStyle, color: booking.payment_status === 'Flagged for Review' ? '#ef4444' : '#fff' }}>
                       ₱{booking.ocr_metadata.amount?.toLocaleString() || '0'}
                     </div>
                   </div>
                   <div>
-                    <div style={labelStyle}>Integrity</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <div style={{ flex: 1, height: '4px', background: 'var(--admin-bg)', borderRadius: '2px' }}>
-                        <div style={{ width: `${booking.ocr_metadata.integrity || 0}%`, height: '100%', background: 'var(--admin-brand)', borderRadius: '2px' }} />
-                      </div>
-                      <span style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-brand)' }}>{booking.ocr_metadata.integrity}%</span>
+                    <div style={labelStyle}>Required Total</div>
+                    <div style={{ ...valueStyle, color: 'var(--admin-brand)' }}>
+                      ₱{booking.ocr_metadata.requiredAmount?.toLocaleString() || booking.total_amount?.toLocaleString()}
                     </div>
                   </div>
                 </div>
 
-                {booking.ocr_metadata.status === 'MISMATCHED' && (
-                  <div style={{ padding: '0.75rem', background: 'rgba(245, 158, 11, 0.1)', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <ShieldAlert size={14} color="#f59e0b" />
-                    <span style={{ fontSize: '0.65rem', fontWeight: '900', color: '#f59e0b', textTransform: 'uppercase' }}>AI Flagged Discrepancy</span>
+                {/* Conflict Resolution Buttons */}
+                {booking.payment_status === 'Flagged for Review' && (
+                  <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div style={{ padding: '0.75rem', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <ShieldAlert size={14} color="#ef4444" />
+                      <span style={{ fontSize: '0.65rem', fontWeight: '900', color: '#ef4444', textTransform: 'uppercase' }}>Financial Mismatch Detected</span>
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button 
+                        onClick={async () => {
+                          const confirm = window.confirm('FORCE CONFIRM: Are you sure you want to override the AI mismatch and validate this payment?');
+                          if (!confirm) return;
+                          
+                          const { data: { user } } = await supabase.auth.getUser();
+                          const { error } = await supabase.from('bookings').update({ payment_status: 'Confirmed' }).eq('id', id);
+                          if (error) return toast.error('Override failed');
+                          
+                          await supabase.from('audit_logs').insert({
+                            booking_id: id,
+                            action_type: 'MANUAL_OVERRIDE_CONFIRM',
+                            actor_name: user?.email,
+                            actor_role: 'ADMIN',
+                            details: `Admin manually confirmed flagged payment of ₱${booking.ocr_metadata.amount}.`
+                          });
+                          
+                          toast.success('Manual Override Successful: Payment Confirmed');
+                          fetchBookingDetails();
+                        }}
+                        style={{ flex: 1, padding: '0.75rem', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.65rem', cursor: 'pointer' }}
+                      >
+                        FORCE CONFIRM
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          const reason = window.prompt('Provide reason for rejection:');
+                          if (!reason) return;
+                          
+                          const { data: { user } } = await supabase.auth.getUser();
+                          const { error } = await supabase.from('bookings').update({ payment_status: 'Payment Rejected' }).eq('id', id);
+                          if (error) return toast.error('Rejection failed');
+                          
+                          await supabase.from('audit_logs').insert({
+                            booking_id: id,
+                            action_type: 'MANUAL_OVERRIDE_REJECT',
+                            actor_name: user?.email,
+                            actor_role: 'ADMIN',
+                            details: `Admin rejected payment. Reason: ${reason}`
+                          });
+                          
+                          toast.error('Payment Rejected and Logged');
+                          fetchBookingDetails();
+                        }}
+                        style={{ flex: 1, padding: '0.75rem', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.65rem', cursor: 'pointer' }}
+                      >
+                        REJECT PAYMENT
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -932,22 +1029,44 @@ const AdminBookingDetails = () => {
             <div style={{ fontSize: '0.65rem', fontWeight: '900' }}>LIVE SUPPORT LOGS (0)</div>
           </div>
 
-          {/* D. DIGITAL VERIFICATION */}
-          {pendingVerification && !isLocked && (
-            <div style={{ ...cardStyle, border: '2px solid var(--admin-info)', background: 'rgba(59, 130, 246, 0.02)' }}>
+          {/* D. DIGITAL VERIFICATION ARCHIVE - REQ-ADM-05 */}
+          {bookingPayments.filter(p => p.receipt_url || p.evidence_url).length > 0 && (
+            <div style={{ ...cardStyle, border: '1px solid var(--admin-border)', background: 'rgba(255, 255, 255, 0.01)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                <h3 style={{ margin: 0, fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-info)', textTransform: 'uppercase' }}>Payment Verification</h3>
-                <span style={{ fontSize: '0.55rem', fontWeight: '950', background: 'var(--admin-info)', color: 'white', padding: '0.2rem 0.6rem', borderRadius: '2px' }}>FOR REVIEW</span>
+                <h3 style={{ margin: 0, fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>Payment Evidence</h3>
+                <ImageIcon size={18} color="var(--admin-brand)" />
               </div>
-              <div 
-                onClick={() => window.open(pendingVerification.receipt_url, '_blank')}
-                style={{ width: '100%', height: '180px', borderRadius: '0.75rem', background: 'black', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', marginBottom: '1rem' }}
-              >
-                <img src={pendingVerification.receipt_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Receipt" />
-              </div>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button onClick={() => handleVerifyPayment(pendingVerification)} style={{ flex: 1, padding: '0.85rem', background: '#10b981', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>APPROVE</button>
-                <button onClick={() => handleRejectPayment(pendingVerification)} style={{ flex: 1, padding: '0.85rem', background: '#ef4444', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>REJECT</button>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {bookingPayments.filter(p => p.receipt_url || p.evidence_url).map((p, idx) => (
+                  <div key={p.id} style={{ borderBottom: idx === bookingPayments.filter(p => p.receipt_url || p.evidence_url).length - 1 ? 'none' : '1px solid var(--admin-border)', paddingBottom: idx === bookingPayments.filter(p => p.receipt_url || p.evidence_url).length - 1 ? 0 : '1.5rem' }}>
+                    <div 
+                      onClick={() => window.open(p.receipt_url || p.evidence_url, '_blank')}
+                      style={{ width: '100%', height: '180px', borderRadius: '0.75rem', background: 'black', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', marginBottom: '1rem' }}
+                    >
+                      <img src={p.receipt_url || p.evidence_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Receipt" />
+                    </div>
+
+                    {p.status === 'FOR_VERIFICATION' ? (
+                      <div style={{ display: 'flex', gap: '0.75rem' }}>
+                        <button onClick={() => handleVerifyPayment(p)} style={{ flex: 1, padding: '0.85rem', background: '#10b981', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>APPROVE</button>
+                        <button onClick={() => handleRejectPayment(p)} style={{ flex: 1, padding: '0.85rem', background: '#ef4444', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>REJECT</button>
+                      </div>
+                    ) : (
+                      <div style={{ 
+                        padding: '0.75rem', background: p.status === 'PAID' ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)', 
+                        border: `1px solid ${p.status === 'PAID' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+                        borderRadius: '4px', textAlign: 'center', color: p.status === 'PAID' ? '#10b981' : '#ef4444', 
+                        fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase'
+                      }}>
+                        {p.status === 'PAID' ? '✓ Verified Receipt Archive' : '✗ Rejected Receipt Archive'}
+                      </div>
+                    )}
+                    <div style={{ marginTop: '0.5rem', fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '700', textAlign: 'center' }}>
+                      PROCESSED ON {new Date(p.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

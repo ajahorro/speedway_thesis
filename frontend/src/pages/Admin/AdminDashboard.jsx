@@ -77,7 +77,7 @@ const AdminDashboard = () => {
       totalBookings: 0,
       totalRevenue: 0,
       pendingPayments: 0,
-      refundRequests: 0,
+      flaggedBookings: 0,
       unassignedBookings: 0,
       overdueServices: 0,
       successRate: 0,
@@ -130,13 +130,13 @@ const AdminDashboard = () => {
         .from('bookings')
         .select('*', { count: 'exact', head: true })
         .is('staff_id', null)
-        .neq('status', 'CANCELLED');
+        .not('status', 'ilike', 'cancelled');
 
-      // 6. Needs Attention - Refund Requests
-      const { data: cancels } = await supabase.from('bookings').select('*, payments(*)').eq('status', 'CANCELLED');
-      const pendingRefunds = (cancels || []).filter(b => 
-        (b.refund_status !== 'PROCESSED') && (b.payments || []).some(p => p.status === 'PAID')
-      ).length;
+      // 6. Needs Attention - Flagged for Review (Financial Discrepancies)
+      const { count: flaggedCount } = await supabase
+        .from('bookings')
+        .select('*', { count: 'exact', head: true })
+        .eq('payment_status', 'Flagged for Review');
 
       // 7. Needs Attention - Overdue Services
       // Definition: Past start time but not completed/cancelled
@@ -144,7 +144,7 @@ const AdminDashboard = () => {
         .from('bookings')
         .select('*', { count: 'exact', head: true })
         .lt('start_datetime', new Date().toISOString())
-        .not('status', 'in', '("COMPLETED","CANCELLED")');
+        .not('status', 'in', '("completed","cancelled","COMPLETED","CANCELLED")');
 
       // 7. Recent Bookings (DEDUPLICATED)
       const { data: recent } = await supabase
@@ -166,12 +166,46 @@ const AdminDashboard = () => {
       // 8. Priority Item Aggregation (for the Queue)
       const pItems = [];
       // Add unassigned
-      const { data: unassignedItems } = await supabase.from('bookings').select('id, customer:profiles!bookings_customer_id_fkey(full_name), start_datetime').is('staff_id', null).neq('status', 'CANCELLED').limit(2);
-      unassignedItems?.forEach(item => pItems.push({ id: item.id, type: 'STAFF', title: `Unassigned Fleet: ${item.customer?.full_name}`, sub: `Scheduled for ${new Date(item.start_datetime).toLocaleDateString()}`, color: '#3b82f6' }));
+      const { data: unassignedRaw } = await supabase.from('bookings').select('id, customer_id, start_datetime').is('staff_id', null).not('status', 'ilike', 'cancelled').limit(2);
+      
+      const unassignedItems = [];
+      if (unassignedRaw && unassignedRaw.length > 0) {
+        for (const item of unassignedRaw) {
+          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).single();
+          unassignedItems.push({ ...item, customer: { full_name: profile?.full_name || 'Unknown' } });
+        }
+      }
+
+      unassignedItems.forEach(item => pItems.push({ id: item.id, type: 'STAFF', title: `Unassigned Fleet: ${item.customer?.full_name}`, sub: `Scheduled for ${new Date(item.start_datetime).toLocaleDateString()}`, color: '#3b82f6' }));
       
       // Add pending payments
-      const { data: pendingItems } = await supabase.from('payments').select('id, amount, bookings(customer:profiles!bookings_customer_id_fkey(full_name))').eq('status', 'FOR_VERIFICATION').limit(2);
+      const { data: pendingRaw } = await supabase.from('payments').select('id, amount, booking_id').eq('status', 'FOR_VERIFICATION').limit(2);
+      
+      const pendingItems = [];
+      if (pendingRaw && pendingRaw.length > 0) {
+        for (const item of pendingRaw) {
+          const { data: b } = await supabase.from('bookings').select('customer_id').eq('id', item.booking_id).single();
+          if (b) {
+            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', b.customer_id).single();
+            pendingItems.push({ ...item, bookings: { customer: { full_name: profile?.full_name || 'Unknown' } } });
+          }
+        }
+      }
+
       pendingItems?.forEach(item => pItems.push({ id: item.id, type: 'PAYMENT', title: `Verification Needed: ₱${item.amount}`, sub: item.bookings?.customer?.full_name, color: '#f59e0b' }));
+
+      // Add flagged items (Supreme Court)
+      const { data: flaggedItemsRaw } = await supabase.from('bookings').select('id, customer_id').eq('payment_status', 'Flagged for Review').limit(2);
+      
+      const flaggedItems = [];
+      if (flaggedItemsRaw && flaggedItemsRaw.length > 0) {
+        for (const item of flaggedItemsRaw) {
+          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).single();
+          flaggedItems.push({ ...item, customer: { full_name: profile?.full_name || 'Unknown' } });
+        }
+      }
+
+      flaggedItems.forEach(item => pItems.push({ id: item.id, type: 'AUDIT', title: `Audit Required: ${item.customer?.full_name}`, sub: 'Payment mismatch detected.', color: '#ef4444' }));
 
       setState({
         loading: false,
@@ -180,7 +214,7 @@ const AdminDashboard = () => {
           totalBookings: totalCount || 0,
           totalRevenue: revenue,
           pendingPayments: pendingPay || 0,
-          refundRequests: pendingRefunds || 0,
+          flaggedBookings: flaggedCount || 0,
           unassignedBookings: unassigned || 0,
           overdueServices: overdue || 0,
           successRate: sRate,
@@ -267,6 +301,14 @@ const AdminDashboard = () => {
             onClick={() => navigate('/admin/payments')}
           />
           <AttentionCard 
+            count={state.stats.flaggedBookings}
+            label="Flagged for Review"
+            icon={ShieldAlert}
+            color="#ef4444"
+            bg="rgba(239, 68, 68, 0.1)"
+            onClick={() => navigate('/admin/bookings?filter=flagged')}
+          />
+          <AttentionCard 
             count={state.stats.unassignedBookings}
             label="Unassigned Fleets"
             icon={Users}
@@ -281,14 +323,6 @@ const AdminDashboard = () => {
             color="#E61E2A"
             bg="rgba(230, 30, 42, 0.1)"
             onClick={() => navigate('/admin/bookings?filter=overdue')}
-          />
-          <AttentionCard 
-            count={state.stats.refundRequests}
-            label="Pending Refunds"
-            icon={RefreshCcw}
-            color="#ef4444"
-            bg="rgba(239, 68, 68, 0.1)"
-            onClick={() => navigate('/admin/refunds')}
           />
         </div>
 

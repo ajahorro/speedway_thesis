@@ -45,13 +45,13 @@ const AdminSalesReport = () => {
       else if (currentPeriod === 'yearly') startDate = new Date(now.getFullYear(), 0, 1); // Jan 1st of current year
 
       // 1. Fetch Verified Payments
-      const { data: payments, error } = await supabase
+      const { data: paymentsRaw, error } = await supabase
         .from('payments')
         .select(`
           *,
           booking:bookings(
             id, 
-            customer:profiles!bookings_customer_id_fkey(full_name),
+            customer_id,
             vehicles:booking_vehicles(
               *,
               services:booking_vehicle_services(*)
@@ -63,6 +63,19 @@ const AdminSalesReport = () => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+
+      // Manually attach customer names
+      const payments = [];
+      if (paymentsRaw) {
+        for (const p of paymentsRaw) {
+          if (p.booking?.customer_id) {
+            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', p.booking.customer_id).single();
+            payments.push({ ...p, booking: { ...p.booking, customer: { full_name: profile?.full_name || 'Walk-in' } } });
+          } else {
+            payments.push(p);
+          }
+        }
+      }
 
       // 2. Fetch Refunded Volume
       const { data: refundData } = await supabase
