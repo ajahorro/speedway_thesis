@@ -73,7 +73,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         const resultObj = {
           referenceNo: extractedData.referenceNo,
           amount: extractedData.amount,
-          requiredAmount: requiredAmount,
+          requiredAmount: targetAmount,
           date: extractedData.date,
           status: isAmountMatched ? 'MATCHED' : 'MISMATCHED',
           recipient: settings?.GCASH_NAME || 'SPEEDWAY STUDIO',

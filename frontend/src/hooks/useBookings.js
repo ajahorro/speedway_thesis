@@ -82,9 +82,9 @@ export const useBookings = (customerId) => {
   }, [refresh, debouncedRefresh, customerId]);
 
   // Derived data — unified state mapping
-  const activeBooking = bookings.find(b => b.status === 'ongoing') || bookings.find(b => b.status === 'scheduled');
+  const activeBooking = bookings.find(b => ['ongoing', 'in_progress'].includes(b.status)) || bookings.find(b => b.status === 'scheduled');
   const upcomingBookings = bookings.filter(b => ['scheduled', 'confirmed'].includes(b.status));
   const pastBookings = bookings.filter(b => ['completed', 'cancelled'].includes(b.status));
 
-  return { bookings, activeBooking, upcomingBookings, pastBookings, loading, refresh };
+  return { bookings, allBookings: bookings, activeBooking, upcomingBookings, pastBookings, loading, refresh };
 };

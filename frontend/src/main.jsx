@@ -34,6 +34,7 @@ import CustomerBilling from './pages/Customer/CustomerBilling';
 import CustomerGarage from './pages/Customer/CustomerGarage';
 import CustomerNotifications from './pages/Customer/CustomerNotifications';
 import CustomerSettings from './pages/Customer/CustomerSettings';
+import CustomerProfile from './pages/Customer/CustomerProfile';
 import CustomerBookingDetails from './pages/Customer/CustomerBookingDetails';
 import './index.css';
 
@@ -116,6 +117,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="garage" element={<CustomerGarage />} />
             <Route path="notifications" element={<CustomerNotifications />} />
             <Route path="settings" element={<CustomerSettings />} />
+            <Route path="profile" element={<CustomerProfile />} />
           </Route>
 
           {/* Global Fallback: Catch-all for unknown routes */}

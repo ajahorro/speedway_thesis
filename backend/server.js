@@ -449,33 +449,37 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     console.log(`🔍 [AUDIT] Comparison: Extracted ₱${extractedAmount} vs Required ₱${requiredAmount}`);
     console.log(`📊 [AUDIT] Result: ${isMatch ? '✅ MATCH' : '⚠️ MISMATCH'} -> Status: ${finalStatus}`);
 
-    // Update the booking in Supabase using Service Role
-    const { error: updateError } = await supabaseAdmin
-      .from('bookings')
-      .update({ 
-        payment_status: finalStatus,
-        ocr_metadata: {
-          ...extractedData,
-          requiredAmount,
-          isMatch,
-          auditedAt: new Date().toISOString()
-        }
-      })
-      .eq('id', bookingId);
+    // Update the booking in Supabase ONLY IF it already exists (Post-creation flow)
+    if (bookingId && bookingId !== 'PENDING') {
+      const { error: updateError } = await supabaseAdmin
+        .from('bookings')
+        .update({ 
+          payment_status: finalStatus,
+          ocr_metadata: {
+            ...extractedData,
+            requiredAmount,
+            isMatch,
+            auditedAt: new Date().toISOString()
+          }
+        })
+        .eq('id', bookingId);
 
-    if (updateError) throw updateError;
+      if (updateError) throw updateError;
 
-    // Record in Master Audit Log
-    try {
-      await supabaseAdmin.from('audit_logs').insert({
-        booking_id: bookingId,
-        action_type: 'AI_VERIFICATION_COMPLETE',
-        actor_name: 'AI_AUDITOR',
-        actor_role: 'SYSTEM',
-        details: `AI extracted ₱${extractedAmount}. Required ₱${requiredAmount}. Match: ${isMatch}. Status: ${finalStatus}`
-      });
-    } catch (logErr) {
-      console.warn('⚠️ Audit logging failed, but booking was updated.');
+      // Record in Master Audit Log
+      try {
+        await supabaseAdmin.from('audit_logs').insert({
+          booking_id: bookingId,
+          action_type: 'AI_VERIFICATION_COMPLETE',
+          actor_name: 'AI_AUDITOR',
+          actor_role: 'SYSTEM',
+          details: `AI extracted ₱${extractedAmount}. Required ₱${requiredAmount}. Match: ${isMatch}. Status: ${finalStatus}`
+        });
+      } catch (logErr) {
+        console.warn('⚠️ Audit logging failed, but booking was updated.');
+      }
+    } else {
+      console.log('ℹ️ [AI OCR] Booking is in PENDING state. Returning extraction results to frontend for submission.');
     }
 
     res.json({
@@ -498,6 +502,148 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
  * 🛡️ REQ-ADM-12: Simulated AI Audit for Admin Dashboard
  * Provides an immediate, reliable 'Audit Simulation' for thesis defense.
  */
+/**
+ * 🛡️ REQ-NFR-31: Password Verification Challenge
+ * Allows frontend to verify current password before sensitive updates
+ */
+app.post('/api/auth/verify-password', async (req, res) => {
+  const { email, password } = req.body;
+  console.log(`🔐 [AUTH] PASSWORD CHALLENGE FOR: ${email}`);
+
+  try {
+    const { data, error } = await supabaseAdmin.auth.signInWithPassword({ email, password });
+    if (error) {
+      return res.status(401).json({ success: false, error: 'Invalid current password' });
+    }
+    return res.json({ success: true, message: 'Identity verified' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'Verification system error' });
+  }
+});
+
+/**
+ * 🛡️ REQ-CST-12: Double-Step Email Change
+ * Sends verification token to OLD email address before authorizing change
+ */
+app.post('/api/auth/request-email-change', async (req, res) => {
+  const { userId, oldEmail, newEmail } = req.body;
+  console.log(`📧 [AUTH] EMAIL CHANGE REQUEST: ${oldEmail} -> ${newEmail}`);
+
+  try {
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store OTP in profiles metadata temporarily (In a real system, use a dedicated table)
+    const { error: dbError } = await supabaseAdmin
+      .from('profiles')
+      .update({ 
+        email_change_temp: { newEmail, otp, expires: new Date(Date.now() + 15 * 60000).toISOString() }
+      })
+      .eq('id', userId);
+
+    if (dbError) throw dbError;
+
+    // Dispatch OTP to OLD email
+    if (resendClient) {
+      await resendClient.emails.send({
+        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        to: oldEmail,
+        subject: 'Speedway: Authorize Email Change',
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; color: #333;">
+            <h2 style="color: #A91B18;">SPEEDWAY SECURITY</h2>
+            <p>You requested to change your account email to <strong>${newEmail}</strong>.</p>
+            <p>Enter the following authorization code to confirm this change:</p>
+            <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; padding: 10px; background: #f4f4f4; border-radius: 5px; display: inline-block;">
+              ${otp}
+            </div>
+            <p>If you did not request this, please change your password immediately.</p>
+          </div>`
+      });
+    }
+
+    console.log(`🔑 Verification code for ${oldEmail}: ${otp}`);
+    return res.json({ success: true, message: 'Verification code sent to current email' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/auth/confirm-email-change', async (req, res) => {
+  const { userId, otp } = req.body;
+  
+  try {
+    const { data: profile, error: fetchError } = await supabaseAdmin
+      .from('profiles')
+      .select('email_change_temp')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !profile.email_change_temp) {
+      return res.status(400).json({ success: false, error: 'No active email change request' });
+    }
+
+    const { newEmail, otp: storedOtp, expires } = profile.email_change_temp;
+
+    if (new Date() > new Date(expires)) {
+      return res.status(400).json({ success: false, error: 'Code expired' });
+    }
+
+    if (otp !== storedOtp) {
+      return res.status(400).json({ success: false, error: 'Invalid authorization code' });
+    }
+
+    // Update Email in Supabase Auth
+    const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, { email: newEmail });
+    if (authError) throw authError;
+
+    // Update Email in Profiles Table
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .update({ email: newEmail, email_change_temp: null })
+      .eq('id', userId);
+
+    if (profileError) throw profileError;
+
+    return res.json({ success: true, message: 'Email updated successfully' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * 🛡️ REQ-ADM-14: Account Deactivation (15-Day Grace Period)
+ * Marks account as INACTIVE instead of deleting immediately.
+ */
+app.post('/api/auth/deactivate-account', async (req, res) => {
+  const { userId } = req.body;
+  console.log(`⚠️ [AUTH] DEACTIVATION REQUEST: ${userId}`);
+
+  try {
+    const deactivatedAt = new Date().toISOString();
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update({ 
+        is_active: false, 
+        deactivated_at: deactivatedAt 
+      })
+      .eq('id', userId);
+
+    if (error) throw error;
+
+    // Record in Audit Log
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_name: 'SYSTEM',
+      actor_role: 'SECURITY',
+      action_type: 'ACCOUNT_DEACTIVATION',
+      details: `User ${userId} initiated deactivation. Scheduled for deletion in 15 days.`
+    });
+
+    return res.json({ success: true, message: 'Account deactivated. You have 15 days to recover it.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/admin/verify-payment-ocr', async (req, res) => {
   const { receiptUrl } = req.body;
   console.log(`🤖 [ADMIN AI] SIMULATING SCAN FOR: ${receiptUrl?.substring(0, 50)}...`);

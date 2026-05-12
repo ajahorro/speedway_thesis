@@ -1,46 +1,93 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import PageHeader from '../../components/PageHeader';
 import { User, Mail, Lock, Shield, Save, Key } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { supabase } from '../../lib/supabase';
 
 const AdminProfile = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { user, profile, updateProfile, verifyPassword } = useAuth();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   
+  // States
+  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null); // 'profile' or 'password'
+  
   const [formData, setFormData] = useState({
-    firstName: profile?.first_name || '',
-    lastName: profile?.last_name || '',
-    email: profile?.email || '',
+    firstName: profile?.first_name || user?.user_metadata?.first_name || '',
+    lastName: profile?.last_name || user?.user_metadata?.last_name || '',
+    email: user?.email || '',
     currentPassword: '',
     newPassword: '',
     confirmPassword: ''
   });
 
-  const [loading, setLoading] = useState(false);
+  // Reset form when profile/user loads
+  useEffect(() => {
+    if (profile || user) {
+      setFormData(prev => ({
+        ...prev,
+        firstName: profile?.first_name || user?.user_metadata?.first_name || '',
+        lastName: profile?.last_name || user?.user_metadata?.last_name || '',
+        email: user?.email || ''
+      }));
+    }
+  }, [profile, user]);
 
-  const handleUpdateProfile = () => {
-    setLoading(true);
-    setTimeout(() => {
-      toast.success('Profile credentials updated successfully!');
-      setLoading(false);
-    }, 800);
+  const handleUpdateClick = (action) => {
+    if (action === 'password') {
+      if (!formData.newPassword || formData.newPassword !== formData.confirmPassword) {
+        return toast.error('Passwords do not match');
+      }
+      if (formData.newPassword.length < 6) {
+        return toast.error('New password must be at least 6 characters');
+      }
+    }
+    setPendingAction(action);
+    setShowVerifyModal(true);
   };
 
-  const handleChangePassword = () => {
-    if (!formData.newPassword || formData.newPassword !== formData.confirmPassword) {
-      toast.error('Passwords do not match');
-      return;
+  const executeVerifiedAction = async () => {
+    const res = await verifyPassword(formData.currentPassword);
+    if (!res.success) {
+      return toast.error('Identity verification failed. Incorrect password.');
     }
+
+    setShowVerifyModal(false);
     setLoading(true);
-    setTimeout(() => {
-      toast.success('Security credentials updated!');
+    const toastId = toast.loading('Synchronizing identity records...');
+
+    try {
+      if (pendingAction === 'profile') {
+        await updateProfile({
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          full_name: `${formData.firstName} ${formData.lastName}`.trim()
+        });
+        setIsEditing(false);
+        toast.success('Professional identity updated', { id: toastId });
+      } else if (pendingAction === 'password') {
+        const isVerified = await verifyPassword(formData.currentPassword);
+        if (!isVerified.success) {
+          toast.error('Identity verification failed. Incorrect current password.', { id: toastId });
+          return;
+        }
+        const { error } = await supabase.auth.updateUser({ password: formData.newPassword });
+        if (error) throw error;
+        toast.success('Security credentials rotated', { id: toastId });
+        setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
+      }
+    } catch (err) {
+      toast.error(err.message || 'Operation failed', { id: toastId });
+    } finally {
       setLoading(false);
-      setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
-    }, 800);
+      setPendingAction(null);
+    }
   };
 
   const cardStyle = {
@@ -48,20 +95,22 @@ const AdminProfile = () => {
     borderRadius: 'var(--admin-radius)',
     border: '1px solid var(--admin-border)',
     padding: isMobile ? '1.5rem' : '2rem',
-    boxShadow: 'var(--admin-card-shadow)'
+    boxShadow: 'var(--admin-card-shadow)',
+    position: 'relative'
   };
 
   const inputStyle = {
     width: '100%',
     padding: '0.85rem 1.25rem',
-    background: 'var(--admin-bg)',
-    border: '1px solid var(--admin-border)',
+    background: isEditing || pendingAction === 'password' ? 'var(--admin-bg)' : 'rgba(255,255,255,0.02)',
+    border: `1px solid ${isEditing ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
     borderRadius: 'var(--admin-radius-sm)',
     color: 'var(--admin-text-primary)',
     fontSize: '0.95rem',
     fontWeight: '600',
     outline: 'none',
-    transition: 'border-color 0.2s'
+    transition: 'all 0.2s ease',
+    cursor: isEditing ? 'text' : 'not-allowed'
   };
 
   const labelStyle = {
@@ -87,6 +136,15 @@ const AdminProfile = () => {
         
         {/* Personal Information */}
         <div style={cardStyle}>
+          {!isEditing && (
+            <button 
+              onClick={() => setIsEditing(true)}
+              style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'transparent', border: '1px solid var(--admin-brand)', color: 'var(--admin-brand)', padding: '0.5rem 1rem', borderRadius: '4px', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}
+            >
+              Edit Identity
+            </button>
+          )}
+          
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem' }}>
             <div style={{ width: '48px', height: '48px', borderRadius: 'var(--admin-radius-sm)', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-brand)', border: '1px solid rgba(var(--admin-brand-rgb), 0.2)' }}>
               <User size={24} />
@@ -103,6 +161,7 @@ const AdminProfile = () => {
                 <label style={labelStyle}>First Name</label>
                 <input 
                   style={inputStyle} 
+                  readOnly={!isEditing}
                   value={formData.firstName}
                   onChange={e => setFormData({...formData, firstName: e.target.value})}
                 />
@@ -111,6 +170,7 @@ const AdminProfile = () => {
                 <label style={labelStyle}>Last Name</label>
                 <input 
                   style={inputStyle} 
+                  readOnly={!isEditing}
                   value={formData.lastName}
                   onChange={e => setFormData({...formData, lastName: e.target.value})}
                 />
@@ -127,30 +187,22 @@ const AdminProfile = () => {
                 />
               </div>
             </div>
-            <button 
-              onClick={handleUpdateProfile}
-              disabled={loading}
-              style={{ 
-                marginTop: '1rem',
-                width: '100%', 
-                padding: '1rem', 
-                background: 'var(--admin-bg)', 
-                color: 'var(--admin-text-primary)', 
-                border: '1px solid var(--admin-border)', 
-                borderRadius: 'var(--admin-radius-sm)', 
-                fontWeight: '950', 
-                fontSize: '0.75rem', 
-                cursor: 'pointer',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.75rem'
-              }}
-            >
-              <Save size={18} /> {loading ? 'Saving...' : 'Update Information'}
-            </button>
+            {isEditing && (
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button 
+                  onClick={() => { setIsEditing(false); setFormData({...formData, firstName: profile.first_name, lastName: profile.last_name}); }}
+                  style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'white', borderRadius: '4px', fontWeight: '950', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => handleUpdateClick('profile')}
+                  style={{ flex: 2, padding: '1rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', cursor: 'pointer' }}
+                >
+                  Authorize & Update
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -170,11 +222,11 @@ const AdminProfile = () => {
             <div>
               <label style={labelStyle}>Current Password</label>
               <div style={{ position: 'relative' }}>
-                <Key size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
+                <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
                   type="password"
-                  style={{ ...inputStyle, paddingLeft: '3.25rem' }} 
-                  placeholder="Enter current password"
+                  style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text', paddingLeft: '3.25rem' }} 
+                  placeholder="Verify identity"
                   value={formData.currentPassword}
                   onChange={e => setFormData({...formData, currentPassword: e.target.value})}
                 />
@@ -187,7 +239,7 @@ const AdminProfile = () => {
                 <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
                   type="password"
-                  style={{ ...inputStyle, paddingLeft: '3.25rem' }} 
+                  style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text', paddingLeft: '3.25rem' }} 
                   placeholder="Enter new password"
                   value={formData.newPassword}
                   onChange={e => setFormData({...formData, newPassword: e.target.value})}
@@ -201,7 +253,7 @@ const AdminProfile = () => {
                 <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
                   type="password"
-                  style={{ ...inputStyle, paddingLeft: '3.25rem' }} 
+                  style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text', paddingLeft: '3.25rem' }} 
                   placeholder="Confirm new password"
                   value={formData.confirmPassword}
                   onChange={e => setFormData({...formData, confirmPassword: e.target.value})}
@@ -209,20 +261,11 @@ const AdminProfile = () => {
               </div>
             </div>
 
-            <div style={{ textAlign: 'right' }}>
-              <button 
-                onClick={() => toast.success('Password reset instructions sent to your email.')}
-                style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
-              >
-                Forgot Password?
-              </button>
-            </div>
-
             <button 
-              onClick={handleChangePassword}
-              disabled={loading}
+              onClick={() => executeVerifiedAction()}
+              disabled={loading || !formData.newPassword || !formData.currentPassword}
               style={{ 
-                marginTop: '0.5rem',
+                marginTop: '1rem',
                 width: '100%', 
                 padding: '1rem', 
                 background: 'var(--admin-brand)', 
@@ -237,17 +280,61 @@ const AdminProfile = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.75rem'
+                gap: '0.75rem',
+                opacity: loading || !formData.newPassword || !formData.currentPassword ? 0.5 : 1
               }}
             >
-              <Shield size={18} /> {loading ? 'Processing...' : 'Change Security Password'}
+              <Shield size={18} /> {loading ? 'Processing...' : 'Rotate Security Key'}
             </button>
+            <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+              <button 
+                type="button"
+                onClick={() => {
+                  const email = user?.email;
+                  if (email) {
+                    toast.promise(supabase.auth.resetPasswordForEmail(email), {
+                      loading: 'Sending reset link...',
+                      success: 'Reset link sent to your email!',
+                      error: 'Failed to send reset link.'
+                    });
+                  }
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
+              >
+                Forgot Password?
+              </button>
+            </div>
           </div>
         </div>
 
       </div>
+
+      {/* Verification Modal */}
+      {showVerifyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
+          <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', padding: '2.5rem', borderRadius: 'var(--admin-radius)', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
+            <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem auto', color: 'var(--admin-brand)' }}>
+              <Shield size={32} />
+            </div>
+            <h2 style={{ fontWeight: '950', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Authorize Action</h2>
+            <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.8rem', fontWeight: '700', marginBottom: '2rem' }}>Please enter your current password to verify your identity.</p>
+            
+            <input 
+              type="password"
+              placeholder="Current Password"
+              value={formData.currentPassword}
+              onChange={e => setFormData({...formData, currentPassword: e.target.value})}
+              style={{ ...inputStyle, background: 'var(--admin-bg)', textAlign: 'center', cursor: 'text', marginBottom: '1.5rem' }}
+            />
+
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button onClick={() => setShowVerifyModal(false)} style={{ flex: 1, padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={executeVerifiedAction} style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', border: 'none', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Verify & Proceed</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
 export default AdminProfile;

@@ -271,10 +271,10 @@ const CustomerLayout = () => {
             )}
             <div style={{ width: '1px', height: '20px', background: 'var(--admin-border)', opacity: 0.5 }}></div>
             <div 
-              onClick={() => navigate('/customer/settings')} 
-              style={{ cursor: 'pointer', transition: 'all 0.2s', opacity: location.pathname === '/customer/settings' ? 1 : 0.8 }}
+              onClick={() => navigate('/customer/profile')} 
+              style={{ cursor: 'pointer', transition: 'all 0.2s', opacity: location.pathname === '/customer/profile' ? 1 : 0.8 }}
               onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
-              onMouseLeave={(e) => { if (location.pathname !== '/customer/settings') e.currentTarget.style.opacity = '0.8'; }}
+              onMouseLeave={(e) => { if (location.pathname !== '/customer/profile') e.currentTarget.style.opacity = '0.8'; }}
             >
               <ProfileHeader />
             </div>

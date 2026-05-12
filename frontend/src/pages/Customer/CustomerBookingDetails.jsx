@@ -371,6 +371,38 @@ const CustomerBookingDetails = () => {
             </div>
           </div>
 
+          {/* ===== ACTIONS ===== */}
+          {(['scheduled', 'confirmed'].includes(booking.status)) && (
+            <div style={{ ...cardStyle, border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.02)' }}>
+              <div style={{ ...labelStyle, color: '#ef4444' }}>Danger Zone</div>
+              <p style={{ margin: '0.5rem 0 1rem 0', fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>
+                Need to cancel? You can cancel your appointment now. 
+                {booking.totalPaid > 0 && " Since a payment was detected, a refund request will be automatically filed."}
+              </p>
+              <button 
+                onClick={async () => {
+                  if (!window.confirm('Are you sure you want to cancel this booking? This action cannot be undone.')) return;
+                  const toastId = toast.loading('Processing cancellation...');
+                  try {
+                    const { error } = await supabase
+                      .from('bookings')
+                      .update({ status: 'cancelled' })
+                      .eq('id', id);
+                    if (error) throw error;
+                    
+                    toast.success('Booking Cancelled', { id: toastId });
+                    fetchAll();
+                  } catch (err) {
+                    toast.error('Failed to cancel booking', { id: toastId });
+                  }
+                }}
+                style={{ width: '100%', padding: '0.85rem', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer', textTransform: 'uppercase' }}
+              >
+                Cancel Appointment
+              </button>
+            </div>
+          )}
+
           {/* ===== LIVE CHAT ===== */}
           <div style={cardStyle}>
             <div style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>

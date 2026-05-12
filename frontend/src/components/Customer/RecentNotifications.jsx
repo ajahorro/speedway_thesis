@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, ShieldCheck, CheckCircle, Clock } from 'lucide-react';
+import { Bell, ShieldCheck, CheckCircle, Clock, CreditCard, AlertCircle, CheckCircle2, MessageCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { fetchNotifications, subscribeToNotifications } from '../../services/notificationService';
 import { supabase } from '../../lib/supabase';
@@ -32,11 +32,23 @@ const RecentNotifications = ({ userId }) => {
 
   const getIcon = (type) => {
     switch (type) {
-      case 'PAYMENT_VERIFIED': return <ShieldCheck size={16} color="var(--admin-success)" />;
-      case 'STATUS_UPDATE': return <Clock size={16} color="var(--admin-brand)" />;
-      case 'BOOKING_CONFIRMED': return <CheckCircle size={16} color="var(--admin-info)" />;
-      case 'TASK_ASSIGNED': return <Clock size={16} color="#a855f7" />;
-      default: return <Bell size={16} color="var(--admin-text-secondary)" />;
+      case 'PAYMENT_APPROVED':
+      case 'PAYMENT_RECEIVED':
+      case 'PAYMENT_VERIFIED':
+        return <CreditCard size={16} color="#10b981" />;
+      case 'PAYMENT_REJECTED':
+        return <AlertCircle size={16} color="#ef4444" />;
+      case 'TASK_ASSIGNED':
+      case 'STATUS_UPDATE':
+        return <Clock size={16} color="var(--admin-brand)" />;
+      case 'VEHICLE_COMPLETED':
+        return <CheckCircle2 size={16} color="#10b981" />;
+      case 'CHAT_MESSAGE':
+        return <MessageCircle size={16} color="#3b82f6" />;
+      case 'BOOKING_CONFIRMED':
+        return <CheckCircle size={16} color="var(--admin-info)" />;
+      default:
+        return <Bell size={16} color="var(--admin-text-secondary)" />;
     }
   };
 
@@ -58,7 +70,8 @@ const RecentNotifications = ({ userId }) => {
       border: '1px solid var(--admin-border)',
       boxShadow: 'var(--admin-card-shadow)',
       display: 'flex',
-      flexDirection: 'column'
+      flexDirection: 'column',
+      overflow: 'hidden'
     }}>
       <div style={{
         padding: '1.25rem 1.5rem',
@@ -67,51 +80,60 @@ const RecentNotifications = ({ userId }) => {
         justifyContent: 'space-between',
         alignItems: 'center'
       }}>
-        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>Alerts</h3>
+        <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Operational Alerts</h3>
         <button
           onClick={() => navigate('/customer/notifications')}
-          style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.75rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.5px' }}
+          style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.5px' }}
         >
           View All
         </button>
       </div>
 
-      <div style={{ padding: '0.5rem 0', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         {loading ? (
-          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--admin-brand)', fontWeight: '900', fontSize: '0.85rem' }}>Loading...</div>
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--admin-brand)', fontWeight: '900', fontSize: '0.8rem' }}>SYNCING...</div>
         ) : notifications.length === 0 ? (
-          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>No notifications yet</div>
+          <div style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontSize: '0.8rem', fontWeight: '600', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+            <Bell size={24} style={{ opacity: 0.2 }} />
+            NO RECENT ACTIVITY
+          </div>
         ) : (
           notifications.map((notif) => (
             <div
               key={notif.id}
-              className="admin-card-hover"
+              onClick={() => {
+                if (notif.action_url) navigate(notif.action_url);
+                else navigate('/customer/notifications');
+              }}
               style={{
                 padding: '1rem 1.5rem',
                 borderBottom: '1px solid var(--admin-border)',
                 cursor: 'pointer',
                 display: 'flex',
                 gap: '1rem',
-                background: notif.is_read ? 'transparent' : 'rgba(var(--admin-brand-rgb), 0.03)'
+                background: notif.is_read ? 'transparent' : 'rgba(var(--admin-brand-rgb), 0.03)',
+                transition: 'all 0.2s ease'
               }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = notif.is_read ? 'transparent' : 'rgba(var(--admin-brand-rgb), 0.03)'}
             >
               <div style={{
-                width: '32px', height: '32px', borderRadius: '50%',
-                background: 'var(--admin-bg)',
+                width: '36px', height: '36px', borderRadius: '8px',
+                background: 'rgba(255,255,255,0.03)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: '1px solid var(--admin-border)',
                 flexShrink: 0
               }}>
-                {getIcon(notif.type)}
+                {getIcon(notif.notification_type)}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: notif.is_read ? '800' : '950', color: 'var(--admin-text-primary)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: 0 }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: '950', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {notif.title}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', lineHeight: 1.4 }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {notif.message}
                 </div>
-                <div style={{ fontSize: '0.65rem', fontWeight: '800', color: 'var(--admin-text-secondary)', marginTop: '0.25rem', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-text-secondary)', marginTop: '0.25rem', textTransform: 'uppercase', opacity: 0.6 }}>
                   {timeAgo(notif.created_at)}
                 </div>
               </div>

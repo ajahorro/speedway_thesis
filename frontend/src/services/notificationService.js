@@ -2,12 +2,9 @@ import { supabase } from '../lib/supabase';
 
 /**
  * notificationService.js
- * Handles fetching and managing customer notifications.
+ * Handles customer-facing notification management.
  */
 
-/**
- * Fetch all notifications for a specific user.
- */
 export const fetchNotifications = async (userId) => {
   const { data, error } = await supabase
     .from('notifications')
@@ -19,10 +16,7 @@ export const fetchNotifications = async (userId) => {
   return data || [];
 };
 
-/**
- * Mark a single notification as read.
- */
-export const markAsRead = async (notificationId) => {
+export const markNotificationAsRead = async (notificationId) => {
   const { error } = await supabase
     .from('notifications')
     .update({ is_read: true })
@@ -31,9 +25,6 @@ export const markAsRead = async (notificationId) => {
   if (error) throw error;
 };
 
-/**
- * Mark all notifications for a user as read.
- */
 export const markAllAsRead = async (userId) => {
   const { error } = await supabase
     .from('notifications')
@@ -44,25 +35,26 @@ export const markAllAsRead = async (userId) => {
   if (error) throw error;
 };
 
-/**
- * Get unread notification count for badge display.
- */
-export const getUnreadCount = async (userId) => {
-  const { count, error } = await supabase
+export const deleteNotification = async (notificationId) => {
+  const { error } = await supabase
     .from('notifications')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .eq('is_read', false);
+    .delete()
+    .eq('id', notificationId);
 
-  if (error) return 0;
-  return count || 0;
+  if (error) throw error;
 };
 
-/**
- * Subscribe to real-time notifications for a user.
- */
+export const clearAllNotifications = async (userId) => {
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) throw error;
+};
+
 export const subscribeToNotifications = (userId, callback) => {
-  const channel = supabase
+  return supabase
     .channel(`notifications-${userId}`)
     .on('postgres_changes', {
       event: 'INSERT',
@@ -71,6 +63,4 @@ export const subscribeToNotifications = (userId, callback) => {
       filter: `user_id=eq.${userId}`
     }, callback)
     .subscribe();
-
-  return channel;
 };
