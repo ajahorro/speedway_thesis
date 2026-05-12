@@ -2,8 +2,8 @@ import React from 'react';
 import { Zap } from 'lucide-react';
 import { segregateBookings } from '../../utils/schedulingUtils';
 
-const OccupancyShelf = ({ bookings, onBookingClick }) => {
-  const { fullDay } = segregateBookings(bookings);
+const OccupancyShelf = ({ bookings, onBookingClick, config }) => {
+  const { fullDay } = segregateBookings(bookings, config);
 
   if (fullDay.length === 0) return null;
 

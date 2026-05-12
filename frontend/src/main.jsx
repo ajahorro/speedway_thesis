@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { ConfigProvider } from './context/ConfigContext';
 import AdminLayout from './pages/Admin/AdminLayout';
 import AdminDashboard from './pages/Admin/AdminDashboard';
 import AdminBookings from './pages/Admin/AdminBookings';
@@ -46,10 +47,11 @@ console.warn = (...args) => {
 };
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <ThemeProvider>
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
+  <ConfigProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
@@ -146,7 +148,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             }
           }}
         />
-      </BrowserRouter>
-    </AuthProvider>
-  </ThemeProvider>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
+  </ConfigProvider>
 );

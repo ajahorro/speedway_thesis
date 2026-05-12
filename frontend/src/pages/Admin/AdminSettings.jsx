@@ -7,6 +7,7 @@ import {
 import toast from 'react-hot-toast';
 import PageHeader from '../../components/PageHeader';
 import { useTheme } from '../../context/ThemeContext';
+import { useConfig } from '../../context/ConfigContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { logger } from '../../utils/logger';
@@ -14,6 +15,7 @@ import { logger } from '../../utils/logger';
 const AdminSettings = () => {
   const { profile } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { refreshConfig } = useConfig();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
@@ -111,6 +113,7 @@ const AdminSettings = () => {
       if (error) throw error;
 
       localStorage.setItem('speedway_business_settings', JSON.stringify(settings));
+      await refreshConfig();
       toast.success('Global settings updated successfully!');
       logger.admin('Global parameters committed to database.');
     } catch (err) {

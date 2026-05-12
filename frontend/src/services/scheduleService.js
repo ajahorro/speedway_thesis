@@ -18,10 +18,11 @@ import {
  */
 export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
   try {
-    const { data: config } = await supabase.from('business_config').select('opening_hour, closing_hour').limit(1).single();
+    const { data: config } = await supabase.from('business_config').select('opening_hour, closing_hour, slots_per_hour').maybeSingle();
     
     let startHour = SHOP_CONFIG.OPENING_HOUR;
     let endHour = SHOP_CONFIG.CLOSING_HOUR;
+    let maxBays = SHOP_CONFIG.MAX_BAYS;
     
     if (config) {
       const parseHour = (timeStr) => {
@@ -41,6 +42,7 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
       const parsedEnd = parseHour(config.closing_hour);
       if (parsedStart !== null) startHour = parsedStart;
       if (parsedEnd !== null) endHour = parsedEnd;
+      if (config.slots_per_hour) maxBays = config.slots_per_hour;
     }
 
     // 1. Fetch ALL bookings and blocks for the day
@@ -49,7 +51,7 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
 
     const { data: bookings } = await supabase
       .from('bookings')
-      .select('id, start_datetime, end_datetime, status')
+      .select('id, start_datetime, end_datetime, status, vehicles:booking_vehicles(id, status)')
       .lte('start_datetime', endOfDay)
       .gte('end_datetime', startOfDay)
       .neq('status', 'CANCELLED');
@@ -57,7 +59,7 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
     const { data: blocks } = await supabase
       .from('blocked_slots')
       .select('*')
-      .eq('date', dateStr);
+      .eq('block_date', dateStr);
 
     // 2. Filter active sessions using shared utility
     const activeBookings = filterActiveBookings(bookings || []);
@@ -85,12 +87,19 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
 
       // Rule: Check if EACH hour of the requested duration has capacity
       const durationHours = Math.ceil(requestedDuration / 60);
+      const isFullDay = requestedDuration >= SHOP_CONFIG.FULL_DAY_THRESHOLD_MINUTES;
+
       for (let offset = 0; offset < durationHours; offset++) {
         const targetH = slotH + offset;
-        // Don't book past closing
-        if (targetH >= endHour) return false;
         
-        if (calculateOccupancy(targetH, dateStr, activeBookings, blocks || []) >= SHOP_CONFIG.MAX_BAYS) {
+        // If it's a SAME-DAY service, it MUST finish before closing
+        if (targetH >= endHour && !isFullDay) return false;
+        
+        // If we reached closing but it's a MULTI-DAY service, we stop checking for TODAY
+        // (The system assumes it will continue tomorrow and tomorrow's slots will reflect this later)
+        if (targetH >= endHour && isFullDay) break;
+        
+        if (calculateOccupancy(targetH, dateStr, activeBookings, blocks || [], { ...SHOP_CONFIG, MAX_BAYS: maxBays }) >= maxBays) {
           return false;
         }
       }
@@ -111,9 +120,8 @@ export const getBusinessHours = async () => {
   const { data, error } = await supabase
     .from('business_config')
     .select('opening_hour, closing_hour')
-    .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (error) return { opening: '08:00 AM', closing: '06:00 PM' };
+  if (error || !data) return { opening: '08:00 AM', closing: '06:00 PM' };
   return { opening: data.opening_hour, closing: data.closing_hour };
 };

@@ -43,13 +43,13 @@ export const formatDisplayHour = (hour) => {
 /**
  * Filters bookings into Transient vs Long-Term (Full Day).
  */
-export const segregateBookings = (bookings = []) => {
+export const segregateBookings = (bookings = [], config = SHOP_CONFIG) => {
   const fullDay = [];
   const transient = [];
 
   bookings.forEach(b => {
     const duration = (new Date(b.end_datetime) - new Date(b.start_datetime)) / (1000 * 60);
-    if (duration >= SHOP_CONFIG.FULL_DAY_THRESHOLD_MINUTES) {
+    if (duration >= config.FULL_DAY_THRESHOLD_MINUTES) {
       fullDay.push(b);
     } else {
       transient.push(b);
@@ -62,24 +62,33 @@ export const segregateBookings = (bookings = []) => {
 /**
  * Calculates how many resources are occupied at a specific hour on a specific date.
  */
-export const calculateOccupancy = (hour, dateStr, activeBookings = [], blocks = []) => {
+export const calculateOccupancy = (hour, dateStr, activeBookings = [], blocks = [], config = SHOP_CONFIG) => {
   let count = 0;
   const checkTime = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00`);
   
-  // Check Bookings
+  // Check Bookings (Granular Vehicle Occupancy)
   activeBookings.forEach(b => {
     const start = new Date(b.start_datetime);
     const end = new Date(b.end_datetime);
-    if (checkTime >= start && checkTime < end) count++;
+    
+    if (checkTime >= start && checkTime < end) {
+      // RELEASE LOGIC: Only count vehicles that are NOT completed
+      const activeVehicleCount = (b.vehicles || []).filter(v => 
+        v.status !== 'COMPLETED' && v.status !== 'completed'
+      ).length;
+      
+      // Fallback to 1 if vehicles are missing (legacy or single-unit bookings without relation)
+      count += activeVehicleCount || 1;
+    }
   });
 
   // Check Maintenance Blocks
   blocks.forEach(b => {
-    if (!b.start_time) count = SHOP_CONFIG.MAX_BAYS; // Whole day block
+    if (!b.start_time) count = config.MAX_BAYS; // Whole day block
     else {
       const bStart = parseInt(b.start_time.split(':')[0], 10);
       const bEnd = parseInt(b.end_time.split(':')[0], 10);
-      if (hour >= bStart && hour < bEnd) count = SHOP_CONFIG.MAX_BAYS;
+      if (hour >= bStart && hour < bEnd) count = config.MAX_BAYS;
     }
   });
 
@@ -89,13 +98,13 @@ export const calculateOccupancy = (hour, dateStr, activeBookings = [], blocks = 
 /**
  * Filters out stale pending sessions.
  */
-export const filterActiveBookings = (bookings = []) => {
+export const filterActiveBookings = (bookings = [], config = SHOP_CONFIG) => {
   const now = new Date();
   return (bookings || []).filter(b => {
     if (b.status === 'scheduled') {
       const start = new Date(b.start_datetime);
       const diffMins = (now - start) / (1000 * 60);
-      return diffMins <= SHOP_CONFIG.STALE_SESSION_PURGE_MINUTES;
+      return diffMins <= config.STALE_SESSION_PURGE_MINUTES;
     }
     return true;
   });

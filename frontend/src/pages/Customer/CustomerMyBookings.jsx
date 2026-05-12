@@ -34,13 +34,57 @@ const CustomerMyBookings = () => {
     }
   };
 
-  const handleBookAgain = (e, booking) => {
-    e.stopPropagation(); // Don't trigger the card's navigate
-    navigate('/customer/book', { state: { prefill: booking } });
+  const [showRebookModal, setShowRebookModal] = useState(false);
+  const [selectedRebook, setSelectedRebook] = useState(null);
+
+  const handleBookAgainClick = (booking) => {
+    setSelectedRebook(booking);
+    setShowRebookModal(true);
+  };
+
+  const confirmRebook = () => {
+    if (selectedRebook) {
+      sessionStorage.setItem('speedway_rebook_data', JSON.stringify(selectedRebook));
+      setShowRebookModal(false);
+      navigate('/customer/book');
+    }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
+      
+      {/* Rebook Confirmation Modal */}
+      {showRebookModal && (
+        <div className="hero-toast-overlay" onClick={() => setShowRebookModal(false)}>
+          <div className="hero-toast-content" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
+              <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <RotateCw size={32} color="var(--admin-brand)" />
+              </div>
+            </div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: '950', color: 'white', margin: '0 0 0.5rem 0', textTransform: 'uppercase' }}>Fast-Track Rebook?</h2>
+            <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem', margin: '0 0 2rem 0', fontWeight: '600' }}>
+              Copying services and vehicle details. You will jump directly to the <strong>Schedule Selection</strong> step.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button 
+                onClick={() => setShowRebookModal(false)}
+                style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'white', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', textTransform: 'uppercase' }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={confirmRebook}
+                style={{ flex: 1, padding: '1rem', background: 'var(--admin-brand)', border: 'none', color: 'white', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', textTransform: 'uppercase', boxShadow: '0 4px 15px rgba(var(--admin-brand-rgb), 0.3)' }}
+              >
+                Let's Go
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
@@ -171,7 +215,10 @@ const CustomerMyBookings = () => {
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     {(b.status === 'completed' || b.status === 'cancelled') && (
                       <button 
-                        onClick={(e) => handleBookAgain(e, b)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleBookAgainClick(b);
+                        }}
                         style={{ 
                           width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(169, 27, 24, 0.1)', 
                           border: '1px solid var(--admin-brand)', display: 'flex', alignItems: 'center', 
@@ -193,7 +240,8 @@ const CustomerMyBookings = () => {
         )}
       </div>
     </div>
-  );
+  </div>
+);
 };
 
 export default CustomerMyBookings;

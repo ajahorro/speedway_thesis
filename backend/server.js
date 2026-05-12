@@ -2,6 +2,8 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const multer = require('multer');
 require('dotenv').config();
 
 const { Resend } = require('resend');
@@ -10,6 +12,26 @@ const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+
+// Initialize Gemini AI
+const geminiKey = process.env.GEMINI_API_KEY || '';
+const genAI = new GoogleGenerativeAI(geminiKey);
+const model = genAI.getGenerativeModel({ model: "models/gemini-1.5-flash" });
+
+// 🤖 Model Discovery (Diagnostics)
+(async () => {
+  try {
+    console.log(`🤖 [AI] API KEY MASK: ${geminiKey.substring(0, 8)}...`);
+    // Note: listModels might not be available in all SDK versions, 
+    // but we'll try to help debug the 404 issue.
+    console.log(`🤖 [AI] ATTEMPTING TO USE: models/gemini-1.5-flash`);
+  } catch (e) {
+    console.warn('Could not list models, continuing with default.');
+  }
+})();
+
+// Configure Multer for memory storage
+const upload = multer({ storage: multer.memoryStorage() });
 
 const PORT = process.env.PORT || 3000;
 
@@ -21,20 +43,27 @@ console.log(`KEY LENGTH:  ${process.env.SUPABASE_SERVICE_ROLE_KEY?.length || 0}`
 console.log(`URL DEFINED: ${!!process.env.SUPABASE_URL}`);
 console.log('🔍'.repeat(20) + '\n');
 
-// Initialize Supabase Admin Client
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-  {
+// Initialize Supabase Admin Client (Safe-guard against missing keys)
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+let supabaseAdmin = null;
+
+if (supabaseUrl && supabaseKey) {
+  supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false
     }
-  }
-);
+  });
+  console.log('📦 Supabase Admin initialized.');
+} else {
+  console.warn('⚠️ SUPABASE_SERVICE_ROLE_KEY missing. Database-dependent features (Emails/Invites) will be disabled, but AI services will remain active.');
+}
 
 // 🔍 DEBUG: Test Simple Admin Call on Startup
 (async () => {
+  if (!supabaseAdmin) return;
   try {
     const { data, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1 });
     if (error) throw error;
@@ -355,41 +384,68 @@ app.post('/customer/register', async (req, res) => {
 
 /**
  * 🤖 REQ-SYS-01: AI-Assisted OCR Verification
- * Simulates Gemini AI OCR for payment receipt validation
+ * Uses Gemini 1.5 Flash for high-fidelity receipt auditing
  */
-app.post('/admin/verify-payment-ocr', async (req, res) => {
-  const { receiptUrl } = req.body;
-  
-  if (!receiptUrl) {
-    return res.status(400).json({ success: false, error: 'Receipt URL is required' });
-  }
-
-  console.log(`🤖 [AI OCR] SCANNING RECEIPT: ${receiptUrl}`);
-
+app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) => {
   try {
-    // SIMULATION MODE: In a real thesis, you'd use @google/generative-ai here.
-    // We simulate a 2-second AI 'thinking' delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No receipt image uploaded' });
+    }
 
-    // Mock extraction logic (simulating successful OCR)
-    // In a real scenario, this would come from the Gemini AI response
-    const mockReferenceNumber = `00${Math.floor(10000000 + Math.random() * 90000000)}`;
-    const mockConfidence = 0.98;
+    console.log(`🤖 [AI OCR] SCANNING RECEIPT: ${req.file.originalname} (${req.file.size} bytes)`);
 
-    console.log(`✅ [AI OCR] EXTRACTED REF: ${mockReferenceNumber} (Confidence: ${mockConfidence})`);
+    // Convert buffer to generative AI part
+    const imagePart = {
+      inlineData: {
+        data: req.file.buffer.toString('base64'),
+        mimeType: req.file.mimetype
+      }
+    };
+
+    const prompt = `
+      You are a financial audit specialist for a high-end car detailing studio. 
+      Extract the following information from this GCash or Bank transaction receipt:
+      1. Transaction Reference Number (Ref No, ID, or Transaction ID)
+      2. Total Amount Paid (PHP value)
+      3. Date and Time of transaction
+
+      Rules:
+      - Return the data in STRICT JSON format.
+      - If you cannot find a specific field, use "N/A".
+      - Be extremely precise with the amount.
+      - Return ONLY the JSON object, no other text.
+
+      JSON Structure:
+      {
+        "referenceNo": "string",
+        "amount": number,
+        "date": "string",
+        "integrity": number (0-100 confidence score),
+        "isReceipt": boolean
+      }
+    `;
+
+    const result = await model.generateContent([prompt, imagePart]);
+    const response = await result.response;
+    const text = response.text();
+    
+    // 🧹 Clean JSON (sometimes AI adds markdown blocks)
+    const cleanedJson = text.replace(/```json|```/g, '').trim();
+    const extractedData = JSON.parse(cleanedJson);
+
+    console.log(`✅ [AI OCR] EXTRACTION SUCCESSFUL:`, extractedData);
 
     res.json({
       success: true,
-      data: {
-        referenceNumber: mockReferenceNumber,
-        confidence: mockConfidence,
-        detectedAmount: 1500, // Example detected amount
-        isSimulation: !process.env.GEMINI_API_KEY
-      }
+      data: extractedData
     });
+
   } catch (error) {
     console.error('❌ [AI OCR] FAILED:', error);
-    res.status(500).json({ success: false, error: 'AI processing failed' });
+    res.status(500).json({ 
+      success: false, 
+      error: 'AI analysis failed. Please ensure the photo is clear and try again.' 
+    });
   }
 });
 

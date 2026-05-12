@@ -140,7 +140,7 @@ export const fetchCustomerBookings = async (customerId) => {
     .from('bookings')
     .select(`
       *,
-      vehicles:booking_vehicles(*, services:booking_vehicle_services(*)),
+      vehicles:booking_vehicles(*, services:booking_vehicle_services!booking_vehicle_id(*)),
       payments:payments(*)
     `)
     .eq('customer_id', customerId)
@@ -158,7 +158,7 @@ export const fetchBookingById = async (bookingId) => {
     .from('bookings')
     .select(`
       *,
-      vehicles:booking_vehicles(*, services:booking_vehicle_services(*)),
+      vehicles:booking_vehicles(*, services:booking_vehicle_services!booking_vehicle_id(*)),
       payments:payments(*),
       assigned_staff:profiles!bookings_staff_id_fkey(first_name, last_name, email)
     `)
@@ -207,29 +207,44 @@ export const subscribeToCustomerBookings = (customerId, callback) => {
 // --- Utility ---
 
 function combineDateAndTime(dateStr, timeStr) {
+  if (!dateStr) return new Date().toISOString();
   if (!timeStr) return `${dateStr}T00:00:00`;
-  const [time, meridian] = timeStr.split(' ');
-  let [hours, minutes] = time.split(':').map(Number);
-  if (meridian === 'PM' && hours !== 12) hours += 12;
-  if (meridian === 'AM' && hours === 12) hours = 0;
-  return `${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+  
+  try {
+    const [time, meridian] = timeStr.split(' ');
+    let [hours, minutes] = time.split(':').map(Number);
+    if (meridian === 'PM' && hours !== 12) hours += 12;
+    if (meridian === 'AM' && hours === 12) hours = 0;
+    
+    const iso = `${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+    if (isNaN(new Date(iso).getTime())) throw new Error('Invalid ISO');
+    return iso;
+  } catch (e) {
+    return `${dateStr}T12:00:00`; // Fallback to noon if time parsing fails
+  }
 }
 
 function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
-  const startIso = combineDateAndTime(dateStr, timeStr);
-  const date = new Date(startIso);
-  
-  // Calculate total duration across all vehicles and their services
-  let totalMinutes = 0;
-  vehicles.forEach(v => {
-    (v.services || []).forEach(s => {
-      totalMinutes += (s.durationMinutes || 60); // Default to 60 if missing
+  try {
+    const startIso = combineDateAndTime(dateStr, timeStr);
+    const date = new Date(startIso);
+    
+    // Calculate total duration across all vehicles and their services
+    let totalMinutes = 0;
+    vehicles.forEach(v => {
+      (v.services || []).forEach(s => {
+        totalMinutes += (s.durationMinutes || 60); // Default to 60 if missing
+      });
     });
-  });
 
-  // Minimum duration of 1 hour if no services selected yet
-  if (totalMinutes === 0) totalMinutes = 60;
+    // Minimum duration of 1 hour if no services selected yet
+    if (totalMinutes === 0) totalMinutes = 60;
 
-  date.setMinutes(date.getMinutes() + totalMinutes);
-  return date.toISOString();
+    date.setMinutes(date.getMinutes() + totalMinutes);
+    
+    if (isNaN(date.getTime())) return new Date().toISOString();
+    return date.toISOString();
+  } catch (e) {
+    return new Date().toISOString();
+  }
 }

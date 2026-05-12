@@ -1,11 +1,15 @@
 import React from 'react';
-import { Car, Trash2, Copy, Plus, ChevronRight, Info } from 'lucide-react';
+import { Car, Trash2, Copy, Plus, ChevronRight, Info, Lock, X } from 'lucide-react';
+import toast from 'react-hot-toast';
+import Step2Services from './Step2Services';
 
-const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, setActiveVehicleIndex, setCurrentStep, onNext, onBack }) => {
+const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, setActiveVehicleIndex, setCurrentStep, onNext, onBack, isSubTaskActive, setIsSubTaskActive }) => {
   const vehicles = bookingData.vehicles || [];
 
+  const [draftVehicle, setDraftVehicle] = React.useState(null);
+
   const handleAddVehicle = () => {
-    const newVehicle = {
+    const newDraft = {
       id: crypto.randomUUID(),
       type: '',
       brand: '',
@@ -13,10 +17,23 @@ const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, se
       plateNumber: '',
       services: []
     };
-    const updatedVehicles = [...vehicles, newVehicle];
-    setBookingData({ ...bookingData, vehicles: updatedVehicles });
-    setActiveVehicleIndex(updatedVehicles.length - 1);
-    setCurrentStep(1); // Go back to Step 1 for new vehicle
+    setDraftVehicle(newDraft);
+    setIsSubTaskActive(true); 
+  };
+
+  const commitDraftVehicle = () => {
+    if (!draftVehicle) return;
+    setBookingData({
+      ...bookingData,
+      vehicles: [...vehicles, draftVehicle]
+    });
+    setDraftVehicle(null);
+    setIsSubTaskActive(false);
+    toast.success('New vehicle added to fleet!');
+  };
+
+  const updateDraftField = (updates) => {
+    setDraftVehicle(prev => ({ ...prev, ...updates }));
   };
 
   const handleCopyVehicle = (e, index) => {
@@ -50,10 +67,45 @@ const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, se
     setShowDeleteConfirm(null);
   };
 
+  const [editingIndex, setEditingIndex] = React.useState(null);
+
   const handleEditVehicle = (index) => {
-    setActiveVehicleIndex(index);
-    setCurrentStep(2); // User said: clicking container goes back to edit services (Step 2)
+    setEditingIndex(index);
   };
+
+  const handleSaveMetadata = () => {
+    setEditingIndex(null);
+    toast.success('Vehicle details updated!', {
+      style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)' }
+    });
+  };
+
+  const updateMetadataField = (field, value) => {
+    if (editingIndex === null) return;
+    const updatedVehicles = [...vehicles];
+    updatedVehicles[editingIndex] = { ...updatedVehicles[editingIndex], [field]: value };
+    setBookingData({ ...bookingData, vehicles: updatedVehicles });
+  };
+
+  if (isSubTaskActive && draftVehicle) {
+    // Virtual state proxy to isolate draft from global fleet
+    const virtualBookingData = { ...bookingData, vehicles: [draftVehicle] };
+    const virtualSetBookingData = (newData) => setDraftVehicle(newData.vehicles[0]);
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ padding: '0.5rem 1rem', background: 'rgba(var(--admin-brand-rgb), 0.1)', border: '1px solid var(--admin-brand)', borderRadius: '4px', width: 'fit-content', color: 'var(--admin-brand)', fontSize: '0.75rem', fontWeight: '900', textTransform: 'uppercase' }}>
+          Configuring New Fleet Asset
+        </div>
+        <Step2Services 
+          bookingData={virtualBookingData} 
+          setBookingData={virtualSetBookingData} 
+          activeVehicleIndex={0} 
+          onNext={commitDraftVehicle} 
+        />
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -188,24 +240,33 @@ const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, se
         >
           Back
         </button>
-        <button 
-          onClick={onNext}
-          style={{
-            padding: '1rem 2rem',
-            background: 'var(--admin-brand)',
-            color: '#fff',
-            border: '1px solid var(--admin-brand)',
-            borderRadius: 'var(--admin-radius-md)',
-            fontWeight: '950',
-            fontSize: '1rem',
-            cursor: 'pointer',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            transition: 'all 0.3s ease'
-          }}
-        >
-          Next: Review & Payment
-        </button>
+        <div style={{ position: 'relative' }}>
+          {vehicles.length === 0 && (
+            <div style={{ position: 'absolute', bottom: '100%', right: 0, marginBottom: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.4rem 0.8rem', borderRadius: '4px', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', border: '1px solid rgba(239, 68, 68, 0.2)', whiteSpace: 'nowrap' }}>
+              At least one vehicle required to proceed
+            </div>
+          )}
+          <button 
+            onClick={onNext}
+            disabled={vehicles.length === 0}
+            style={{
+              padding: '1rem 2rem',
+              background: vehicles.length === 0 ? 'var(--admin-card)' : 'var(--admin-brand)',
+              color: vehicles.length === 0 ? 'var(--admin-text-secondary)' : '#fff',
+              border: `1px solid ${vehicles.length === 0 ? 'var(--admin-border)' : 'var(--admin-brand)'}`,
+              borderRadius: 'var(--admin-radius-md)',
+              fontWeight: '950',
+              fontSize: '1rem',
+              cursor: vehicles.length === 0 ? 'not-allowed' : 'pointer',
+              textTransform: 'uppercase',
+              letterSpacing: '1px',
+              transition: 'all 0.3s ease',
+              opacity: vehicles.length === 0 ? 0.5 : 1
+            }}
+          >
+            Next: Review & Payment
+          </button>
+        </div>
       </div>
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm !== null && (
@@ -230,6 +291,93 @@ const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, se
                 style={{ flex: 1, padding: '1rem', background: '#ef4444', border: 'none', borderRadius: 'var(--admin-radius-md)', fontWeight: '900', color: '#fff', cursor: 'pointer' }}
               >
                 Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Scoped Metadata Edit Modal */}
+      {editingIndex !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(10px)' }}>
+          <div style={{ background: 'var(--admin-card)', padding: '2.5rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', width: '100%', maxWidth: '550px', textAlign: 'left', boxShadow: '0 20px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
+            
+            {/* Close Button */}
+            <button 
+              onClick={() => setEditingIndex(null)}
+              style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'transparent', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer', padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', transition: 'all 0.2s' }}
+              className="admin-card-hover"
+            >
+              <X size={20} />
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Car size={24} color="var(--admin-brand)" />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-text-primary)', margin: 0, textTransform: 'uppercase' }}>Edit Vehicle Details</h3>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Refine your vehicle identification metadata.</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Editable Fields */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '800', color: 'var(--admin-text-secondary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Brand</label>
+                  <input 
+                    type="text"
+                    value={vehicles[editingIndex].brand}
+                    onChange={(e) => updateMetadataField('brand', e.target.value)}
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '700' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '800', color: 'var(--admin-text-secondary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Model</label>
+                  <input 
+                    type="text"
+                    value={vehicles[editingIndex].model}
+                    onChange={(e) => updateMetadataField('model', e.target.value)}
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '700' }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '800', color: 'var(--admin-text-secondary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Plate Number</label>
+                <input 
+                  type="text"
+                  value={vehicles[editingIndex].plateNumber}
+                  onChange={(e) => updateMetadataField('plateNumber', e.target.value.toUpperCase())}
+                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '700' }}
+                />
+              </div>
+
+              {/* Locked Fields */}
+              <div style={{ background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: 'var(--admin-radius-md)', border: '1px dashed var(--admin-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--admin-text-secondary)', fontSize: '0.7rem', fontWeight: '900', textTransform: 'uppercase' }}>
+                  <Lock size={12} /> Resource Locks (Secured in Step 1 & 2)
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--admin-text-primary)', fontWeight: '700' }}>
+                    Type: <span style={{ color: 'var(--admin-text-secondary)' }}>{vehicles[editingIndex].type}</span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--admin-text-primary)', fontWeight: '700' }}>
+                    Services: <span style={{ color: 'var(--admin-text-secondary)' }}>{vehicles[editingIndex].services?.map(s => s.name).join(', ')}</span>
+                  </div>
+                </div>
+                <div style={{ marginTop: '0.75rem', fontSize: '0.65rem', color: 'var(--admin-brand)', fontWeight: '700', fontStyle: 'italic' }}>
+                  *Changing Type or Services requires re-evaluating schedule occupancy. Use the progress bar above to go back.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+              <button 
+                onClick={handleSaveMetadata}
+                style={{ flex: 1, padding: '1rem', background: 'var(--admin-brand)', border: 'none', borderRadius: 'var(--admin-radius-md)', fontWeight: '900', color: '#fff', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
+              >
+                Save Vehicle Details
               </button>
             </div>
           </div>

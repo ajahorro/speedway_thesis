@@ -216,12 +216,48 @@ const CustomerBookingDetails = () => {
                   </div>
                 ))}
               </div>
-
               {/* Vehicle Subtotal */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px dashed var(--admin-border)' }}>
                 <span style={{ fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>
                   Vehicle Total: ₱{(v.subtotal || (v.services || []).reduce((sum, s) => sum + Number(s.price || s.price_snapshot || 0), 0)).toLocaleString()}
                 </span>
+              </div>
+
+              {/* REQ-ADM-15: TECHNICAL DOCUMENTATION (Photos & Notes) */}
+              <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', gap: '1.5rem' }}>
+                  <div>
+                    <div style={labelStyle}>Service Started</div>
+                    <div style={v.started_at ? valStyle : { ...valStyle, opacity: 0.2 }}>
+                      {v.started_at ? new Date(v.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={labelStyle}>Service Finished</div>
+                    <div style={v.completed_at ? { ...valStyle, color: 'var(--admin-success)' } : { ...valStyle, opacity: 0.2 }}>
+                      {v.completed_at ? new Date(v.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---'}
+                    </div>
+                  </div>
+                </div>
+
+                {(v.service_notes || v.photo_proof_url) && (
+                  <div style={{ display: 'flex', gap: '1.5rem' }}>
+                    {v.photo_proof_url && (
+                      <div 
+                        onClick={() => window.open(v.photo_proof_url, '_blank')}
+                        style={{ width: '80px', height: '80px', borderRadius: '8px', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', flexShrink: 0 }}
+                      >
+                        <img src={v.photo_proof_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Service Evidence" />
+                      </div>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ ...labelStyle, color: 'var(--admin-brand)', marginBottom: '0.4rem' }}>Technician Detailing Notes</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--admin-text-secondary)', fontWeight: '600', fontStyle: 'italic', lineHeight: 1.5 }}>
+                        "{v.service_notes || 'No detailing notes provided by technician.'}"
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ))}

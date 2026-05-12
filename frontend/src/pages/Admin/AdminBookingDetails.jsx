@@ -6,8 +6,11 @@ import {
   History, CheckCircle, XCircle, AlertCircle, MessageCircle,
   Hash, Calendar, Phone, Shield, Activity, Play, CheckCircle2,
   Package, Truck, Trash2, Banknote, Loader2, Eye, ArrowRight, X, UserX, Box,
-  Send, ShieldCheck, Image as ImageIcon
+  Send, ShieldCheck, ShieldAlert, Image as ImageIcon, Plus, Zap
 } from 'lucide-react';
+import { SERVICES_DATA } from '../../data/servicesCatalog';
+import { calculateOccupancy, filterActiveBookings } from '../../utils/schedulingUtils';
+import { SHOP_CONFIG } from '../../config/constants';
 import toast from 'react-hot-toast';
 import BookingAuditTrail from '../../components/BookingAuditTrail';
 import BookingChat from '../../components/BookingChat';
@@ -28,6 +31,11 @@ const AdminBookingDetails = () => {
   const [paymentModal, setPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [serviceModal, setServiceModal] = useState({ open: false, vehicleId: null });
+  const [historyModal, setHistoryModal] = useState(false);
+  const [userBookings, setUserBookings] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isUpdatingDuration, setIsUpdatingDuration] = useState(false);
   const isMobile = useMediaQuery('(max-width: 1024px)');
 
   useEffect(() => {
@@ -154,8 +162,34 @@ const AdminBookingDetails = () => {
   };
 
   const fetchStaffList = async () => {
-    const { data } = await supabase.from('profiles').select('*').eq('role', 'STAFF');
-    if (data) setStaffList(data);
+    try {
+      const { data: allStaff } = await supabase.from('profiles').select('*').eq('role', 'STAFF');
+      if (!allStaff || !booking) {
+        if (allStaff) setStaffList(allStaff);
+        return;
+      }
+
+      // TECHNICIAN COLLISION GUARD: Find staff busy during this booking's window
+      const { data: busyAssignments } = await supabase
+        .from('bookings')
+        .select('staff_id')
+        .neq('id', id)
+        .neq('status', 'cancelled')
+        .not('staff_id', 'is', null)
+        .lte('start_datetime', booking.end_datetime)
+        .gte('end_datetime', booking.start_datetime);
+
+      const busyIds = new Set(busyAssignments?.map(a => a.staff_id) || []);
+      
+      const filteredStaff = allStaff.map(s => ({
+        ...s,
+        isBusy: busyIds.has(s.id)
+      }));
+
+      setStaffList(filteredStaff);
+    } catch (err) {
+      logger.error('Staff Fetch Error', err);
+    }
   };
 
   const fetchAuditLogs = async () => {
@@ -321,9 +355,86 @@ const AdminBookingDetails = () => {
     }
   };
 
+  const handleAddService = async (vehicleId, service) => {
+    setIsUpdatingDuration(true);
+    const toastId = toast.loading('Validating schedule integrity...');
+    try {
+      const v = vehicles.find(item => item.id === vehicleId);
+      const vehicleType = v.vehicle_type;
+      const price = service.prices[vehicleType] || 0;
+      const extraMinutes = service.durationMinutes || 60;
+
+      // 1. DURATION UPDATE GUARD: Check if extending the end_datetime causes overbooking
+      const newEndDatetime = new Date(new Date(booking.end_datetime).getTime() + extraMinutes * 60000).toISOString();
+      
+      const { data: overlapping } = await supabase
+        .from('bookings')
+        .select('id, start_datetime, end_datetime, status, vehicles:booking_vehicles(id, status)')
+        .neq('id', id)
+        .neq('status', 'cancelled')
+        .lte('start_datetime', newEndDatetime)
+        .gte('end_datetime', booking.start_datetime);
+
+      const { data: blocks } = await supabase.from('blocked_slots').select('*').eq('date', booking.start_datetime.split('T')[0]);
+
+      // Check each hour from now until the new end time
+      const startH = new Date(booking.start_datetime).getHours();
+      const newEndH = new Date(newEndDatetime).getHours();
+      const activeBookings = filterActiveBookings(overlapping || []);
+
+      for (let h = startH; h <= newEndH; h++) {
+        const occ = calculateOccupancy(h, booking.start_datetime.split('T')[0], activeBookings, blocks || []);
+        if (occ >= SHOP_CONFIG.MAX_BAYS) {
+          throw new Error(`CRITICAL OVERBOOKING: Bay capacity exceeded at ${h}:00. Cannot extend duration.`);
+        }
+      }
+
+      // 2. Commit Service
+      const { error: sError } = await supabase.from('booking_vehicle_services').insert({
+        booking_vehicle_id: vehicleId,
+        service_name: service.name,
+        price: price
+      });
+
+      if (sError) throw sError;
+
+      // 3. Update Booking End Time and Total
+      const { error: bError } = await supabase.from('bookings').update({
+        end_datetime: newEndDatetime,
+        total_amount: Number(booking.total_amount) + price
+      }).eq('id', id);
+
+      if (bError) throw bError;
+
+      // 4. Audit Log
+      const { data: { user: actor } } = await supabase.auth.getUser();
+      await supabase.from('audit_logs').insert({
+        booking_id: id,
+        action_type: 'SERVICE_ADDED',
+        actor_name: actor?.email || 'Admin',
+        actor_role: 'ADMIN',
+        details: `Added ${service.name} to ${v.make} ${v.model}. Duration extended by ${extraMinutes}m.`
+      });
+
+      toast.success('Service added and schedule synchronized.', { id: toastId });
+      fetchBookingDetails();
+      setServiceModal({ open: false, vehicleId: null });
+    } catch (err) {
+      toast.error(err.message || 'Validation failed', { id: toastId });
+    } finally {
+      setIsUpdatingDuration(false);
+    }
+  };
+
   const updateVehicleStatus = async (vehicleId, status) => {
     try {
-      const { error } = await supabase.from('booking_vehicles').update({ status }).eq('id', vehicleId);
+      const timestamp = new Date().toISOString();
+      const updateData = { status };
+      
+      if (status === 'in_progress') updateData.started_at = timestamp;
+      if (status === 'completed') updateData.completed_at = timestamp;
+
+      const { error } = await supabase.from('booking_vehicles').update(updateData).eq('id', vehicleId);
       if (error) throw error;
       
       if (status === 'completed') {
@@ -345,6 +456,25 @@ const AdminBookingDetails = () => {
       toast.success(`Vehicle ${status}`);
       fetchBookingDetails(); fetchAuditLogs();
     } catch (err) { toast.error('Vehicle update failed'); }
+  };
+
+  const fetchCustomerHistory = async () => {
+    setHistoryModal(true);
+    setLoadingHistory(true);
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`*, vehicles:booking_vehicles(*, services:booking_vehicle_services(*))`)
+        .eq('customer_id', booking.customer_id)
+        .order('start_datetime', { ascending: false });
+
+      if (error) throw error;
+      setUserBookings(data || []);
+    } catch (err) {
+      toast.error('Failed to load history');
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   const cardStyle = {
@@ -546,20 +676,88 @@ const AdminBookingDetails = () => {
                           <div style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>{v.plate_number} • {v.vehicle_type}</div>
                         </div>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontWeight: '950', color: 'var(--admin-brand)', fontSize: '1.1rem', marginBottom: '0.25rem' }}>₱{v.subtotal?.toLocaleString()}</div>
-                        <button 
-                          onClick={() => updateVehicleStatus(v.id, v.status === 'in_progress' ? 'completed' : 'in_progress')}
-                          style={{ 
-                            background: v.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : 'var(--admin-bg)', 
-                            border: `1px solid ${v.status === 'completed' ? '#10b981' : 'var(--admin-border)'}`, 
-                            padding: '0.4rem 0.8rem', borderRadius: '4px', color: v.status === 'completed' ? '#10b981' : 'var(--admin-text-secondary)', 
-                            cursor: 'pointer', fontSize: '0.6rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem'
-                          }}
-                        >
-                          {v.status === 'completed' ? <><CheckCircle2 size={12} /> COMPLETED</> : <><Play size={12} /> {v.status === 'in_progress' ? 'FINISH' : 'START'}</>}
-                        </button>
+                      <div style={{ textAlign: 'right', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: '950', color: 'var(--admin-brand)', fontSize: '1.1rem', marginBottom: '0.25rem' }}>₱{v.subtotal?.toLocaleString()}</div>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button 
+                              onClick={() => setServiceModal({ open: true, vehicleId: v.id })}
+                              disabled={isLocked}
+                              style={{ 
+                                background: 'transparent', border: '1px solid #444', 
+                                padding: '0.4rem 0.6rem', borderRadius: '4px', color: 'var(--admin-text-secondary)', 
+                                cursor: 'pointer', fontSize: '0.6rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.3rem'
+                              }}
+                            >
+                              <Plus size={12} /> ADD
+                            </button>
+                            <button 
+                              onClick={() => updateVehicleStatus(v.id, v.status === 'in_progress' ? 'completed' : 'in_progress')}
+                              style={{ 
+                                background: v.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : 'var(--admin-bg)', 
+                                border: `1px solid ${v.status === 'completed' ? '#10b981' : 'var(--admin-border)'}`, 
+                                padding: '0.4rem 0.8rem', borderRadius: '4px', color: v.status === 'completed' ? '#10b981' : 'var(--admin-text-secondary)', 
+                                cursor: 'pointer', fontSize: '0.6rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem'
+                              }}
+                            >
+                              {v.status === 'completed' ? <><CheckCircle2 size={12} /> COMPLETED</> : <><Play size={12} /> {v.status === 'in_progress' ? 'FINISH' : 'START'}</>}
+                            </button>
+                          </div>
+                        </div>
                       </div>
+                    </div>
+
+                    {/* SERVICES LIST */}
+                    <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      {v.services?.map((s, idx) => (
+                        <div key={idx} style={{ 
+                          padding: '0.3rem 0.7rem', background: 'rgba(255,255,255,0.02)', 
+                          border: '1px solid var(--admin-border)', borderRadius: '4px',
+                          display: 'flex', alignItems: 'center', gap: '0.5rem'
+                        }}>
+                          <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'white', textTransform: 'uppercase' }}>{s.service_name}</span>
+                          <span style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{s.price?.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* REQ-ADM-15: TECHNICAL DOCUMENTATION (Photos & Notes) */}
+                    <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.03)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '1.5rem' }}>
+                          <div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>Started At</div>
+                            <div style={{ fontSize: '0.75rem', fontWeight: '800', color: v.started_at ? '#fff' : 'rgba(255,255,255,0.1)' }}>
+                              {v.started_at ? new Date(v.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>Finished At</div>
+                            <div style={{ fontSize: '0.75rem', fontWeight: '800', color: v.completed_at ? '#10b981' : 'rgba(255,255,255,0.1)' }}>
+                              {v.completed_at ? new Date(v.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '---'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {(v.service_notes || v.photo_proof_url) && (
+                        <div style={{ display: 'flex', gap: '1.5rem' }}>
+                          {v.photo_proof_url && (
+                            <div 
+                              onClick={() => window.open(v.photo_proof_url, '_blank')}
+                              style={{ width: '80px', height: '80px', borderRadius: '4px', background: 'black', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', flexShrink: 0 }}
+                            >
+                              <img src={v.photo_proof_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Service Evidence" />
+                            </div>
+                          )}
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-brand)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.4rem' }}>Technical Documentation</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600', fontStyle: 'italic', lineHeight: 1.4 }}>
+                              "{v.service_notes || 'No detailing notes provided by technician.'}"
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -578,7 +776,10 @@ const AdminBookingDetails = () => {
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white' }}>{booking.customer?.full_name}</h3>
-                <span style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-brand)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Fleet Account Holder</span>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                  <span style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-brand)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Fleet Account Holder</span>
+                  <button onClick={fetchCustomerHistory} style={{ background: 'transparent', border: 'none', color: 'var(--admin-info)', fontSize: '0.6rem', fontWeight: '950', cursor: 'pointer', padding: 0, textTransform: 'uppercase', textDecoration: 'underline' }}>VIEW HISTORY</button>
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -592,6 +793,66 @@ const AdminBookingDetails = () => {
               </div>
             </div>
           </div>
+
+          {/* AI VISION AUDIT PANEL (REQ-SYS-01) */}
+          {booking.ocr_metadata && Object.keys(booking.ocr_metadata).length > 0 && (
+            <div style={{ 
+              ...cardStyle, 
+              border: booking.ocr_metadata.status === 'MISMATCHED' ? '2px solid #f59e0b' : '1px solid var(--admin-border)',
+              boxShadow: booking.ocr_metadata.status === 'MISMATCHED' ? '0 0 20px rgba(245, 158, 11, 0.15)' : 'none',
+              animation: booking.ocr_metadata.status === 'MISMATCHED' ? 'pulse-border 2s infinite' : 'none'
+            }}>
+              <style>{`
+                @keyframes pulse-border {
+                  0% { border-color: #f59e0b; }
+                  50% { border-color: rgba(245, 158, 11, 0.2); }
+                  100% { border-color: #f59e0b; }
+                }
+              `}</style>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <Zap size={18} color={booking.ocr_metadata.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-brand)'} />
+                  <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'white', letterSpacing: '1px' }}>AI Vision Audit</h3>
+                </div>
+                <div style={{ fontSize: '0.55rem', fontWeight: '950', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>GEMINI 1.5 FLASH</div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                <div>
+                  <div style={labelStyle}>Extracted Reference</div>
+                  <div style={{ ...valueStyle, color: 'var(--admin-brand)', fontFamily: 'monospace', letterSpacing: '1px' }}>
+                    {booking.ocr_metadata.referenceNo || 'N/A'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <div style={labelStyle}>AI Detected</div>
+                    <div style={{ ...valueStyle, color: booking.ocr_metadata.status === 'MISMATCHED' ? '#f59e0b' : '#fff' }}>
+                      ₱{booking.ocr_metadata.amount?.toLocaleString() || '0'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={labelStyle}>Integrity</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <div style={{ flex: 1, height: '4px', background: 'var(--admin-bg)', borderRadius: '2px' }}>
+                        <div style={{ width: `${booking.ocr_metadata.integrity || 0}%`, height: '100%', background: 'var(--admin-brand)', borderRadius: '2px' }} />
+                      </div>
+                      <span style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-brand)' }}>{booking.ocr_metadata.integrity}%</span>
+                    </div>
+                  </div>
+                </div>
+
+                {booking.ocr_metadata.status === 'MISMATCHED' && (
+                  <div style={{ padding: '0.75rem', background: 'rgba(245, 158, 11, 0.1)', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <ShieldAlert size={14} color="#f59e0b" />
+                    <span style={{ fontSize: '0.65rem', fontWeight: '900', color: '#f59e0b', textTransform: 'uppercase' }}>AI Flagged Discrepancy</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* TECHNICIAN ASSIGNMENT */}
           <div style={{ ...cardStyle, opacity: (booking.status === 'in_progress' || isLocked) ? 0.6 : 1, pointerEvents: (booking.status === 'in_progress' || isLocked) ? 'none' : 'auto' }}>
@@ -658,7 +919,11 @@ const AdminBookingDetails = () => {
                 style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '900', outline: 'none', fontSize: '0.8rem' }}
               >
                 <option value="">SELECT STAFF...</option>
-                {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                {staffList.map(s => (
+                  <option key={s.id} value={s.id} disabled={s.isBusy}>
+                    {s.full_name} {s.isBusy ? '(OCCUPIED)' : ''}
+                  </option>
+                ))}
               </select>
             )}
           </div>
@@ -734,6 +999,83 @@ const AdminBookingDetails = () => {
             {booking.status === 'confirmed' && <button onClick={() => updateBookingStatus('in_progress')} style={{ padding: '0.85rem 2rem', background: 'var(--admin-brand)', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>START SESSION</button>}
             {booking.status === 'in_progress' && <button onClick={() => updateBookingStatus('completed')} style={{ padding: '0.85rem 2rem', background: '#a855f7', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>MARK COMPLETED</button>}
             <button onClick={() => updateBookingStatus('cancelled')} style={{ padding: '0.85rem 1.5rem', background: 'transparent', color: '#ef4444', borderRadius: '6px', border: '1px solid #ef4444', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer' }}>CANCEL SESSION</button>
+          </div>
+        </div>
+      )}
+      {/* SERVICE MANAGEMENT MODAL */}
+      {serviceModal.open && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+          <div style={{ background: '#15171A', border: '1px solid var(--admin-border)', borderRadius: '8px', width: '100%', maxWidth: '800px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', textTransform: 'uppercase' }}>Add Service Treatment</h3>
+                <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>Extending duration will re-validate bay capacity.</p>
+              </div>
+              <button onClick={() => setServiceModal({ open: false, vehicleId: null })} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {Object.keys(SERVICES_DATA).map(category => (
+                <div key={category}>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-brand)', textTransform: 'uppercase', letterSpacing: '1.5px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Zap size={12} /> {category}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem' }}>
+                    {SERVICES_DATA[category].map(s => {
+                      const v = vehicles.find(item => item.id === serviceModal.vehicleId);
+                      const price = s.prices[v?.vehicle_type] || 0;
+                      if (price === 0) return null;
+                      
+                      return (
+                        <div 
+                          key={s.id} 
+                          onClick={() => handleAddService(serviceModal.vehicleId, s)}
+                          style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', padding: '1rem', cursor: 'pointer' }}
+                        >
+                          <div style={{ fontWeight: '950', fontSize: '0.85rem', marginBottom: '0.25rem' }}>{s.name}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.65rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>{s.estTime}</span>
+                            <span style={{ fontSize: '0.9rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{price.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* CUSTOMER HISTORY MODAL */}
+      {historyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+          <div style={{ background: '#15171A', border: '1px solid var(--admin-border)', borderRadius: '8px', width: '100%', maxWidth: '800px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', textTransform: 'uppercase' }}>{booking.customer?.full_name} • SYSTEM HISTORY</h3>
+                <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>Historical service records and revenue trail.</p>
+              </div>
+              <button onClick={() => setHistoryModal(false)} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem' }}>
+              {loadingHistory ? <LoadingState message="Syncing history..." /> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {userBookings.map(b => (
+                    <div key={b.id} style={{ background: 'var(--admin-bg)', padding: '1rem', borderRadius: '4px', border: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '0.8rem', fontWeight: '950', color: '#fff' }}>{new Date(b.start_datetime).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+                        <div style={{ fontSize: '0.65rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>ID: #{b.id.slice(0, 8).toUpperCase()} • {b.status.toUpperCase()}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{b.total_amount?.toLocaleString()}</div>
+                        <button onClick={() => { setHistoryModal(false); navigate(`/admin/bookings/${b.id}`); }} style={{ background: 'transparent', border: 'none', color: 'var(--admin-info)', fontSize: '0.6rem', fontWeight: '950', cursor: 'pointer', padding: 0 }}>VIEW DETAILS</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

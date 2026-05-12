@@ -8,7 +8,8 @@ const DetailTimeline = ({
   getBookingsForHour, 
   getBlockForHour, 
   onBookingClick, 
-  onDeleteBlock 
+  onDeleteBlock,
+  config = CONFIG
 }) => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -16,11 +17,11 @@ const DetailTimeline = ({
         const allHourBookings = getBookingsForHour(hour);
         const transientBookings = allHourBookings.filter(b => {
           const duration = (new Date(b.end_datetime) - new Date(b.start_datetime)) / (1000 * 60);
-          return duration < CONFIG.FULL_DAY_THRESHOLD_MINUTES;
+          return duration < config.FULL_DAY_THRESHOLD_MINUTES;
         });
         const block = getBlockForHour(hour);
-        const occupancy = allHourBookings.length;
-        const isFullyBooked = occupancy >= CONFIG.MAX_BAYS;
+        const occupancy = allHourBookings.reduce((sum, b) => sum + (b.vehicles?.length || 1), 0);
+        const isFullyBooked = occupancy >= config.MAX_BAYS;
         const statusColor = getOccupancyColor(occupancy);
 
         return (
@@ -36,7 +37,7 @@ const DetailTimeline = ({
                 color: statusColor,
                 border: `1px solid ${isFullyBooked ? 'rgba(239, 68, 68, 0.2)' : COLORS.BORDER}`
               }}>
-                {occupancy}/{CONFIG.MAX_BAYS} BAYS
+                {occupancy}/{config.MAX_BAYS} BAYS
               </div>
             </div>
             <div style={{ flex: 1, padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'relative' }}>

@@ -75,6 +75,8 @@ const AdminBookings = () => {
     const filter = params.get('filter');
     if (filter === 'unassigned') {
       setState(prev => ({ ...prev, filterStatus: 'unassigned' }));
+    } else if (filter === 'overdue') {
+      setState(prev => ({ ...prev, filterStatus: 'overdue' }));
     }
 
     // Live synchronization channel
@@ -97,9 +99,13 @@ const AdminBookings = () => {
       
       let matchesStatus = state.filterStatus === 'all' || b.status === state.filterStatus;
       
-      // SPECIAL FILTER: UNASSIGNED
+      // SPECIAL FILTER: UNASSIGNED & OVERDUE
       if (state.filterStatus === 'unassigned') {
         matchesStatus = !b.staff_id && b.status !== 'cancelled';
+      } else if (state.filterStatus === 'overdue') {
+        const now = new Date();
+        const start = new Date(b.start_datetime);
+        matchesStatus = start < now && !['completed', 'cancelled'].includes(b.status.toLowerCase());
       }
       
       return matchesSearch && matchesStatus;
@@ -161,7 +167,7 @@ const AdminBookings = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.4rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', overflowX: 'auto' }}>
-            {['all', 'unassigned', 'scheduled', 'ongoing', 'completed', 'cancelled'].map(f => (
+            {['all', 'unassigned', 'overdue', 'scheduled', 'ongoing', 'completed', 'cancelled'].map(f => (
               <button 
                 key={f}
                 onClick={() => setState(prev => ({ ...prev, filterStatus: f }))}

@@ -201,62 +201,6 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
               </div>
             )}
           </div>
-
-          {/* Vehicle Details Section (Relocated) */}
-          <div style={{ background: 'rgba(var(--admin-brand-rgb), 0.02)', padding: '1.5rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)' }}>
-            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>Vehicle Details</h3>
-            <p style={{ margin: '0 0 1.5rem 0', color: 'var(--admin-text-secondary)', fontSize: '0.75rem', fontWeight: '600' }}>
-              Details of the vehicle you are bringing in.
-            </p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Type</label>
-                <select
-                  value={vehicle.type || ''}
-                  onChange={(e) => handleVehicleChange('type', e.target.value)}
-                  style={{ ...inputStyle, padding: '0.75rem' }}
-                >
-                  <option value="" disabled>Select Type</option>
-                  <option value="Sedan">Sedan</option>
-                  <option value="SUV">SUV</option>
-                  <option value="Van/L300">Van/L300</option>
-                  <option value="Regular">Motorcycle (Regular)</option>
-                  <option value="Bigbike">Motorcycle (Bigbike)</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Brand</label>
-                <input 
-                  type="text"
-                  value={vehicle.brand || ''}
-                  onChange={(e) => handleVehicleChange('brand', e.target.value)}
-                  style={{ ...inputStyle, padding: '0.75rem' }}
-                  placeholder="e.g. Toyota"
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Model</label>
-                <input 
-                  type="text"
-                  value={vehicle.model || ''}
-                  onChange={(e) => handleVehicleChange('model', e.target.value)}
-                  style={{ ...inputStyle, padding: '0.75rem' }}
-                  placeholder="e.g. Camry"
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Plate #</label>
-                <input 
-                  type="text"
-                  value={vehicle.plateNumber || ''}
-                  onChange={(e) => handleVehicleChange('plateNumber', e.target.value.toUpperCase())}
-                  style={{ ...inputStyle, padding: '0.75rem' }}
-                  placeholder="e.g. ABC-1234"
-                />
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 

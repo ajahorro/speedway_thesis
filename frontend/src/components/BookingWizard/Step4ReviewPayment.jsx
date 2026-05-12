@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, CheckCircle2, Wallet, Banknote, ShieldAlert } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useConfig } from '../../context/ConfigContext';
 
 const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSubmit, isSubmitting }) => {
-  const [businessConfig, setBusinessConfig] = useState(null);
+  const { settings } = useConfig();
   const [isUploading, setIsUploading] = useState(false);
   const [receiptDetails, setReceiptDetails] = useState(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -23,96 +24,61 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
     return total + (v.services || []).reduce((sub, s) => sub + s.price, 0);
   }, 0);
 
-  // Fetch business settings for GCash info
-  useEffect(() => {
-    const fetchConfig = async () => {
-      const { data, error } = await supabase.from('business_config').select('gcash_number, gcash_name, gcash_qr_url').limit(1).single();
-      if (!error && data) {
-        setBusinessConfig(data);
-      }
-    };
-    fetchConfig();
-  }, []);
+  // Removed local fetchConfig - now using useConfig hook for global settings
 
   const [scanStep, setScanStep] = useState('');
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (file) {
+      // 🔄 RESET: Clear the input so selecting the same file again triggers onChange
+      e.target.value = null;
+      
       setIsUploading(true);
       setReceiptDetails(null);
+      setScanStep('TRANSMITTING TO AI AUDITOR...');
       
-      // SAVE THE FILE IMMEDIATELY: Admin will perform final verification anyway
+      // Save the file reference
       setBookingData(prev => ({
         ...prev,
         payment: { ...prev.payment, proofOfPayment: file }
       }));
       
       try {
-        if (!window.Tesseract) {
-          throw new Error("OCR Engine not ready. Please refresh the page or check your connection.");
-        }
+        const formData = new FormData();
+        formData.append('receipt', file);
 
-        setScanStep('PREPARING SCANNER...');
-        
-        const result = await window.Tesseract.recognize(
-          file,
-          'eng',
-          { 
-            logger: m => {
-              if (m.status === 'recognizing text') {
-                setScanStep(`ANALYZING PIXELS: ${Math.floor(m.progress * 100)}%`);
-              } else if (m.status === 'loading tesseract core') {
-                setScanStep('LOADING CORE...');
-              }
-            }
-          }
-        );
+        const response = await fetch('http://localhost:3000/api/ocr/verify-receipt', {
+          method: 'POST',
+          body: formData
+        });
 
-        const text = result.data.text;
-        const upperText = text.toUpperCase();
-        
-        setScanStep('SCANNING DOCUMENT INTEGRITY...');
-        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!response.ok) throw new Error('AI analysis service unavailable. Please try again.');
 
-        // 1. Validation Logic
-        const keywords = ['GCASH', 'AMOUNT', 'PHP', 'REF', 'SUCCESS', 'SENT', 'RECEIVED', 'TRANSACTION', 'DATE', 'TIME', 'BANK', 'TRANSFER', 'MAYA'];
-        const matches = keywords.filter(k => upperText.includes(k));
-        
-        // If text is too sparse or missing too many keywords, it's likely not a receipt
-        if (matches.length < 2) {
-          throw new Error("UNRECOGNIZED DOCUMENT FORMAT: No financial patterns detected. Please upload a clear photo of your receipt.");
-        }
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error);
 
-        if (upperText.includes('QR CODE') || (upperText.includes('SCAN') && !upperText.includes('SUCCESS'))) {
-          throw new Error("SCAN FAILED: The uploaded image appears to be a QR code. Please upload the transaction receipt screenshot instead.");
-        }
-
-        setScanStep('VERIFYING RECIPIENT...');
-        const targetName = (businessConfig?.gcash_name || 'SPEEDWAY').toUpperCase();
-        const recipientMatch = upperText.includes(targetName) || upperText.includes('SPEEDWAY');
-
-        setScanStep('EXTRACTING AMOUNT...');
-        const amountRegex = /(?:PHP|₱)?\s*([\d,]+\.\d{2})/g;
-        const amountMatches = [...text.matchAll(amountRegex)];
-        let extractedAmount = 0;
-        if (amountMatches.length > 0) {
-          const amounts = amountMatches.map(m => parseFloat(m[1].replace(/,/g, '')));
-          extractedAmount = Math.max(...amounts);
-        }
-
+        const extractedData = result.data;
         const requiredAmount = bookingData.payment.type === 'Full' ? grandTotal : Math.ceil(grandTotal * 0.3);
+        
+        // VALIDATION: Compare extracted amount with required amount
+        const isAmountMatched = extractedData.amount >= (requiredAmount * 0.95); // 5% margin for rounding
+
+        setScanStep('FINALIZING AUDIT...');
+        await new Promise(resolve => setTimeout(resolve, 800));
 
         const resultObj = {
-          referenceNo: text.match(/(?:REF|ID)\.?\s*([0-9\sA-Z]{8,})/i)?.[1].trim() || `REF-${Math.floor(Math.random() * 1000000000)}`,
-          amount: extractedAmount || requiredAmount,
+          referenceNo: extractedData.referenceNo,
+          amount: extractedData.amount,
           requiredAmount: requiredAmount,
-          date: new Date().toLocaleString(),
-          status: 'MATCHED',
-          recipient: businessConfig?.gcash_name || 'SPEEDWAY STUDIO',
-          recipientMatch: recipientMatch,
-          integrity: 95 + Math.floor(Math.random() * 5),
-          description: `DEEP SCAN COMPLETE: Detected ${matches.length} financial markers. ${recipientMatch ? 'Recipient verified.' : 'Receipt structure valid.'}`
+          date: extractedData.date,
+          status: isAmountMatched ? 'MATCHED' : 'MISMATCHED',
+          recipient: settings?.GCASH_NAME || 'SPEEDWAY STUDIO',
+          recipientMatch: extractedData.isReceipt,
+          integrity: extractedData.integrity,
+          description: isAmountMatched 
+            ? `AI AUDIT COMPLETE: High-fidelity receipt detected. Reference and Amount verified.`
+            : `DISCREPANCY DETECTED: Receipt amount (₱${extractedData.amount.toLocaleString()}) does not match the required amount (₱${requiredAmount.toLocaleString()}).`
         };
 
         setReceiptDetails(resultObj);
@@ -123,13 +89,11 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
           payment: { ...prev.payment, ocrData: resultObj }
         }));
 
-
-
       } catch (err) {
         setReceiptDetails({
           status: 'REJECTED',
-          error: 'VERIFICATION FAILED',
-          description: err.message || "The uploaded image could not be verified as a valid receipt. Please try a clearer photo."
+          error: 'AI VERIFICATION FAILED',
+          description: err.message || "The AI could not verify this document. Please ensure it is a clear photo of your receipt."
         });
       } finally {
         setIsUploading(false);
@@ -313,15 +277,15 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
 
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>Scan to Pay</div>
-                  {businessConfig ? (
+                  {settings.loaded ? (
                     <>
-                      {businessConfig.gcash_qr_url ? (
-                        <img src={businessConfig.gcash_qr_url} alt="GCash QR" style={{ width: '100%', maxWidth: '400px', height: '550px', objectFit: 'contain', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', margin: '1.5rem 0', background: '#fff', padding: '1.5rem', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} />
+                      {settings.GCASH_QR_URL ? (
+                        <img src={settings.GCASH_QR_URL} alt="GCash QR" style={{ width: '100%', maxWidth: '400px', height: '550px', objectFit: 'contain', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', margin: '1.5rem 0', background: '#fff', padding: '1.5rem', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} />
                       ) : (
                         <div style={{ width: '100%', maxWidth: '400px', height: '550px', margin: '1.5rem auto', background: 'var(--admin-card)', border: '1px dashed var(--admin-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', borderRadius: 'var(--admin-radius-lg)' }}>No QR Configured</div>
                       )}
-                      <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{businessConfig.gcash_name}</div>
-                      <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--admin-brand)', marginTop: '0.25rem' }}>{businessConfig.gcash_number}</div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{settings.GCASH_NAME}</div>
+                      <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--admin-brand)', marginTop: '0.25rem' }}>{settings.GCASH_NUMBER}</div>
                     </>
                   ) : (
                     <div style={{ padding: '2rem', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>Loading business settings...</div>
@@ -405,11 +369,11 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                              {receiptDetails.status === 'REJECTED' ? <ShieldAlert size={20} color="#fff" /> : <CheckCircle2 size={20} color="#fff" />}
                           </div>
                           <div>
-                            <div style={{ color: receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-success)', fontWeight: '950', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                              {receiptDetails.status === 'REJECTED' ? 'Verification Failed' : 'Deep Scan Verified'}
+                            <div style={{ color: receiptDetails.status === 'REJECTED' ? '#ef4444' : (receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)'), fontWeight: '950', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                              {receiptDetails.status === 'REJECTED' ? 'Verification Failed' : (receiptDetails.status === 'MISMATCHED' ? 'Amount Discrepancy' : 'AI Audit Verified')}
                             </div>
                             <div style={{ color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '800' }}>
-                              {receiptDetails.status === 'REJECTED' ? 'SYSTEM ALERT: INVALID FORMAT' : 'SECURITY SIGNATURE: HIGH CONFIDENCE'}
+                              {receiptDetails.status === 'REJECTED' ? 'SYSTEM ALERT: INVALID FORMAT' : (receiptDetails.status === 'MISMATCHED' ? 'WARNING: PRICE MISMATCH' : 'SECURITY SIGNATURE: GEMINI 1.5 FLASH')}
                             </div>
                           </div>
                         </div>
@@ -470,9 +434,9 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                                 <div style={{ color: 'var(--admin-text-primary)', fontSize: '1.5rem', fontWeight: '950' }}>₱{receiptDetails.amount.toLocaleString()}</div>
                               </div>
                               <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-success)', textTransform: 'uppercase' }}>Status</div>
-                                <div style={{ color: 'var(--admin-success)', fontSize: '0.85rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                  MATCHED <CheckCircle2 size={16} />
+                                <div style={{ fontSize: '0.65rem', fontWeight: '900', color: receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)', textTransform: 'uppercase' }}>Status</div>
+                                <div style={{ color: receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)', fontSize: '0.85rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  {receiptDetails.status} {receiptDetails.status === 'MATCHED' ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />}
                                 </div>
                               </div>
                             </div>
@@ -480,7 +444,16 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                         ) : (
                           <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: 'var(--admin-radius-sm)', border: '1px dashed #ef4444', textAlign: 'center' }}>
                             <p style={{ margin: 0, fontSize: '0.8rem', fontWeight: '800', color: '#ef4444' }}>
-                              Please ensure you are uploading the <strong style={{ textDecoration: 'underline' }}>Official E-Receipt</strong> and not the QR code itself.
+                              AI analysis inconclusive. You may proceed, and our staff will manually verify this receipt before your appointment.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Soft Note for Mismatches */}
+                        {receiptDetails.status === 'MISMATCHED' && (
+                          <div style={{ padding: '1rem', background: 'rgba(245, 158, 11, 0.05)', borderRadius: 'var(--admin-radius-sm)', border: '1px dashed #f59e0b', textAlign: 'center' }}>
+                            <p style={{ margin: 0, fontSize: '0.8rem', fontWeight: '800', color: '#f59e0b' }}>
+                              NOTE: Our staff will perform a final manual audit of this amount. You may proceed with your booking.
                             </p>
                           </div>
                         )}

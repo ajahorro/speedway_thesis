@@ -11,7 +11,8 @@ import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
 
 // Refactored Imports
-import { SHOP_CONFIG, COLORS } from '../../config/constants';
+import { COLORS } from '../../config/constants';
+import { useConfig } from '../../context/ConfigContext';
 import { segregateBookings } from '../../utils/schedulingUtils';
 import SegmentedTimePicker from '../../components/AdminSchedule/SegmentedTimePicker';
 import OccupancyShelf from '../../components/AdminSchedule/OccupancyShelf';
@@ -21,6 +22,7 @@ import { AlertTriangle, Info } from 'lucide-react';
 
 const AdminSchedule = () => {
   const navigate = useNavigate();
+  const { settings } = useConfig();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   
   // State: Navigation & Context
@@ -36,15 +38,15 @@ const AdminSchedule = () => {
   // State: Blocking Panel
   const [isAddingBlock, setIsAddingBlock] = useState(false);
   const [blockData, setBlockData] = useState({
-    startTime: `${String(SHOP_CONFIG.OPENING_HOUR).padStart(2, '0')}:00`,
-    endTime: `${String(SHOP_CONFIG.CLOSING_HOUR - 4).padStart(2, '0')}:00`,
+    startTime: `${String(settings.OPENING_HOUR).padStart(2, '0')}:00`,
+    endTime: `${String(settings.CLOSING_HOUR - 4).padStart(2, '0')}:00`,
     reason: '',
     isWholeDay: true
   });
 
   const hours = Array.from(
-    { length: SHOP_CONFIG.CLOSING_HOUR - SHOP_CONFIG.OPENING_HOUR + 1 }, 
-    (_, i) => i + SHOP_CONFIG.OPENING_HOUR
+    { length: settings.CLOSING_HOUR - settings.OPENING_HOUR + 1 }, 
+    (_, i) => i + settings.OPENING_HOUR
   );
 
   useEffect(() => {
@@ -226,7 +228,7 @@ const AdminSchedule = () => {
         onRefresh={fetchDailyContext}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '350px 1fr', gap: '2rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '350px 1fr', gap: '2rem', marginTop: '0.5rem' }}>
         {/* Left Panel: Calendar & Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* ── INDUSTRIAL CALENDAR (PHOTO MATCH) ── */}
@@ -401,6 +403,7 @@ const AdminSchedule = () => {
             <OccupancyShelf 
               bookings={bookings} 
               onBookingClick={(id) => navigate(`/admin/bookings/${id}`)} 
+              config={settings}
             />
 
             {loading ? <LoadingState message="Syncing timeline..." /> : (
@@ -441,6 +444,7 @@ const AdminSchedule = () => {
                   getBlockForHour={getBlockForHour}
                   onBookingClick={(id) => navigate(`/admin/bookings/${id}`)}
                   onDeleteBlock={handleDeleteBlock}
+                  config={settings}
                 />
               </>
             )}
