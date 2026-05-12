@@ -143,7 +143,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
         </div>
       )}
 
-      {/* Footer Subtotal & Actions */}
+          {/* Footer Subtotal & Actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1rem' }}>
         <div>
           <div style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Current Subtotal</div>
@@ -151,23 +151,6 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
         </div>
         
         <div style={{ display: 'flex', gap: '1rem' }}>
-          <button 
-            onClick={onBack}
-            style={{
-              padding: '1rem 2rem',
-              background: 'var(--admin-bg)',
-              color: 'var(--admin-text-primary)',
-              border: '1px solid var(--admin-border)',
-              borderRadius: 'var(--admin-radius-md)',
-              fontWeight: '950',
-              fontSize: '1rem',
-              cursor: 'pointer',
-              textTransform: 'uppercase',
-              letterSpacing: '1px'
-            }}
-          >
-            Back
-          </button>
           <button 
             onClick={onNext}
             disabled={currentServices.length === 0 || !vehicleType}
@@ -185,7 +168,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
               transition: 'all 0.3s ease'
             }}
           >
-            Next: Fleet Editing
+            Next: Select Schedule
           </button>
         </div>
       </div>

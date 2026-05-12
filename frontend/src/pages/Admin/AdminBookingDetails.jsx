@@ -347,9 +347,36 @@ const AdminBookingDetails = () => {
     } catch (err) { toast.error('Vehicle update failed'); }
   };
 
-  const cardStyle = { background: 'var(--admin-card)', borderRadius: '4px', border: '1px solid var(--admin-border)', padding: '1.5rem', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', color: 'var(--admin-text-primary)' };
-  const labelStyle = { fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem', letterSpacing: '1px' };
-  const valueStyle = { fontSize: '0.95rem', fontWeight: '950', color: 'var(--admin-text-primary)' };
+  const cardStyle = {
+    background: 'var(--admin-card)',
+    borderRadius: 'var(--admin-radius)',
+    padding: '1.5rem',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2)',
+    border: '1px solid rgba(255,255,255,0.05)'
+  };
+
+  const labelStyle = {
+    fontSize: '0.7rem',
+    fontWeight: '900',
+    color: '#6c757d',
+    textTransform: 'uppercase',
+    letterSpacing: '1px',
+    marginBottom: '0.4rem',
+    opacity: 0.6
+  };
+
+  const valueStyle = {
+    fontSize: '0.95rem',
+    fontWeight: '800',
+    color: '#fff'
+  };
+
+  const naStyle = {
+    fontSize: '0.95rem',
+    fontWeight: '700',
+    color: '#6c757d',
+    opacity: 0.5
+  };
 
   if (loading || !booking) return <LoadingState message="Synchronizing fleet records..." />;
 
@@ -364,83 +391,121 @@ const AdminBookingDetails = () => {
       display: 'flex', 
       flexDirection: 'column', 
       gap: '1.5rem', 
-      padding: '0.5rem 1.5rem 10rem 1.5rem',
+      padding: '0 0 10rem 0',
       position: 'relative'
     }}>
       
-      {/* 1. COMPACT CONSOLE HEADER (ALIGNED TO 1200px GUTTER) */}
-      <PageHeader 
-        showBack onBack={() => navigate(-1)} 
-        badge="ADMINISTRATIVE CONSOLE" 
-        title={`SW-BKG-${id.slice(0, 8).toUpperCase()}`} 
-        subtitle={`Detailed operational record for session initialized on ${new Date(booking.created_at).toLocaleDateString()}.`} 
-        titleStyle={{ fontSize: '1.85rem', fontWeight: '950', letterSpacing: '-1.5px' }}
-      />
+      {/* 1. HEADER & BREADCRUMBS (THE "STRONG LINE" ALIGNMENT) */}
+      <div style={{ marginBottom: '2.5rem' }}>
+        <button 
+          onClick={() => navigate(-1)}
+          style={{ 
+            display: 'flex', alignItems: 'center', gap: '0.4rem', 
+            background: 'none', color: 'var(--admin-text-secondary)', 
+            border: 'none', padding: 0, 
+            fontWeight: '900', cursor: 'pointer', 
+            fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '1.5px',
+            marginBottom: '1rem', opacity: 0.6
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.6'}
+        >
+          <ArrowLeft size={14} /> ADMINISTRATIVE CONSOLE
+        </button>
+        
+        <h1 style={{ margin: 0, fontSize: '2.8rem', fontWeight: '950', color: 'white', letterSpacing: '-2px', textTransform: 'uppercase', lineHeight: 1 }}>
+          {booking.booking_id || `SW-BKG-${id.slice(0, 8).toUpperCase()}`}
+        </h1>
+        <p style={{ margin: '0.75rem 0 0 0', color: 'var(--admin-text-secondary)', fontWeight: '600', fontSize: '0.95rem', opacity: 0.8 }}>
+          Detailed operational record for session initialized on {new Date(booking.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}.
+        </p>
+      </div>
 
-      {/* 2. TWO-COLUMN STABILIZED GRID (70/30 SPLIT) */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: isMobile ? '1fr' : '7fr 3fr', 
+        gridTemplateColumns: isMobile ? '1fr' : '7.5fr 2.5fr', 
         gap: '1.5rem',
         alignItems: 'start'
       }}>
         
-        {/* === MAIN COLUMN: FINANCIALS & FLEET ASSETS === */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
           
-          {/* A. FINANCIAL LEDGER (TABLE FORMAT) */}
           <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Banknote size={16} color="var(--admin-brand)" /> Financial Ledger
-              </h3>
-              <div style={{ fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{booking.total_amount?.toLocaleString()}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Banknote size={20} color="var(--admin-brand)" />
+                <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'white', letterSpacing: '1px' }}>Financial Ledger</h3>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem', letterSpacing: '1px', opacity: 0.6 }}>Total Booking Value</div>
+                <div style={{ fontSize: '1.8rem', fontWeight: '800', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '1.1rem', color: 'white', opacity: 0.4 }}>₱</span>{booking.total_amount?.toLocaleString()}
+                </div>
+              </div>
             </div>
 
-            <div style={{ overflowX: 'auto', marginBottom: '1.5rem' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', tableLayout: 'fixed' }}>
+            <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
                 <thead>
-                  <tr style={{ background: 'var(--admin-bg)', borderBottom: '1px solid var(--admin-border)' }}>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>DATE</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>METHOD</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>STATUS</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>AMOUNT</th>
+                  <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '2px solid var(--admin-border)' }}>
+                    <th style={{ padding: '1rem 0.75rem', textAlign: 'left', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>DATE</th>
+                    <th style={{ padding: '1rem 0.75rem', textAlign: 'left', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>TIME</th>
+                    <th style={{ padding: '1rem 0.75rem', textAlign: 'left', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>METHOD</th>
+                    <th style={{ padding: '1rem 0.75rem', textAlign: 'left', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>STATUS</th>
+                    <th style={{ padding: '1rem 0.75rem', textAlign: 'right', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>AMOUNT</th>
                   </tr>
                 </thead>
                 <tbody>
                   {bookingPayments.map((p) => (
                     <tr key={p.id} style={{ borderBottom: '1px solid var(--admin-border)' }}>
-                      <td style={{ padding: '1.25rem 0.75rem' }}>
+                      <td style={{ padding: '1.25rem 0.75rem', verticalAlign: 'middle', textAlign: 'left' }}>
                         <div style={{ fontWeight: '800', color: '#fff', fontSize: '0.85rem' }}>{new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
-                        <div style={{ fontSize: '0.75rem', color: '#A0A0A0', fontWeight: '600', marginTop: '0.25rem' }}>{new Date(p.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
                       </td>
-                      <td style={{ padding: '0.75rem', fontWeight: '800' }}>{p.method}</td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                      <td style={{ padding: '1.25rem 0.75rem', verticalAlign: 'middle', textAlign: 'left', fontSize: '0.75rem', color: '#A0A0A0', fontWeight: '800' }}>
+                        {new Date(p.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td style={{ padding: '1.25rem 0.75rem', verticalAlign: 'middle', textAlign: 'left', fontWeight: '800', color: '#A0A0A0' }}>{p.method}</td>
+                      <td style={{ padding: '1.25rem 0.75rem', verticalAlign: 'middle', textAlign: 'left' }}>
                         <span style={{ 
-                          fontSize: '0.55rem', fontWeight: '950', padding: '0.2rem 0.5rem', borderRadius: '2px',
+                          fontSize: '0.55rem', fontWeight: '950', padding: '0.3rem 0.6rem', borderRadius: '2px',
                           background: p.status === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                          color: p.status === 'PAID' ? '#10b981' : '#f59e0b'
+                          color: p.status === 'PAID' ? '#10b981' : '#f59e0b',
+                          border: `1px solid ${p.status === 'PAID' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'}`
                         }}>
                           {p.status.toUpperCase()}
                         </span>
                       </td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '950' }}>₱{p.amount?.toLocaleString()}</td>
+                      <td style={{ padding: '1.25rem 0.75rem', verticalAlign: 'middle', textAlign: 'right', fontWeight: '950' }}>₱{p.amount?.toLocaleString()}</td>
                     </tr>
                   ))}
                   {bookingPayments.length === 0 && (
-                    <tr><td colSpan="4" style={{ padding: '2rem', textAlign: 'center', opacity: 0.5 }}>NO TRANSACTIONS LOGGED</td></tr>
+                    <tr><td colSpan="5" style={{ padding: '3rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>NO TRANSACTIONS RECORDED</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
 
             <div style={{ 
-              padding: '1.25rem', background: balance === 0 ? 'rgba(16, 185, 129, 0.03)' : 'rgba(245, 158, 11, 0.03)', 
-              borderRadius: '0.75rem', textAlign: 'center', border: `1px solid ${balance === 0 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'}`,
-              color: balance === 0 ? '#10b981' : '#f59e0b', fontSize: '0.85rem', fontWeight: '950',
-              textTransform: 'uppercase', letterSpacing: '1px'
+              padding: '1rem', 
+              background: balance === 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)', 
+              borderRadius: '4px', 
+              textAlign: 'center', 
+              border: `1px solid ${balance === 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+              color: balance === 0 ? '#10b981' : '#f59e0b', 
+              fontSize: '0.8rem', 
+              fontWeight: '950',
+              textTransform: 'uppercase', 
+              letterSpacing: '0.8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.75rem'
             }}>
-              {balance === 0 ? '✓ ACCOUNT SETTLED' : `⚠ BALANCE DUE: ₱${balance.toLocaleString()}`}
+              {balance === 0 ? (
+                <><CheckCircle2 size={16} /> ACCOUNT SETTLED • NO BALANCE DUE</>
+              ) : (
+                <><AlertCircle size={16} /> ATTENTION: OUTSTANDING BALANCE ₱{balance.toLocaleString()}</>
+              )}
             </div>
 
             {balance > 0 && !isLocked && (
@@ -454,19 +519,18 @@ const AdminBookingDetails = () => {
             )}
           </div>
 
-          {/* B. FLEET ASSETS */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
               <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Car size={16} color="var(--admin-brand)" /> Fleet Units ({vehicles.length})
               </h3>
-              <div style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)' }}>BOOKING SUB-TOTAL: ₱{booking.total_amount?.toLocaleString()}</div>
+              <div style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>SUB-TOTAL: ₱{booking.total_amount?.toLocaleString()}</div>
             </div>
 
             {vehicles.length === 0 ? (
-              <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.3, background: 'var(--admin-bg)', borderRadius: '0.75rem', border: '1px dashed var(--admin-border)' }}>
-                <Box size={32} style={{ marginBottom: '1rem' }} />
-                <div style={{ fontSize: '0.8rem', fontWeight: '900' }}>NO ASSETS REGISTERED FOR THIS SESSION</div>
+              <div style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.3, background: 'var(--admin-bg)', borderRadius: '0.75rem', border: '1px dashed var(--admin-border)', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                <Box size={20} style={{ marginBottom: '0.5rem' }} />
+                <div style={{ fontSize: '0.65rem', fontWeight: '900' }}>NO ASSETS REGISTERED</div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -504,52 +568,42 @@ const AdminBookingDetails = () => {
           </div>
         </div>
 
-        {/* === SIDEBAR COLUMN: PERSONNEL, IDENTITY & SUPPORT === */}
+        {/* === SIDEBAR COLUMN === */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
           
-          {/* A. CUSTOMER IDENTITY */}
           <div style={cardStyle}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-              <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--admin-border)' }}>
-                <User size={22} color="var(--admin-text-secondary)" />
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--admin-border)' }}>
+                <User size={18} color="var(--admin-text-secondary)" />
               </div>
               <div>
-                <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '950', color: 'white' }}>{booking.customer?.full_name}</h3>
-                <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-brand)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Fleet Account Holder</span>
+                <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white' }}>{booking.customer?.full_name}</h3>
+                <span style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-brand)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Fleet Account Holder</span>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
-                <div style={labelStyle}>Registered Contact</div>
-                <div style={{ fontSize: '0.9rem', fontWeight: '800' }}>{booking.customer?.phone_number || 'N/A'}</div>
+                <div style={{ ...labelStyle, opacity: 0.6 }}>Registered Contact</div>
+                <div style={booking.customer?.phone_number ? valueStyle : naStyle}>{booking.customer?.phone_number || 'N/A'}</div>
               </div>
               <div>
-                <div style={labelStyle}>Primary Email ID</div>
-                <div style={{ fontSize: '0.9rem', fontWeight: '800' }}>{booking.customer?.email}</div>
+                <div style={{ ...labelStyle, opacity: 0.6 }}>Primary Email ID</div>
+                <div style={booking.customer?.email ? valueStyle : naStyle}>{booking.customer?.email}</div>
               </div>
             </div>
           </div>
 
-          {/* B. HANDLING NOTES */}
-          {booking.notes && (
-            <div style={{ ...cardStyle, borderLeft: '4px solid var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.02)' }}>
-              <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '0.75rem', fontWeight: '950', color: 'var(--admin-brand)', textTransform: 'uppercase' }}>Fleet Handling Notes</h3>
-              <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '700', lineHeight: 1.5, color: 'var(--admin-text-primary)' }}>{booking.notes}</p>
-            </div>
-          )}
-
-          {/* C. TECHNICIAN ASSIGNMENT */}
-          <div style={{ ...cardStyle, opacity: (booking.status === 'in_progress' || isLocked) ? 0.5 : 1, pointerEvents: (booking.status === 'in_progress' || isLocked) ? 'none' : 'auto', position: 'relative' }}>
+          {/* TECHNICIAN ASSIGNMENT */}
+          <div style={{ ...cardStyle, opacity: (booking.status === 'in_progress' || isLocked) ? 0.6 : 1, pointerEvents: (booking.status === 'in_progress' || isLocked) ? 'none' : 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)' }}>Technician Assignment</h3>
-              {booking.status === 'in_progress' && <span style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-brand)', background: 'rgba(230, 30, 42, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '2px' }}>SESSION ONGOING - LOCKED</span>}
+              <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>Personnel</h3>
             </div>
             
             {booking.staff_id ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--admin-bg)', padding: '1rem', borderRadius: '4px', border: '1px solid var(--admin-border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <ShieldCheck size={18} color="var(--admin-brand)" />
-                  <span style={{ fontSize: '0.9rem', fontWeight: '950' }}>{booking.assigned_staff?.full_name}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '0.85rem', borderRadius: '4px', border: '1px solid var(--admin-border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <ShieldCheck size={16} color="var(--admin-brand)" />
+                  <span style={{ fontSize: '0.85rem', fontWeight: '900', color: '#fff' }}>{booking.assigned_staff?.full_name}</span>
                 </div>
                 {!isLocked && booking.status !== 'in_progress' && (
                   <button 
@@ -562,7 +616,7 @@ const AdminBookingDetails = () => {
                               onClick={async () => {
                                 setBooking({...booking, staff_id: null});
                                 toast.dismiss(t.id);
-                                toast.success('Technician cleared. Ready for reassignment.');
+                                toast.success('Technician cleared.');
                               }}
                               style={{ background: 'var(--admin-brand)', color: 'white', border: 'none', padding: '0.4rem 1rem', borderRadius: '2px', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer' }}
                             >
@@ -576,9 +630,23 @@ const AdminBookingDetails = () => {
                             </button>
                           </div>
                         </div>
-                      ), { duration: 5000, position: 'top-center', style: { background: '#15171A', border: '1px solid var(--admin-border)', borderRadius: '4px', padding: '1rem' } });
+                      ), { 
+                        duration: 5000, 
+                        position: 'top-center', 
+                        style: { 
+                          background: '#15171A', 
+                          border: '1px solid var(--admin-border)', 
+                          borderRadius: '4px', 
+                          padding: '1.5rem',
+                          marginTop: '35vh',
+                          minWidth: '320px',
+                          boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
+                        } 
+                      });
                     }} 
-                    style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-brand)', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.5px' }}
+                    style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', background: 'transparent', border: '1px solid #444', padding: '0.25rem 0.5rem', borderRadius: '2px', cursor: 'pointer', transition: '0.2s' }}
+                    onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--admin-brand)'}
+                    onMouseLeave={(e) => e.currentTarget.style.borderColor = '#444'}
                   >
                     REASSIGN
                   </button>
@@ -587,12 +655,16 @@ const AdminBookingDetails = () => {
             ) : (
               <select 
                 onChange={(e) => handleAssignStaff(e.target.value)} 
-                style={{ width: '100%', padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '950', outline: 'none' }}
+                style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '900', outline: 'none', fontSize: '0.8rem' }}
               >
-                <option value="">SELECT TECHNICIAN...</option>
+                <option value="">SELECT STAFF...</option>
                 {staffList.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
               </select>
             )}
+          </div>
+
+          <div style={{ padding: '1rem', textAlign: 'center', opacity: 0.3, background: 'rgba(255,255,255,0.02)', borderRadius: '0.75rem', border: '1px dashed var(--admin-border)', minHeight: '80px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ fontSize: '0.65rem', fontWeight: '900' }}>LIVE SUPPORT LOGS (0)</div>
           </div>
 
           {/* D. DIGITAL VERIFICATION */}

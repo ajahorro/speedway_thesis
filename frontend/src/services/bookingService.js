@@ -25,7 +25,7 @@ export const createBooking = async (customerId, bookingData) => {
       customer_id: customerId,
       customer_name: bookingData.customerName, // Added this field
       start_datetime: combineDateAndTime(bookingData.date, bookingData.time),
-      end_datetime: calculateEstimatedEnd(bookingData.date, bookingData.time), // Satisfy NOT NULL constraint
+      end_datetime: calculateEstimatedEnd(bookingData.date, bookingData.time, vehicles), 
       status: 'scheduled',
       total_amount: totalAmount,
       notes: bookingData.notes || '',
@@ -215,9 +215,21 @@ function combineDateAndTime(dateStr, timeStr) {
   return `${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 }
 
-function calculateEstimatedEnd(dateStr, timeStr) {
+function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
   const startIso = combineDateAndTime(dateStr, timeStr);
   const date = new Date(startIso);
-  date.setHours(date.getHours() + 2); // Default to 2 hours duration
+  
+  // Calculate total duration across all vehicles and their services
+  let totalMinutes = 0;
+  vehicles.forEach(v => {
+    (v.services || []).forEach(s => {
+      totalMinutes += (s.durationMinutes || 60); // Default to 60 if missing
+    });
+  });
+
+  // Minimum duration of 1 hour if no services selected yet
+  if (totalMinutes === 0) totalMinutes = 60;
+
+  date.setMinutes(date.getMinutes() + totalMinutes);
   return date.toISOString();
 }

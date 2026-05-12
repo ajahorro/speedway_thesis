@@ -1,109 +1,451 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { Calendar, ChevronLeft, ChevronRight, Clock, User, Tag, ArrowRight } from 'lucide-react';
+import { 
+  Calendar as CalendarIcon, ShieldAlert, Lock, Zap, CheckCircle2
+} from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
 
+// Refactored Imports
+import { SHOP_CONFIG, COLORS } from '../../config/constants';
+import { segregateBookings } from '../../utils/schedulingUtils';
+import SegmentedTimePicker from '../../components/AdminSchedule/SegmentedTimePicker';
+import OccupancyShelf from '../../components/AdminSchedule/OccupancyShelf';
+import DetailTimeline from '../../components/AdminSchedule/DetailTimeline';
+import ConfirmationToast from '../../components/ConfirmationToast';
+import { AlertTriangle, Info } from 'lucide-react';
+
 const AdminSchedule = () => {
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width: 1024px)');
+  
+  // State: Navigation & Context
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [viewDate, setViewDate] = useState(new Date());
+  
+  // State: Data
   const [bookings, setBookings] = useState([]);
+  const [blockedSlots, setBlockedSlots] = useState([]);
+  const [allMonthBookings, setAllMonthBookings] = useState([]);
   const [loading, setLoading] = useState(true);
+  
+  // State: Blocking Panel
+  const [isAddingBlock, setIsAddingBlock] = useState(false);
+  const [blockData, setBlockData] = useState({
+    startTime: `${String(SHOP_CONFIG.OPENING_HOUR).padStart(2, '0')}:00`,
+    endTime: `${String(SHOP_CONFIG.CLOSING_HOUR - 4).padStart(2, '0')}:00`,
+    reason: '',
+    isWholeDay: true
+  });
 
-  const hours = Array.from({ length: 11 }, (_, i) => i + 8); // 8 AM to 6 PM
+  const hours = Array.from(
+    { length: SHOP_CONFIG.CLOSING_HOUR - SHOP_CONFIG.OPENING_HOUR + 1 }, 
+    (_, i) => i + SHOP_CONFIG.OPENING_HOUR
+  );
 
   useEffect(() => {
-    fetchDailyBookings();
+    fetchMonthData();
+  }, [viewDate]);
+
+  useEffect(() => {
+    fetchDailyContext();
   }, [selectedDate]);
 
-  const fetchDailyBookings = async () => {
-    setLoading(true);
+  const fetchMonthData = async () => {
     try {
-      logger.admin(`Fetching timeline for ${selectedDate}...`);
-      
+      const year = viewDate.getFullYear();
+      const month = viewDate.getMonth() + 1;
+      const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
+      const lastDay = `${year}-${String(month).padStart(2, '0')}-31`;
+
       const { data, error } = await supabase
         .from('bookings')
-        .select(`*`)
-        .order('start_datetime', { ascending: true });
-
-      // DEDUPLICATION ENGINE: Ensure unique IDs only
-      const uniqueBookings = Array.from(
-        new Map((data || []).map(b => [b.id, b])).values()
-      );
-
-      // Relaxed filter for full visibility
-      const dailyBookings = uniqueBookings.filter(b => {
-        const bDate = new Date(b.start_datetime).toISOString().split('T')[0];
-        return bDate === selectedDate;
-      });
+        .select('id, start_datetime, end_datetime, status')
+        .lte('start_datetime', lastDay)
+        .gte('end_datetime', firstDay)
+        .neq('status', 'CANCELLED');
 
       if (error) throw error;
-      setBookings(dailyBookings);
-      logger.admin('Timeline synchronized.');
+      setAllMonthBookings(data || []);
     } catch (err) {
-      logger.error('Schedule Sync Error', err);
-      toast.error('Failed to load schedule');
+      logger.error('Month Fetch Error', err);
+    }
+  };
+
+  const fetchDailyContext = async () => {
+    setLoading(true);
+    try {
+      const startOfDay = `${selectedDate}T00:00:00Z`;
+      const endOfDay = `${selectedDate}T23:59:59Z`;
+
+      const { data: bookingsData, error: bookingsError } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          customer:profiles!bookings_customer_id_fkey(full_name, email, phone_number),
+          vehicles:booking_vehicles(*)
+        `)
+        .lte('start_datetime', endOfDay)
+        .gte('end_datetime', startOfDay)
+        .neq('status', 'CANCELLED');
+
+      if (bookingsError) throw bookingsError;
+
+      const { data: blocksData, error: blocksError } = await supabase
+        .from('blocked_slots')
+        .select('*')
+        .eq('block_date', selectedDate);
+
+      if (blocksError) throw blocksError;
+
+      setBookings(bookingsData || []);
+      setBlockedSlots(blocksData || []);
+    } catch (err) {
+      logger.error('Daily Sync Error', err);
+      toast.error('Failed to synchronize schedule');
     } finally {
       setLoading(false);
     }
   };
 
-  const getBookingsForHour = (hour) => bookings.filter(b => {
-    const startHour = new Date(b.start_datetime).getHours();
-    return startHour === hour;
-  });
+  const handleCommitBlock = async () => {
+    // ── DUPLICATE PROTECTION ──
+    const isDuplicate = blockedSlots.some(b => {
+      const sameDate = b.block_date === selectedDate;
+      const bothWhole = !b.start_time && blockData.isWholeDay;
+      const bothPartial = b.start_time === blockData.startTime && b.end_time === blockData.endTime;
+      return sameDate && (bothWhole || bothPartial);
+    });
 
-  const isHourOccupied = (hour) => bookings.some(b => {
-    const startHour = new Date(b.start_datetime).getHours();
-    const endHour = new Date(b.end_datetime || b.start_datetime).getHours();
-    return hour >= startHour && hour < (endHour || startHour + 1);
-  });
+    if (isDuplicate) {
+      toast.error('A restriction already exists for this timeframe.');
+      return;
+    }
 
-  const panelStyle = { background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', padding: '1.5rem', color: 'var(--admin-text-primary)' };
+    toast.custom((t) => (
+      <ConfirmationToast
+        t={t}
+        title="Confirm Restriction"
+        message={`Are you sure you want to block ${blockData.isWholeDay ? 'the entire day' : 'these business hours'}? This will lock all resource bays.`}
+        icon={AlertTriangle}
+        confirmLabel="Block Hours"
+        variant="danger"
+        onConfirm={async () => {
+          toast.dismiss(t.id);
+          try {
+            const { error } = await supabase
+              .from('blocked_slots')
+              .insert([{
+                block_date: selectedDate,
+                start_time: blockData.isWholeDay ? null : blockData.startTime,
+                end_time: blockData.isWholeDay ? null : blockData.endTime,
+                reason: blockData.reason || 'ADMIN BLOCK'
+              }]);
+
+            if (error) throw error;
+            toast.success('Schedule restriction committed');
+            setIsAddingBlock(false);
+            fetchDailyContext();
+          } catch (err) {
+            logger.error('Block Error', err);
+            toast.error('Failed to commit restriction');
+          }
+        }}
+        onCancel={() => toast.dismiss(t.id)}
+      />
+    ), { duration: Infinity });
+  };
+
+  const handleDeleteBlock = async (id) => {
+    toast.custom((t) => (
+      <ConfirmationToast
+        t={t}
+        title="Lift Restriction"
+        message="Are you sure you want to lift this block? This will reopen resource bays for booking."
+        icon={Info}
+        confirmLabel="Lift Block"
+        variant="brand"
+        onConfirm={async () => {
+          toast.dismiss(t.id);
+          try {
+            const { error } = await supabase
+              .from('blocked_slots')
+              .delete()
+              .eq('id', id);
+
+            if (error) throw error;
+            
+            // ── OPTIMISTIC UPDATE (CRITICAL) ──
+            // We remove it from local state immediately and skip the immediate re-fetch
+            // to prevent the DB race condition from bringing it back.
+            setBlockedSlots(prev => prev.filter(b => b.id !== id));
+            toast.success('Restriction lifted');
+            
+            // Re-sync quietly in the background after a delay
+            setTimeout(() => fetchDailyContext(), 1000);
+          } catch (err) {
+            logger.error('Delete Block Error', err);
+            toast.error('Failed to lift restriction');
+            fetchDailyContext(); // Re-sync on error
+          }
+        }}
+        onCancel={() => toast.dismiss(t.id)}
+      />
+    ), { duration: Infinity });
+  };
+
+  const getBookingsForHour = (hour) => {
+    return bookings.filter(b => {
+      const bStart = new Date(b.start_datetime);
+      const bEnd = new Date(b.end_datetime);
+      const checkTime = new Date(selectedDate);
+      checkTime.setHours(hour, 0, 0, 0);
+      return checkTime >= bStart && checkTime < bEnd;
+    });
+  };
+
+  const getBlockForHour = (hour) => {
+    return blockedSlots.find(block => {
+      if (!block.start_time) return true; // NULL start_time = whole-day block
+      const [sh] = block.start_time.split(':').map(Number);
+      const [eh] = block.end_time.split(':').map(Number);
+      return hour >= sh && hour < eh;
+    });
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem' }}>
-      <PageHeader badge="TIMELINE OVERVIEW" title="SCHEDULE" subtitle={`${bookings.length} ${bookings.length === 1 ? 'booking' : 'bookings'} today.`}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.45rem 0.85rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)' }}>
-          <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split('T')[0]); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><ChevronLeft size={18} color="var(--admin-brand)" /></button>
-          <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} style={{ background: 'transparent', border: 'none', color: 'var(--admin-text-primary)', fontWeight: '800', fontSize: '0.85rem', outline: 'none', width: '125px' }} />
-          <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 1); setSelectedDate(d.toISOString().split('T')[0]); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><ChevronRight size={18} color="var(--admin-brand)" /></button>
-        </div>
-      </PageHeader>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem', maxWidth: '1600px', margin: '0 auto' }}>
+      <PageHeader 
+        badge="SERVICE_RESOURCES"
+        title="SERVICE SCHEDULE" 
+        subtitle="Manage resource occupancy and daily throughput."
+        onRefresh={fetchDailyContext}
+      />
 
-      <div style={{ ...panelStyle, minHeight: '600px' }}>
-        {loading ? <LoadingState message="Generating timeline..." /> : hours.map((hour) => {
-          const hourBookings = getBookingsForHour(hour);
-          const isOccupied = isHourOccupied(hour);
-          const displayHour = hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
-          return (
-            <div key={hour} style={{ display: 'flex', borderBottom: hour === 18 ? 'none' : '1px solid var(--admin-border)', minHeight: isMobile ? '80px' : '100px' }}>
-              <div style={{ width: isMobile ? '60px' : '90px', padding: '1.5rem 0', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>{displayHour}</div>
-              <div style={{ flex: 1, padding: isMobile ? '0.5rem' : '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {!isOccupied && <span style={{ color: 'var(--admin-text-secondary)', opacity: 0.15, fontSize: '0.75rem', fontWeight: '800', textTransform: 'uppercase', padding: '0.75rem 0' }}>Available</span>}
-                {hourBookings.map((booking, bIdx) => {
-                  const fleetSize = booking.vehicles?.length || 0;
-                  const vehicleText = fleetSize > 1 ? `${fleetSize} Vehicles (Fleet)` : (booking.vehicles?.[0]?.vehicle_type || 'Vehicle');
-                  return (
-                    <div key={booking.id} onClick={() => navigate(`/admin/bookings/${booking.id}`)} style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderLeft: `4px solid ${bIdx === 0 ? 'var(--admin-brand)' : '#8b5cf6'}`, borderRadius: 'var(--admin-radius)', padding: '0.75rem 1rem', cursor: 'pointer' }}>
-                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                         <div style={{ color: bIdx === 0 ? 'var(--admin-brand)' : '#8b5cf6', fontSize: '0.65rem', fontWeight: '900', textTransform: 'uppercase' }}>APPOINTMENT</div>
-                         <div style={{ fontSize: '0.7rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>{vehicleText}</div>
-                       </div>
-                       <h3 style={{ margin: '0.2rem 0', fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{booking.customer_name || booking.customer?.full_name || 'Anonymous'}</h3>
-                       <div style={{ fontSize: '0.85rem', fontWeight: '900', color: 'var(--admin-brand)' }}>₱{Number(booking.total_amount).toLocaleString()}</div>
-                     </div>
-                  )
-                })}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '350px 1fr', gap: '2rem' }}>
+        {/* Left Panel: Calendar & Controls */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* ── INDUSTRIAL CALENDAR (PHOTO MATCH) ── */}
+          <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: '4px', overflow: 'hidden' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem', borderBottom: '1px solid var(--admin-border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <CalendarIcon size={18} color="var(--admin-brand)" />
+                <span style={{ fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  {viewDate.toLocaleString('default', { month: 'long' })} {viewDate.getFullYear()}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  onClick={() => { const d = new Date(viewDate); d.setMonth(d.getMonth() - 1); setViewDate(d); }}
+                  style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer' }}
+                >&lsaquo;</button>
+                <button
+                  onClick={() => { const d = new Date(viewDate); d.setMonth(d.getMonth() + 1); setViewDate(d); }}
+                  style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.25rem 0.6rem', borderRadius: '4px', cursor: 'pointer' }}
+                >&rsaquo;</button>
               </div>
             </div>
-          )
-        })}
+
+            {/* Weekday Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'rgba(0,0,0,0.2)' }}>
+              {['S','M','T','W','T','F','S'].map((d, i) => (
+                <div key={i} style={{ textAlign: 'center', fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', padding: '0.75rem 0' }}>{d}</div>
+              ))}
+            </div>
+
+            {/* Days Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: 'var(--admin-border)' }}>
+              {(() => {
+                const today = new Date().toISOString().split('T')[0];
+                const year  = viewDate.getFullYear();
+                const month = viewDate.getMonth();
+                const firstDay = new Date(year, month, 1).getDay();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                const cells = [];
+
+                for (let i = 0; i < firstDay; i++) cells.push(<div key={`empty-${i}`} style={{ background: 'var(--admin-card)', height: '50px' }} />);
+
+                for (let day = 1; day <= daysInMonth; day++) {
+                  const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                  const isToday = dateStr === today;
+                  const isSelected = dateStr === selectedDate;
+                  const hasBookings = allMonthBookings.some(b => new Date(b.start_datetime).toISOString().split('T')[0] === dateStr);
+
+                  cells.push(
+                    <div
+                      key={dateStr}
+                      onClick={() => {
+                        setSelectedDate(dateStr);
+                        if (new Date(dateStr).getMonth() !== viewDate.getMonth()) setViewDate(new Date(dateStr));
+                      }}
+                      style={{
+                        background: isSelected ? 'rgba(255,255,255,0.05)' : 'var(--admin-card)',
+                        height: '50px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        fontSize: '0.85rem',
+                        fontWeight: '900',
+                        color: isSelected || isToday ? 'white' : 'var(--admin-text-secondary)',
+                        position: 'relative',
+                        border: isSelected ? '2px solid var(--admin-brand)' : isToday ? '1px solid rgba(230,30,42,0.4)' : 'none'
+                      }}
+                    >
+                      {day}
+                      {hasBookings && (
+                        <div style={{ position: 'absolute', bottom: '8px', width: '4px', height: '4px', borderRadius: '50%', background: isSelected ? 'white' : 'var(--admin-brand)' }} />
+                      )}
+                    </div>
+                  );
+                }
+                return cells;
+              })()}
+            </div>
+          </div>
+
+          {/* Active Restrictions Panel (PHOTO MATCH) */}
+          <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: '4px', padding: '1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem', borderBottom: '1px solid var(--admin-border)', paddingBottom: '0.75rem' }}>
+              <ShieldAlert size={16} color="var(--admin-brand)" />
+              <h4 style={{ margin: 0, fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1px' }}>Active Restrictions</h4>
+            </div>
+            {blockedSlots.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {blockedSlots.map(block => (
+                  <div key={block.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(230,30,42,0.05)', padding: '0.75rem', borderRadius: '4px', border: '1px solid rgba(230,30,42,0.1)' }}>
+                    <div>
+                      <p style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', color: 'white' }}>{block.reason || 'MAINTENANCE'}</p>
+                      <p style={{ margin: 0, fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>
+                        {block.start_time ? `${block.start_time} - ${block.end_time}` : 'FULL DAY BLOCK'}
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => handleDeleteBlock(block.id)}
+                      style={{ background: 'none', border: '1px solid rgba(230,30,42,0.3)', color: 'var(--admin-brand)', fontSize: '0.55rem', fontWeight: '950', padding: '0.25rem 0.5rem', borderRadius: '2px', cursor: 'pointer', textTransform: 'uppercase' }}
+                    >Lift</button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ margin: '1rem 0', textAlign: 'center', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', opacity: 0.5 }}>No Active Blocks</p>
+            )}
+          </div>
+
+          <button 
+            onClick={() => setIsAddingBlock(!isAddingBlock)}
+            style={{ width: '100%', padding: '1rem', background: isAddingBlock ? 'rgba(230, 30, 42, 0.1)' : 'var(--admin-card)', color: isAddingBlock ? 'var(--admin-brand)' : 'white', border: `1px solid ${isAddingBlock ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: '8px', fontWeight: '950', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}
+          >
+            {isAddingBlock ? <Zap size={18} /> : <Lock size={18} />}
+            {isAddingBlock ? 'Cancel Restriction' : 'Restrict Resources'}
+          </button>
+        </div>
+
+        {/* Right Panel: Timeline */}
+        <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: '4px', overflow: 'hidden' }}>
+          {isAddingBlock && (
+            <div style={{ padding: '1.25rem', background: 'rgba(230, 30, 42, 0.05)', borderBottom: '1px solid var(--admin-border)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-end' }}>
+                <div style={{ flex: '0 0 200px' }}>
+                  <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Scope</label>
+                  <select 
+                    value={blockData.isWholeDay ? 'day' : 'window'} 
+                    onChange={(e) => setBlockData({...blockData, isWholeDay: e.target.value === 'day'})}
+                    style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.85rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }}
+                  >
+                    <option value="day">Full Working Day</option>
+                    <option value="window">Specific Time Frame</option>
+                  </select>
+                </div>
+
+                {!blockData.isWholeDay && (
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <div>
+                      <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Start</label>
+                      <SegmentedTimePicker value={blockData.startTime} onChange={(v) => setBlockData({...blockData, startTime: v})} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>End</label>
+                      <SegmentedTimePicker value={blockData.endTime} onChange={(v) => setBlockData({...blockData, endTime: v})} />
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ flex: 1, minWidth: '200px' }}>
+                  <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Rationale / Reason</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g., Shop Maintenance, Staff Holiday..." 
+                    value={blockData.reason} 
+                    onChange={(e) => setBlockData({...blockData, reason: e.target.value})}
+                    style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.85rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }}
+                  />
+                </div>
+
+                <button 
+                  onClick={handleCommitBlock} 
+                  style={{ background: 'var(--admin-brand)', color: 'white', border: 'none', padding: '0.85rem 2rem', borderRadius: '4px', fontWeight: '950', fontSize: '0.75rem', textTransform: 'uppercase', cursor: 'pointer', letterSpacing: '1px' }}
+                >
+                  Commit Block
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ padding: '1.5rem' }}>
+            <OccupancyShelf 
+              bookings={bookings} 
+              onBookingClick={(id) => navigate(`/admin/bookings/${id}`)} 
+            />
+
+            {loading ? <LoadingState message="Syncing timeline..." /> : (
+              <>
+                {/* COMPACT INLINE EMPTY STATE (REQ #1) — shown when day is clear */}
+                {bookings.length === 0 && blockedSlots.length === 0 && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '1rem',
+                    padding: '0.85rem 1.25rem',
+                    background: 'rgba(16, 185, 129, 0.05)',
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
+                    borderRadius: '6px',
+                    marginBottom: '1rem'
+                  }}>
+                    <CheckCircle2 size={18} color="#10b981" style={{ flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: '950', color: '#10b981', textTransform: 'uppercase', letterSpacing: '1px' }}>Zero Administrative Records</span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '600', marginLeft: '0.75rem' }}>This day is clear. No bookings or restrictions are scheduled.</span>
+                    </div>
+                    <button
+                      onClick={() => setIsAddingBlock(true)}
+                      style={{
+                        padding: '0.5rem 1rem', background: 'transparent',
+                        border: '1px solid var(--admin-border)',
+                        borderRadius: '4px', color: 'var(--admin-text-secondary)',
+                        fontWeight: '950', fontSize: '0.65rem', cursor: 'pointer',
+                        textTransform: 'uppercase', whiteSpace: 'nowrap',
+                        flexShrink: 0
+                      }}
+                    >
+                      Block This Day
+                    </button>
+                  </div>
+                )}
+                <DetailTimeline 
+                  hours={hours}
+                  getBookingsForHour={getBookingsForHour}
+                  getBlockForHour={getBlockForHour}
+                  onBookingClick={(id) => navigate(`/admin/bookings/${id}`)}
+                  onDeleteBlock={handleDeleteBlock}
+                />
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

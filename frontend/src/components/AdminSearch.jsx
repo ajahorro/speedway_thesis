@@ -107,8 +107,8 @@ const AdminSearch = () => {
         style={{ 
           padding: '0.65rem 1rem 0.65rem 2.75rem', 
           borderRadius: 'var(--admin-radius-sm)', 
-          background: 'var(--admin-bg)', 
-          border: '1px solid var(--admin-border)', 
+          background: '#1A1A1A', 
+          border: '1px solid #333', 
           color: 'var(--admin-text-primary)',
           fontSize: '0.75rem',
           fontWeight: '950',

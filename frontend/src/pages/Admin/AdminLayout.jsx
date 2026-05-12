@@ -71,12 +71,11 @@ const AdminLayout = () => {
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard, exact: true },
     { name: 'Booking Management', path: '/admin/bookings', icon: ClipboardList },
     { name: 'Payment Verification', path: '/admin/payments', icon: CheckSquare },
-    { name: 'Schedule', path: '/admin/schedule', icon: Calendar },
+    {name: 'Schedule', path: '/admin/schedule', icon: Calendar },
     { name: 'Refund Hub', path: '/admin/refunds', icon: Undo },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart2 },
     { name: 'Audit Logs', path: '/admin/audit-logs', icon: History },
     { name: 'Accounts Management', path: '/admin/accounts', icon: Users },
-    { name: 'Slot Management', path: '/admin/slots', icon: ShieldAlert },
     { name: 'Users', path: '/admin/users', icon: User },
     { name: 'Notifications', path: '/admin/notifications', icon: Bell },
 
@@ -177,8 +176,8 @@ const AdminLayout = () => {
                   textTransform: 'uppercase',
                   letterSpacing: '0.8px',
                   transition: 'all 0.2s',
-                  borderLeft: isActive ? '2px solid var(--admin-brand)' : '2px solid transparent',
-                  marginLeft: '0.25rem'
+                  borderLeft: isActive ? '3px solid var(--admin-brand)' : '3px solid transparent',
+                  marginLeft: '0'
                 })}
               >
                 <Icon size={14} strokeWidth={2.5} />
@@ -204,8 +203,8 @@ const AdminLayout = () => {
               fontSize: '0.7rem',
               textTransform: 'uppercase',
               letterSpacing: '0.8px',
-              borderLeft: isActive ? '2px solid var(--admin-brand)' : '2px solid transparent',
-              marginLeft: '0.25rem'
+              borderLeft: isActive ? '3px solid var(--admin-brand)' : '3px solid transparent',
+              marginLeft: '0'
             })}
           >
             <Settings size={14} strokeWidth={2.5} />

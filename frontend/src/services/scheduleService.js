@@ -1,39 +1,35 @@
 import { supabase } from '../lib/supabase';
+import { logger } from '../utils/logger';
+import { SHOP_CONFIG } from '../config/constants';
+import { 
+  calculateOccupancy, 
+  filterActiveBookings, 
+  formatDisplayHour 
+} from '../utils/schedulingUtils';
 
 /**
  * scheduleService.js
  * Handles bay capacity checks and slot availability for booking wizard.
  */
 
-const MAX_BAYS = 7; // Maximum simultaneous bookings per time slot
-
 /**
  * Check how many bookings exist for a given date and time slot.
  * Returns the list of available time slots for that date.
  */
-export const getAvailableSlots = async (dateStr) => {
+export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
   try {
-    const { data: config, error: configError } = await supabase.from('business_config').select('opening_hour, closing_hour').limit(1).single();
+    const { data: config } = await supabase.from('business_config').select('opening_hour, closing_hour').limit(1).single();
     
-    if (configError) console.warn('ScheduleService: Could not fetch business hours, using defaults.', configError);
-    else console.log('ScheduleService: Fetched business hours:', config);
-
-    let startHour = 8;
-    let endHour = 17; // 5 PM
+    let startHour = SHOP_CONFIG.OPENING_HOUR;
+    let endHour = SHOP_CONFIG.CLOSING_HOUR;
     
     if (config) {
       const parseHour = (timeStr) => {
         if (!timeStr) return null;
-        console.log(`ScheduleService: Parsing time string: "${timeStr}"`);
         const upperTime = timeStr.toUpperCase();
-        
-        // Handle HH:mm:ss (Postgres time) or HH:mm
         if (!upperTime.includes('AM') && !upperTime.includes('PM')) {
-           const parts = upperTime.split(':');
-           return parseInt(parts[0], 10);
+           return parseInt(upperTime.split(':')[0], 10);
         }
-        
-        // Handle hh:mm AM/PM
         const [time, modifier] = upperTime.split(' ');
         let [h] = time.split(':');
         h = parseInt(h, 10);
@@ -47,96 +43,62 @@ export const getAvailableSlots = async (dateStr) => {
       if (parsedEnd !== null) endHour = parsedEnd;
     }
 
-    const ALL_SLOTS = [];
-    // Generate hourly slots from startHour to endHour
-    for (let h = startHour; h <= endHour; h++) {
-       let meridian = h >= 12 ? 'PM' : 'AM';
-       let displayH = h > 12 ? h - 12 : h;
-       if (displayH === 0) displayH = 12;
-       ALL_SLOTS.push(`${String(displayH).padStart(2, '0')}:00 ${meridian}`);
-    }
+    // 1. Fetch ALL bookings and blocks for the day
+    const startOfDay = `${dateStr}T00:00:00Z`;
+    const endOfDay = `${dateStr}T23:59:59Z`;
 
-    const startOfDay = `${dateStr}T00:00:00`;
-    const endOfDay = `${dateStr}T23:59:59`;
+    const { data: bookings } = await supabase
+      .from('bookings')
+      .select('id, start_datetime, end_datetime, status')
+      .lte('start_datetime', endOfDay)
+      .gte('end_datetime', startOfDay)
+      .neq('status', 'CANCELLED');
 
-    // 1. Check for Blocked Slots (REQ-ADM-07)
     const { data: blocks } = await supabase
       .from('blocked_slots')
       .select('*')
-      .eq('block_date', dateStr);
-    
-    if (blocks && blocks.some(b => !b.start_time)) {
-      console.log('ScheduleService: Whole day is blocked.');
-      return []; // Whole day blocked
+      .eq('date', dateStr);
+
+    // 2. Filter active sessions using shared utility
+    const activeBookings = filterActiveBookings(bookings || []);
+
+    // 3. Generate ALL possible start slots
+    const ALL_SLOTS = [];
+    for (let h = startHour; h < endHour; h++) {
+       ALL_SLOTS.push(formatDisplayHour(h));
     }
 
-    const { data: bookings, error } = await supabase
-      .from('bookings')
-      .select('start_datetime')
-      .gte('start_datetime', startOfDay)
-      .lte('start_datetime', endOfDay)
-      .neq('status', 'CANCELLED');
-
-    if (error) throw error;
-
-    const slotCounts = {};
-    (bookings || []).forEach(b => {
-      const dt = new Date(b.start_datetime);
-      let hours = dt.getHours();
-      let meridian = hours >= 12 ? 'PM' : 'AM';
-      if (hours > 12) hours -= 12;
-      if (hours === 0) hours = 12;
-      const slotKey = `${String(hours).padStart(2, '0')}:00 ${meridian}`;
-      slotCounts[slotKey] = (slotCounts[slotKey] || 0) + 1;
-    });
-
     const now = new Date();
-    // Use local date string comparison to avoid UTC date offset issues for filtering past hours
     const localToday = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
     const isToday = dateStr === localToday;
     const currentHour = now.getHours();
 
-    const available = ALL_SLOTS.filter(slot => {
-      // 1. Check capacity
-      if ((slotCounts[slot] || 0) >= MAX_BAYS) return false;
-      
-      // 2. Check if past time (if booking is for today)
-      if (isToday) {
-        let [time, modifier] = slot.split(' ');
-        let slotH = parseInt(time.split(':')[0], 10);
-        if (modifier === 'PM' && slotH < 12) slotH += 12;
-        if (modifier === 'AM' && slotH === 12) slotH = 0;
+    // 4. Filter slots based on DURATION AWARENESS
+    return ALL_SLOTS.filter(slot => {
+      let [time, modifier] = slot.split(' ');
+      let slotH = parseInt(time.split(':')[0], 10);
+      if (modifier === 'PM' && slotH < 12) slotH += 12;
+      if (modifier === 'AM' && slotH === 12) slotH = 0;
+
+      // Rule: Can't book in the past
+      if (isToday && slotH <= currentHour) return false;
+
+      // Rule: Check if EACH hour of the requested duration has capacity
+      const durationHours = Math.ceil(requestedDuration / 60);
+      for (let offset = 0; offset < durationHours; offset++) {
+        const targetH = slotH + offset;
+        // Don't book past closing
+        if (targetH >= endHour) return false;
         
-        // Block slots if they are in the past or exactly current hour
-        if (slotH <= currentHour) return false;
+        if (calculateOccupancy(targetH, dateStr, activeBookings, blocks || []) >= SHOP_CONFIG.MAX_BAYS) {
+          return false;
+        }
       }
 
-      // 3. Check against Time-Specific Blocks
-      if (blocks && blocks.length > 0) {
-        const parseSlotH = (slotStr) => {
-          let [time, modifier] = slotStr.split(' ');
-          let h = parseInt(time.split(':')[0], 10);
-          if (modifier === 'PM' && h < 12) h += 12;
-          if (modifier === 'AM' && h === 12) h = 0;
-          return h;
-        };
-        const sH = parseSlotH(slot);
-        
-        const isBlocked = blocks.some(b => {
-          if (!b.start_time) return false; // Handled by whole-day check
-          const bStart = parseInt(b.start_time.split(':')[0], 10);
-          const bEnd = parseInt(b.end_time.split(':')[0], 10);
-          return sH >= bStart && sH < bEnd;
-        });
-        if (isBlocked) return false;
-      }
-      
       return true;
     });
-
-    return available;
   } catch (err) {
-    console.error('Schedule Service Error:', err);
+    logger.error('Schedule Service Error', err);
     return [];
   }
 };

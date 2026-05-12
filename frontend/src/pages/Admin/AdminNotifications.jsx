@@ -1,10 +1,89 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import PageHeader from '../../components/PageHeader';
-import { Bell, CheckCircle, Clock, Trash2, Filter, Search } from 'lucide-react';
+import { Bell, CheckCircle, Clock, Trash2, Filter, Search, AlertTriangle, X } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE CONFIRMATION MODAL (REQ #5)
+// NOTE: This modal is ONLY used for notification deletion.
+// Notification deletions are intentionally NOT written to audit_logs.
+// Audit logs must only track creation events and system-level booking actions.
+// ─────────────────────────────────────────────────────────────────────────────
+const DeleteConfirmModal = ({ onConfirm, onCancel }) => (
+  <div style={{
+    position: 'fixed', inset: 0, zIndex: 9999,
+    background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: '1rem'
+  }}>
+    <div style={{
+      background: 'var(--admin-card)',
+      border: '1px solid var(--admin-border)',
+      borderRadius: 'var(--admin-radius)',
+      padding: '2rem',
+      maxWidth: '420px',
+      width: '100%',
+      boxShadow: '0 25px 60px rgba(0,0,0,0.5)'
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+        <div style={{
+          width: '40px', height: '40px', borderRadius: '50%',
+          background: 'rgba(239,68,68,0.1)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0
+        }}>
+          <AlertTriangle size={20} color="#ef4444" />
+        </div>
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-primary)' }}>
+          Confirm Deletion
+        </h3>
+      </div>
+
+      <p style={{ margin: '0 0 1.5rem 0', fontSize: '0.875rem', color: 'var(--admin-text-secondary)', fontWeight: '600', lineHeight: 1.6 }}>
+        Are you sure you want to delete this notification? This action cannot be undone.
+      </p>
+
+      <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+        <button
+          onClick={onCancel}
+          style={{
+            padding: '0.75rem 1.5rem',
+            background: 'var(--admin-bg)',
+            border: '1px solid var(--admin-border)',
+            borderRadius: 'var(--admin-radius-sm)',
+            color: 'var(--admin-text-primary)',
+            fontWeight: '950',
+            fontSize: '0.75rem',
+            textTransform: 'uppercase',
+            cursor: 'pointer'
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          style={{
+            padding: '0.75rem 1.5rem',
+            background: '#ef4444',
+            border: 'none',
+            borderRadius: 'var(--admin-radius-sm)',
+            color: 'white',
+            fontWeight: '950',
+            fontSize: '0.75rem',
+            textTransform: 'uppercase',
+            cursor: 'pointer'
+          }}
+        >
+          Confirm Delete
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 const AdminNotifications = () => {
   const isMobile = useMediaQuery('(max-width: 1024px)');
@@ -15,6 +94,9 @@ const AdminNotifications = () => {
 
   const [broadcastForm, setBroadcastForm] = useState({ message: '' });
   const [broadcasting, setBroadcasting] = useState(false);
+
+  // ── Deletion Confirmation State ──────────────────────────────────────────
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null); // null = modal hidden
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -39,6 +121,9 @@ const AdminNotifications = () => {
     }
   };
 
+  // ── BROADCAST HANDLER (REQ-ADM-13) ──────────────────────────────────────
+  // Writes one notification per profile (all roles: ADMIN, STAFF, CUSTOMER).
+  // Also inserts a corresponding AUDIT LOG entry so the Admin action is traceable.
   const handleBroadcast = async (e) => {
     e.preventDefault();
     if (!broadcastForm.message.trim()) return;
@@ -47,12 +132,18 @@ const AdminNotifications = () => {
     try {
       logger.admin('Preparing global signal broadcast...');
       
+      // Step 1: Get current admin user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('No authenticated user found');
+
+      // Step 2: Fetch ALL profiles (Admin + Staff + Customer)
       const { data: profiles, error: profileError } = await supabase
         .from('profiles')
         .select('id');
         
       if (profileError) throw profileError;
       
+      // Step 3: Insert one notification row per profile
       const broadcastNotifications = profiles.map(p => ({
         user_id: p.id,
         type: 'ANNOUNCEMENT',
@@ -65,6 +156,24 @@ const AdminNotifications = () => {
         .insert(broadcastNotifications);
         
       if (broadcastError) throw broadcastError;
+
+      // Step 4: Create Audit Log entry for the broadcast action (REQ #4)
+      // This records WHO sent the broadcast and WHEN — audit trail for admin accountability.
+      const { error: auditError } = await supabase
+        .from('audit_logs')
+        .insert({
+          actor_id: user.id,
+          action: 'BROADCAST_SENT',
+          details: `Global broadcast transmitted to ${profiles.length} users. Message: "${broadcastForm.message.substring(0, 100)}${broadcastForm.message.length > 100 ? '...' : ''}"`,
+          created_at: new Date().toISOString()
+        });
+
+      if (auditError) {
+        // Non-blocking: log warning but don't fail the broadcast
+        logger.error('Audit Log Warning (broadcast)', auditError);
+      } else {
+        logger.admin('Audit log entry created for broadcast action.');
+      }
       
       toast.success(`Broadcast signal transmitted to ${profiles.length} receivers`);
       setBroadcastForm({ message: '' });
@@ -112,7 +221,13 @@ const AdminNotifications = () => {
     }
   };
 
-  const handleDelete = async (id) => {
+  // ── DELETE HANDLER (REQ #5) ──────────────────────────────────────────────
+  // Triggered only after the user confirms via the modal.
+  // CRITICAL: No audit_log entry is created here. Notification cleanup is
+  // considered a routine housekeeping action, not a system-level event.
+  const handleConfirmDelete = async () => {
+    const id = confirmDeleteId;
+    setConfirmDeleteId(null); // Close modal immediately
     try {
       const { error } = await supabase
         .from('notifications')
@@ -122,8 +237,10 @@ const AdminNotifications = () => {
       if (error) throw error;
       setNotifications(prev => prev.filter(n => n.id !== id));
       toast.success('Signal purged');
+      // ⚠️ Intentionally NO audit_log insert here — per system design (REQ #5 CRITICAL)
     } catch (err) {
       logger.error('Delete Notification Error', err);
+      toast.error('Failed to purge signal');
     }
   };
 
@@ -138,6 +255,15 @@ const AdminNotifications = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem' }}>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {confirmDeleteId !== null && (
+        <DeleteConfirmModal
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
+      )}
+
       <PageHeader badge="SYSTEM SIGNALS" title="NOTIFICATIONS" subtitle="Operational alerts and system activity logs." onRefresh={fetchNotifications}>
         <button onClick={handleMarkAllAsRead} style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'var(--admin-text-primary)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}>mark all as read</button>
       </PageHeader>
@@ -148,7 +274,7 @@ const AdminNotifications = () => {
           <Bell size={20} color="var(--admin-brand)" />
           <div>
             <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', textTransform: 'uppercase' }}>Global Broadcast Hub</h3>
-            <p style={{ margin: 0, fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>Transmit a priority announcement to all staff and customers.</p>
+            <p style={{ margin: 0, fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>Transmit a priority announcement to all staff and customers. Action is logged in Audit Logs.</p>
           </div>
         </div>
         <form onSubmit={handleBroadcast} style={{ display: 'flex', gap: '1rem', flexDirection: isMobile ? 'column' : 'row' }}>
@@ -209,15 +335,35 @@ const AdminNotifications = () => {
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   {!notif.is_read && <button onClick={() => handleMarkAsRead(notif.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><CheckCircle size={18} /></button>}
-                  <button onClick={() => handleDelete(notif.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><Trash2 size={18} /></button>
+                  {/* Clicking trash opens confirmation modal — no direct delete */}
+                  <button
+                    onClick={() => setConfirmDeleteId(notif.id)}
+                    title="Delete notification"
+                    style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer', transition: 'color 0.2s' }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--admin-text-secondary)'}
+                  >
+                    <Trash2 size={18} />
+                  </button>
                 </div>
               </div>
             </div>
           ))
         ) : (
-          <div style={{ textAlign: 'center', padding: '5rem', background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px dashed var(--admin-border)' }}>
-            <Bell size={48} style={{ opacity: 0.2, marginBottom: '1.5rem' }} />
-            <h3 style={{ margin: 0, fontWeight: '950' }}>ALL CLEAR</h3>
+          // ── COMPACT EMPTY STATE (REQ #1 equivalent for Notifications) ──────
+          // Inline/horizontal layout instead of large billboard
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '1rem',
+            padding: '1rem 1.5rem',
+            background: 'var(--admin-card)',
+            borderRadius: 'var(--admin-radius)',
+            border: '1px dashed var(--admin-border)'
+          }}>
+            <Bell size={20} style={{ opacity: 0.3, flexShrink: 0 }} />
+            <div>
+              <p style={{ margin: 0, fontWeight: '950', fontSize: '0.85rem', textTransform: 'uppercase' }}>All Clear</p>
+              <p style={{ margin: 0, fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>No signals match your current filter.</p>
+            </div>
           </div>
         )}
       </div>

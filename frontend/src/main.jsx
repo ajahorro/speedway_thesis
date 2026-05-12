@@ -76,7 +76,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="users" element={<AdminUserManagement />} />
             <Route path="settings" element={<AdminSettings />} />
             <Route path="notifications" element={<AdminNotifications />} />
-            <Route path="slots" element={<AdminSlotManagement />} />
+            <Route path="slots" element={<Navigate to="/admin/schedule" replace />} />
             <Route path="profile" element={<AdminProfile />} />
             {/* Fallback for other admin routes */}
             <Route path="*" element={<div style={{ padding: '2rem' }}>Module under development</div>} />

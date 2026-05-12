@@ -2,7 +2,7 @@ import React from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 
 const PageHeader = ({ badge, title, subtitle, onRefresh, showBack, onBack, actionLabel, onAction, actionIcon, children, titleStyle = {} }) => (
-  <div className="stack-on-mobile" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
+  <div className="stack-on-mobile" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1rem' }}>
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
         {showBack && <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--admin-text-primary)' }}><ArrowLeft size={20} /></button>}

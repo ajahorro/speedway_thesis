@@ -42,6 +42,7 @@ const AdminSalesReport = () => {
       if (currentPeriod === 'daily') startDate.setHours(0, 0, 0, 0);
       else if (currentPeriod === 'weekly') startDate.setDate(now.getDate() - 7);
       else if (currentPeriod === 'monthly') startDate.setDate(now.getDate() - 30);
+      else if (currentPeriod === 'yearly') startDate = new Date(now.getFullYear(), 0, 1); // Jan 1st of current year
 
       // 1. Fetch Verified Payments
       const { data: payments, error } = await supabase
@@ -126,25 +127,39 @@ const AdminSalesReport = () => {
   };
 
   // REVENUE FORECASTING ENGINE (REQ-ADM-09)
+  const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
   const forecastData = useMemo(() => {
     if (state.transactions.length === 0) return { projected: 0, confidence: 0, trend: [] };
     
-    // 1. Calculate Daily Velocity
-    const dailyVelocity = state.aggregates.grossRevenue / (state.period === 'daily' ? 1 : state.period === 'weekly' ? 7 : 30);
+    const isYearly = state.period === 'yearly';
+
+    // 1. Calculate Daily Velocity (days in period)
+    const periodDays = state.period === 'daily' ? 1 : state.period === 'weekly' ? 7 : isYearly ? 365 : 30;
+    const dailyVelocity = state.aggregates.grossRevenue / periodDays;
     
     // 2. Apply Growth Multiplier (Conservative 12.5% for strategic planning)
     const multiplier = 1.125;
     const projectedMonthly = dailyVelocity * 30 * multiplier;
     
-    // 3. Generate 7-day Trend Projection
-    const trend = Array.from({ length: 7 }, (_, i) => ({
-      day: i + 1,
-      val: dailyVelocity * (1 + (i * 0.02)) // Simulated incremental growth
-    }));
+    // 3. Generate Trend Projection
+    // Yearly mode: 12 monthly data points. Other: 7-day projection.
+    const trend = isYearly
+      ? Array.from({ length: 12 }, (_, i) => ({
+          label: MONTH_LABELS[i],
+          val: (state.aggregates.grossRevenue / 12) * (1 + (i * 0.015))
+        }))
+      : Array.from({ length: 7 }, (_, i) => ({
+          label: `D${i + 1}`,
+          val: dailyVelocity * (1 + (i * 0.02))
+        }));
+
+    // Confidence: yearly period has more data = higher confidence
+    const confidence = isYearly ? 93 : 85;
 
     return { 
-      projected: projectedMonthly, 
-      confidence: 85,
+      projected: isYearly ? state.aggregates.grossRevenue * multiplier : projectedMonthly,
+      confidence,
       trend
     };
   }, [state.transactions, state.aggregates.grossRevenue, state.period]);
@@ -168,7 +183,7 @@ const AdminSalesReport = () => {
             Official Commercial Performance Report
           </p>
           <div style={{ marginTop: '5px', fontSize: '0.75rem', color: '#888' }}>
-            Generated on: {new Date().toLocaleString()} &bull; {state.period.toUpperCase()} PERIOD
+            Generated on: {new Date().toLocaleString()} &bull; {state.period === 'yearly' ? `${new Date().getFullYear()} ANNUAL` : state.period.toUpperCase()} PERIOD
           </div>
         </div>
 
@@ -252,7 +267,7 @@ const AdminSalesReport = () => {
         </PageHeader>
 
         <div style={{ display: 'flex', background: 'var(--admin-card)', padding: '0.4rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', width: 'fit-content' }}>
-          {['daily', 'weekly', 'monthly'].map(t => (
+          {['daily', 'weekly', 'monthly', 'yearly'].map(t => (
             <button 
               key={t} 
               onClick={() => handlePeriodChange(t)} 
@@ -265,7 +280,8 @@ const AdminSalesReport = () => {
                 fontWeight: '900', 
                 textTransform: 'uppercase', 
                 fontSize: '0.7rem', 
-                cursor: 'pointer' 
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
               }}
             >
               {t}
@@ -275,7 +291,7 @@ const AdminSalesReport = () => {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
           <div style={{ ...cardStyle, background: 'linear-gradient(135deg, var(--admin-brand), #7c1210)', color: 'white' }}>
-            <div style={{ opacity: 0.8, fontSize: '0.7rem', fontWeight: '900', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Gross Revenue ({state.period})</div>
+            <div style={{ opacity: 0.8, fontSize: '0.7rem', fontWeight: '900', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Gross Revenue ({state.period === 'yearly' ? new Date().getFullYear() : state.period})</div>
             <div style={{ fontSize: '2.5rem', fontWeight: '950' }}>₱{state.aggregates.grossRevenue.toLocaleString()}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', fontSize: '0.85rem', fontWeight: '800' }}>
               <TrendingUp size={16} /> {state.aggregates.growth}% Target Growth
@@ -321,27 +337,31 @@ const AdminSalesReport = () => {
               <div style={{ position: 'absolute', left: '3rem', right: '1rem', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '1rem 0', pointerEvents: 'none' }}>
                 {[0, 1, 2, 3, 4].map(i => <div key={i} style={{ width: '100%', height: '1px', background: 'var(--admin-border)', opacity: 0.3 }}></div>)}
               </div>
-              {forecastData.trend.map((t, i) => (
-                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', height: '100%', justifyContent: 'flex-end', zIndex: 1 }}>
-                  <div style={{ 
-                    width: '100%', 
-                    height: `${(t.val / (forecastData.trend[6].val * 1.1)) * 100}%`, 
-                    background: i === 6 ? 'linear-gradient(to bottom, var(--admin-brand), rgba(230, 30, 42, 0.1))' : 'var(--admin-text-secondary)',
-                    opacity: i === 6 ? 1 : 0.2,
-                    borderRadius: '2px 2px 0 0'
-                  }}></div>
-                  <span style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>D{t.day}</span>
-                </div>
-              ))}
+              {forecastData.trend.map((t, i) => {
+                const maxVal = Math.max(...forecastData.trend.map(x => x.val));
+                const isLast = i === forecastData.trend.length - 1;
+                return (
+                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', height: '100%', justifyContent: 'flex-end', zIndex: 1 }}>
+                    <div style={{ 
+                      width: '100%', 
+                      height: `${(t.val / (maxVal * 1.1)) * 100}%`, 
+                      background: isLast ? 'linear-gradient(to bottom, var(--admin-brand), rgba(230, 30, 42, 0.1))' : 'var(--admin-text-secondary)',
+                      opacity: isLast ? 1 : 0.2,
+                      borderRadius: '2px 2px 0 0'
+                    }}></div>
+                    <span style={{ fontSize: '0.55rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>{t.label}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           <div style={{ ...cardStyle, background: 'var(--admin-bg)', borderStyle: 'dashed', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-             <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>30-Day Revenue Forecast</h3>
+             <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>{state.period === 'yearly' ? 'Annual Revenue Projection' : '30-Day Revenue Forecast'}</h3>
              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                 <div>
                   <div style={{ fontSize: '2rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{forecastData.projected.toLocaleString()}</div>
-                  <p style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', margin: '0.25rem 0 0 0', fontWeight: '800' }}>Estimated monthly performance based on current velocity.</p>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', margin: '0.25rem 0 0 0', fontWeight: '800' }}>{state.period === 'yearly' ? `Projected annual revenue with ${((forecastData.projected / Math.max(state.aggregates.grossRevenue, 1) - 1) * 100).toFixed(1)}% growth multiplier.` : 'Estimated monthly performance based on current velocity.'}</p>
                 </div>
                 <div style={{ borderTop: '1px solid var(--admin-border)', paddingTop: '1rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>

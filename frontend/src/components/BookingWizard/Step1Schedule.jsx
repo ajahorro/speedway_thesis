@@ -3,10 +3,15 @@ import { Calendar as CalendarIcon, Clock, Phone, AlertCircle } from 'lucide-reac
 import { getAvailableSlots } from '../../services/scheduleService';
 import CustomCalendar from './CustomCalendar';
 
-const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext }) => {
+const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack }) => {
   const [availableSlots, setAvailableSlots] = useState([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   
+  // Calculate total duration for all vehicles
+  const totalDuration = (bookingData.vehicles || []).reduce((total, v) => {
+    return total + (v.services || []).reduce((sub, s) => sub + (s.durationMinutes || 60), 0);
+  }, 0) || 60;
+
   // Basic validation
   const vehicle = bookingData.vehicles && bookingData.vehicles[activeVehicleIndex] ? bookingData.vehicles[activeVehicleIndex] : {};
   const isValid = bookingData.date && bookingData.time && (bookingData.contactNumber || '').length >= 10 &&
@@ -20,7 +25,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
     const fetchSlots = async () => {
       setIsLoadingSlots(true);
       try {
-        const slots = await getAvailableSlots(bookingData.date);
+        const slots = await getAvailableSlots(bookingData.date, totalDuration);
         setAvailableSlots(slots);
         
         // Auto-clear time if the selected time is no longer available
@@ -35,7 +40,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
     };
 
     fetchSlots();
-  }, [bookingData.date]); // eslint-disable-line
+  }, [bookingData.date, totalDuration]); // eslint-disable-line
 
   const handleDateChange = (e) => {
     setBookingData({ ...bookingData, date: e.target.value });
@@ -256,7 +261,25 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
       </div>
 
       {/* Action Footer */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1rem' }}>
+        <button 
+          onClick={onBack}
+          style={{
+            padding: '1rem 2rem',
+            background: 'var(--admin-bg)',
+            color: 'var(--admin-text-primary)',
+            border: '1px solid var(--admin-border)',
+            borderRadius: 'var(--admin-radius-md)',
+            fontWeight: '950',
+            fontSize: '1rem',
+            cursor: 'pointer',
+            textTransform: 'uppercase',
+            letterSpacing: '1px'
+          }}
+        >
+          Back: Adjust Services
+        </button>
+
         <button 
           onClick={onNext}
           disabled={!isValid}
@@ -274,7 +297,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             transition: 'all 0.3s ease'
           }}
         >
-          Next: Select Services
+          Next: Fleet Editing
         </button>
       </div>
 

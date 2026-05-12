@@ -87,8 +87,8 @@ const CustomerBookAppointment = () => {
   };
 
   const steps = [
-    { num: 1, title: 'Schedule & Vehicle' },
-    { num: 2, title: 'Services' },
+    { num: 1, title: 'Services & Vehicle' },
+    { num: 2, title: 'Schedule' },
     { num: 3, title: 'Fleet Editing' },
     { num: 4, title: 'Review & Pay' }
   ];
@@ -144,8 +144,8 @@ const CustomerBookAppointment = () => {
 
       {/* Step Content */}
       <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', padding: '2rem', boxShadow: 'var(--admin-card-shadow)' }}>
-        {currentStep === 1 && <Step1Schedule bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} />}
-        {currentStep === 2 && <Step2Services bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onBack={prevStep} />}
+        {currentStep === 1 && <Step2Services bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} />}
+        {currentStep === 2 && <Step1Schedule bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onBack={prevStep} />}
         {currentStep === 3 && <Step3FleetEditing bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} setActiveVehicleIndex={setActiveVehicleIndex} setCurrentStep={setCurrentStep} onNext={nextStep} onBack={prevStep} />}
         {currentStep === 4 && <Step4ReviewPayment bookingData={bookingData} setBookingData={setBookingData} onSubmit={handleSubmit} onBack={prevStep} isSubmitting={isSubmitting} />}
       </div>
