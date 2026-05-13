@@ -171,15 +171,15 @@ const CustomerGarage = () => {
           <button onClick={handleOpenAdd} style={{ marginTop: '1rem', background: 'transparent', border: '1px solid var(--admin-brand)', color: 'var(--admin-brand)', padding: '0.75rem 1.5rem', borderRadius: '4px', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>GET STARTED</button>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '2rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1.5rem' }}>
           {vehicles.map(vehicle => (
             <div 
               key={vehicle.id}
               style={{
                 background: 'var(--admin-card)',
                 border: `1px solid ${vehicle.is_primary ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                borderRadius: 'var(--admin-radius-lg)',
-                padding: '2rem',
+                borderRadius: 'var(--admin-radius)',
+                padding: '1.5rem',
                 position: 'relative',
                 overflow: 'hidden',
                 transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',

@@ -123,7 +123,7 @@ export const createBooking = async (customerId, bookingData) => {
         method: 'GCash',
         status: 'FOR_VERIFICATION',
         receipt_url: publicUrl,
-        reference_number: bookingData.payment?.ocrData?.referenceNo || `GC-${bookingRef}` // Authoritative AI Extraction Ref
+        reference_number: bookingData.payment?.ocrData?.referenceNo || '' // Transaction Reference
       });
 
       if (payError) throw payError;
@@ -227,19 +227,22 @@ export const subscribeToCustomerBookings = (customerId, callback) => {
 
 function combineDateAndTime(dateStr, timeStr) {
   if (!dateStr) return new Date().toISOString();
-  if (!timeStr) return `${dateStr}T00:00:00`;
+  if (!timeStr) return `${dateStr}T00:00:00Z`;
   
   try {
     const [time, meridian] = timeStr.split(' ');
-    let [hours, minutes] = time.split(':').map(Number);
+    let [hours, minutes = 0] = time.split(':').map(Number);
     if (meridian === 'PM' && hours !== 12) hours += 12;
     if (meridian === 'AM' && hours === 12) hours = 0;
     
-    const iso = `${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
-    if (isNaN(new Date(iso).getTime())) throw new Error('Invalid ISO');
-    return iso;
+    // Construct Date in local timezone, then convert to UTC ISO string
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const d = new Date(year, month - 1, day, hours, minutes, 0);
+    
+    if (isNaN(d.getTime())) throw new Error('Invalid Date');
+    return d.toISOString();
   } catch (e) {
-    return `${dateStr}T12:00:00`; // Fallback to noon if time parsing fails
+    return `${dateStr}T12:00:00Z`; // Fallback
   }
 }
 

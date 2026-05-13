@@ -14,8 +14,8 @@ const CustomerMyBookings = () => {
   const filteredBookings = bookings.filter(b => {
     const matchesFilter =
       filter === 'ALL' ||
-      (filter === 'UPCOMING' && ['scheduled', 'confirmed', 'ongoing'].includes(b.status)) ||
-      (filter === 'PAST' && ['completed', 'cancelled'].includes(b.status));
+      (filter === 'UPCOMING' && ['scheduled', 'confirmed', 'ongoing', 'in_progress'].includes(b.status?.toLowerCase())) ||
+      (filter === 'PAST' && ['completed', 'cancelled', 'flagged_noshow'].includes(b.status?.toLowerCase()));
 
     const searchStr = `${b.id} ${b.vehicles?.map(v => `${v.brand} ${v.model} ${v.plate_number}`).join(' ') || ''}`.toLowerCase();
     const matchesSearch = searchStr.includes(searchTerm.toLowerCase());
@@ -24,12 +24,14 @@ const CustomerMyBookings = () => {
   });
 
   const getStatusColor = (status) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'scheduled': return 'var(--admin-brand)';
       case 'confirmed': return 'var(--admin-info)';
-      case 'ongoing': return '#a855f7';
+      case 'ongoing':
+      case 'in_progress': return '#a855f7';
       case 'completed': return 'var(--admin-success)';
-      case 'cancelled': return '#ef4444';
+      case 'cancelled':
+      case 'flagged_noshow': return '#ef4444';
       default: return 'var(--admin-text-secondary)';
     }
   };
@@ -51,7 +53,7 @@ const CustomerMyBookings = () => {
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
+    <div style={{ padding: '2rem', paddingBottom: '5rem', maxWidth: '1200px', margin: '0 auto' }}>
       
       {/* Rebook Confirmation Modal */}
       {showRebookModal && (
@@ -210,6 +212,9 @@ const CustomerMyBookings = () => {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Status</div>
                     {(() => {
+                      if (b.status?.toUpperCase() === 'CANCELLED') {
+                        return <div style={{ fontSize: '0.8rem', fontWeight: '950', color: '#ef4444' }}>CANCELLED</div>;
+                      }
                       const totalPaid = (b.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
                       const balance = Math.max(0, (b.total_amount || 0) - totalPaid);
                       return (

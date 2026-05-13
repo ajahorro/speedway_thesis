@@ -7,7 +7,7 @@ const LoginForm = ({ onLogin, onSwitchMode, isLoading }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onLogin(email, password);
+    onLogin(email.trim(), password);
   };
 
   const inputStyle = {

@@ -15,7 +15,8 @@ const NotificationPopover = ({ user, profile, onClose, onRead }) => {
       </div>
       <button 
         onClick={() => {
-          navigate('/admin/notifications');
+          const isAdmin = profile?.role?.toUpperCase() === 'ADMIN' || profile?.role?.toUpperCase() === 'SUPERADMIN';
+          navigate(isAdmin ? '/admin/notifications' : '/customer/notifications');
           onClose();
         }} 
         style={{ marginTop: '1.5rem', width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}

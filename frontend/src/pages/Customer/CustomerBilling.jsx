@@ -179,7 +179,7 @@ const CustomerBilling = () => {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
-          <div style={{ background: 'var(--admin-card)', padding: '1.75rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: '1.5rem', boxShadow: 'var(--admin-card-shadow)' }}>
+          <div style={{ background: 'var(--admin-card)', padding: '1.5rem', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: '1.5rem', boxShadow: 'var(--admin-card-shadow)' }}>
             <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(var(--admin-brand-rgb), 0.2)' }}>
               <CreditCard size={28} color="var(--admin-brand)" />
             </div>
@@ -189,7 +189,7 @@ const CustomerBilling = () => {
             </div>
           </div>
 
-          <div style={{ background: 'var(--admin-card)', padding: '1.75rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: '1.5rem', boxShadow: 'var(--admin-card-shadow)' }}>
+          <div style={{ background: 'var(--admin-card)', padding: '1.5rem', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', gap: '1.5rem', boxShadow: 'var(--admin-card-shadow)' }}>
             <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: 'rgba(245, 158, 11, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
               <Clock size={28} color="#f59e0b" />
             </div>
@@ -200,7 +200,7 @@ const CustomerBilling = () => {
           </div>
         </div>
 
-        <div style={{ background: 'var(--admin-card)', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', overflow: 'hidden', boxShadow: 'var(--admin-card-shadow)' }}>
+        <div style={{ background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', overflow: 'hidden', boxShadow: 'var(--admin-card-shadow)' }}>
           <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.02)' }}>
             <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transaction Ledger</h3>
           </div>
@@ -236,34 +236,45 @@ const CustomerBilling = () => {
                           ₱{booking.total_amount.toLocaleString()}
                         </td>
                         <td style={{ padding: '1.25rem 2rem' }}>
-                          <span style={{ 
-                            fontSize: '0.65rem', fontWeight: '950', 
-                            background: accessible ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                            color: accessible ? '#10b981' : '#f59e0b',
-                            padding: '0.3rem 0.75rem', borderRadius: '4px', textTransform: 'uppercase', border: '1px solid currentColor'
-                          }}>
-                            {accessible ? 'PAID' : 'AWAITING VERIFICATION'}
-                          </span>
+                          {booking.status?.toUpperCase() === 'CANCELLED' ? (
+                            <span style={{ 
+                              fontSize: '0.65rem', fontWeight: '950', 
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              color: '#ef4444',
+                              padding: '0.3rem 0.75rem', borderRadius: '4px', textTransform: 'uppercase', border: '1px solid currentColor'
+                            }}>
+                              CANCELLED
+                            </span>
+                          ) : (
+                            <span style={{ 
+                              fontSize: '0.65rem', fontWeight: '950', 
+                              background: accessible ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                              color: accessible ? '#10b981' : '#f59e0b',
+                              padding: '0.3rem 0.75rem', borderRadius: '4px', textTransform: 'uppercase', border: '1px solid currentColor'
+                            }}>
+                              {accessible ? 'PAID' : 'AWAITING VERIFICATION'}
+                            </span>
+                          )}
                         </td>
                         <td style={{ padding: '1.25rem 2rem', textAlign: 'center' }}>
                           <div style={{ position: 'relative', display: 'inline-block' }}>
                             <button 
                               onClick={() => openReceipt(booking)}
-                              disabled={!accessible}
-                              title={!accessible ? "Receipt pending Admin confirmation" : "View Official Receipt"}
+                              disabled={!accessible || booking.status?.toUpperCase() === 'CANCELLED'}
+                              title={booking.status?.toUpperCase() === 'CANCELLED' ? "Receipt voided" : (!accessible ? "Receipt pending Admin confirmation" : "View Official Receipt")}
                               style={{ 
                                 background: 'rgba(255,255,255,0.03)', 
                                 border: '1px solid var(--admin-border)', 
-                                color: accessible ? 'white' : 'rgba(255,255,255,0.1)', 
+                                color: (accessible && booking.status?.toUpperCase() !== 'CANCELLED') ? 'white' : 'rgba(255,255,255,0.1)', 
                                 borderRadius: '8px', width: '40px', height: '40px', 
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                                cursor: accessible ? 'pointer' : 'not-allowed', 
+                                cursor: (accessible && booking.status?.toUpperCase() !== 'CANCELLED') ? 'pointer' : 'not-allowed', 
                                 transition: 'all 0.2s ease' 
                               }}
                             >
                               <FileText size={18} />
                             </button>
-                            {!accessible && (
+                            {(!accessible && booking.status?.toUpperCase() !== 'CANCELLED') && (
                               <div style={{ position: 'absolute', top: '-10px', right: '-5px', width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
                             )}
                           </div>

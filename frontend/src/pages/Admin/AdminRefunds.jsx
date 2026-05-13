@@ -248,7 +248,7 @@ const AdminRefunds = () => {
               {state.selectedItem.ocr_metadata && (
                 <div style={{ background: 'rgba(var(--admin-info-rgb), 0.05)', border: '1px dashed var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', padding: '1rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--admin-info)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase' }}>
-                    <ShieldCheck size={14} /> AI Verification Archive
+                    <ShieldCheck size={14} /> Payment Verification Archive
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
@@ -260,7 +260,7 @@ const AdminRefunds = () => {
                       <span style={{ color: 'white', fontWeight: '900' }}>₱{state.selectedItem.ocr_metadata.amount?.toLocaleString()}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
-                      <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '600' }}>AI Audit Result:</span>
+                      <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Verification Result:</span>
                       <span style={{ color: state.selectedItem.ocr_metadata.status === 'MATCHED' ? '#10b981' : '#f59e0b', fontWeight: '900' }}>{state.selectedItem.ocr_metadata.status}</span>
                     </div>
                   </div>

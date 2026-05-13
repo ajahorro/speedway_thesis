@@ -14,6 +14,14 @@ const CustomerDashboard = () => {
   const totalBookings = allBookings?.length || 0;
   const activeServices = allBookings?.filter(b => b.status === 'ongoing' || b.status === 'in_progress').length || 0;
   
+  // REQ-CST-01: Count queued vehicles across all active bookings
+  const queuedVehicles = (allBookings || []).reduce((count, b) => {
+    if (['ongoing', 'in_progress'].includes(b.status)) {
+      return count + (b.vehicles || []).filter(v => v.status === 'QUEUED').length;
+    }
+    return count;
+  }, 0);
+  
   // REQ-CST-09: BALANCE TRACKER (Real-time calculation)
   const totalOutstanding = (allBookings || []).reduce((sum, b) => {
     if (['cancelled', 'completed'].includes(b.status)) return sum;
@@ -25,7 +33,7 @@ const CustomerDashboard = () => {
     { label: 'Total Bookings', value: totalBookings, icon: ClipboardList, color: 'var(--admin-brand)' },
     { label: 'Outstanding Balance', value: `₱${totalOutstanding.toLocaleString()}`, icon: CreditCard, color: '#f59e0b' },
     { label: 'Active Services', value: activeServices, icon: Activity, color: '#10b981' },
-    { label: 'Fleet Units', value: profile?.fleet_count || 0, icon: Car, color: '#3b82f6' }
+    { label: queuedVehicles > 0 ? 'Units in Queue' : 'Fleet Units', value: queuedVehicles > 0 ? queuedVehicles : (profile?.fleet_count || 0), icon: Car, color: queuedVehicles > 0 ? '#f59e0b' : '#3b82f6' }
   ];
 
   return (

@@ -1,6 +1,5 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '../../lib/supabase';
 import { 
   Clock, User, ChevronLeft, ChevronRight, 
   AlertCircle, LayoutGrid, Calendar, Users,
@@ -9,9 +8,9 @@ import {
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
-import { logger } from '../../utils/logger';
-import toast from 'react-hot-toast';
-import { calculatePaymentStatus, getPaymentStatusUI } from '../../utils/paymentUtils';
+import { getPaymentStatusUI } from '../../utils/paymentUtils';
+import { getStatusColor } from '../../utils/bookingHelpers';
+import { useAdminBookings } from '../../hooks/useAdminBookings';
 
 import AdminSchedulingGrid from './AdminSchedulingGrid';
 
@@ -20,76 +19,30 @@ const AdminBookings = () => {
   const location = useLocation();
   const isMobile = useMediaQuery('(max-width: 1024px)');
 
-  // BATCHED STATE: One source of truth for the page
+  // REQ-NFR-05: Decoupled data layer via custom hook (realtime multi-table sync)
+  const { bookings, loading, refresh } = useAdminBookings();
+
+  // UI-only state (search, filter, view mode)
   const [state, setState] = useState({
-    bookings: [],
-    loading: true,
     searchTerm: location.state?.filter || '',
     filterStatus: 'all',
-    view: 'list' // New view state
+    view: 'list'
   });
 
-  // MEMOIZED FETCH: Prevents unnecessary function recreation
-  const fetchBookings = useCallback(async () => {
-    setState(prev => ({ ...prev, loading: true }));
-    try {
-      logger.admin('Syncing Live Booking Directory...');
-      
-      const { data, error } = await supabase
-        .from('bookings')
-        .select(`
-          *,
-          customer:profiles!bookings_customer_id_fkey(full_name, email),
-          vehicles:booking_vehicles(*),
-          payments:payments(*)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // DEDUPLICATION ENGINE: Resolve Cartesian Product from nested joins
-      const uniqueMap = new Map();
-      (data || []).forEach(b => {
-        if (!uniqueMap.has(b.id)) {
-          uniqueMap.set(b.id, {
-            ...b,
-            calculatedPaymentStatus: calculatePaymentStatus(b)
-          });
-        }
-      });
-
-      setState(prev => ({ ...prev, bookings: Array.from(uniqueMap.values()), loading: false }));
-      logger.admin('Booking Directory synchronized.');
-    } catch (err) {
-      logger.error('Booking Fetch Error', err);
-      toast.error('Failed to sync booking records.');
-      setState(prev => ({ ...prev, loading: false }));
-    }
-  }, []);
-
   useEffect(() => {
-    fetchBookings();
-    
     // Check for URL filters
     const params = new URLSearchParams(location.search);
     const filter = params.get('filter');
     if (filter === 'unassigned') {
       setState(prev => ({ ...prev, filterStatus: 'unassigned' }));
-    } else if (filter === 'overdue') {
-      setState(prev => ({ ...prev, filterStatus: 'overdue' }));
+    } else if (filter === 'overdue' || filter === 'FLAGGED_NOSHOW') {
+      setState(prev => ({ ...prev, filterStatus: 'FLAGGED_NOSHOW' }));
     }
-
-    // Live synchronization channel
-    const channel = supabase.channel('admin-bookings-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => fetchBookings())
-      .subscribe();
-      
-    return () => { supabase.removeChannel(channel); };
-  }, [fetchBookings, location.search]);
+  }, [location.search]);
 
   // MEMOIZED FILTERING: Only re-calculates when data or search changes
   const filteredBookings = useMemo(() => {
-    return state.bookings.filter(b => {
+    return bookings.filter(b => {
       const matchesSearch = `
         ${b.id} 
         ${b.customer?.full_name || ''} 
@@ -97,30 +50,18 @@ const AdminBookings = () => {
         ${b.vehicles?.map(v => v.plate_number).join(' ') || ''} 
       `.toLowerCase().includes(state.searchTerm.toLowerCase());
       
-      let matchesStatus = state.filterStatus === 'all' || b.status === state.filterStatus;
+      let matchesStatus = state.filterStatus === 'all' || b.status?.toLowerCase() === state.filterStatus.toLowerCase();
       
-      // SPECIAL FILTER: UNASSIGNED & OVERDUE
+      // SPECIAL FILTERS
       if (state.filterStatus === 'unassigned') {
-        matchesStatus = !b.staff_id && b.status !== 'cancelled';
-      } else if (state.filterStatus === 'overdue') {
-        const now = new Date();
-        const start = new Date(b.start_datetime);
-        matchesStatus = start < now && !['completed', 'cancelled'].includes(b.status.toLowerCase());
+        matchesStatus = !b.staff_id && b.status?.toLowerCase() !== 'cancelled';
+      } else if (state.filterStatus === 'FLAGGED_NOSHOW') {
+        matchesStatus = b.status?.toUpperCase() === 'FLAGGED_NOSHOW';
       }
       
       return matchesSearch && matchesStatus;
     });
-  }, [state.bookings, state.searchTerm, state.filterStatus]);
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'scheduled': return 'var(--admin-brand)';
-      case 'completed': return '#10b981';
-      case 'cancelled': return '#ef4444';
-      case 'ongoing': return '#a855f7';
-      default: return 'var(--admin-text-secondary)';
-    }
-  };
+  }, [bookings, state.searchTerm, state.filterStatus]);
 
   const getPaymentStatus = (booking) => {
     return getPaymentStatusUI(booking.calculatedPaymentStatus);
@@ -142,7 +83,7 @@ const AdminBookings = () => {
         badge="RECORDS MANAGEMENT"
         title="BOOKING DIRECTORY"
         subtitle="Manage and monitor all vehicle detailing appointments."
-        onRefresh={fetchBookings}
+        onRefresh={refresh}
         actionLabel={state.view === 'list' ? "SWITCH TO GRID VIEW" : "SWITCH TO LIST VIEW"}
         onAction={() => setState(prev => ({ ...prev, view: prev.view === 'list' ? 'grid' : 'list' }))}
         actionIcon={state.view === 'list' ? <LayoutGrid size={18} /> : <RotateCw size={18} />}
@@ -167,7 +108,7 @@ const AdminBookings = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.4rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', overflowX: 'auto' }}>
-            {['all', 'unassigned', 'overdue', 'scheduled', 'ongoing', 'completed', 'cancelled'].map(f => (
+            {['all', 'unassigned', 'FLAGGED_NOSHOW', 'scheduled', 'ongoing', 'completed', 'cancelled'].map(f => (
               <button 
                 key={f}
                 onClick={() => setState(prev => ({ ...prev, filterStatus: f }))}
@@ -186,7 +127,7 @@ const AdminBookings = () => {
         </div>
       </div>
 
-      {state.loading ? (
+      {loading ? (
         <LoadingState message="Retrieving booking records..." />
       ) : filteredBookings.length === 0 ? (
         <div style={{ ...containerStyle, padding: '4rem', textAlign: 'center', color: 'rgba(255,255,255,0.2)', fontSize: '0.8rem', fontWeight: '900', textTransform: 'uppercase' }}>No matching records found</div>

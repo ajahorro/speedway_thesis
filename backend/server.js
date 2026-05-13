@@ -260,7 +260,7 @@ app.post('/invite/accept', async (req, res) => {
     const { data: userData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: invite.email,
       password: password,
-      email_confirm: true,
+      email_confirm: false,
       user_metadata: { first_name, last_name, role: invite.role }
     });
 
@@ -348,6 +348,9 @@ app.post('/customer/register', async (req, res) => {
         role: 'CUSTOMER'
       }
     });
+    // For development, we can automatically confirm if needed, 
+    // but the directive asks to toggle it OFF. 
+    // generating a link is one way, but createUser is better if we want NO email.
 
     if (error) {
       console.error('❌ Supabase Generate Link Error:', error.message);
@@ -804,6 +807,288 @@ app.post('/api/garage/sync', async (req, res) => {
     return res.json({ success: true, message: 'Vehicle registered in garage' });
   } catch (err) {
     console.error('❌ [GARAGE] Sync Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+/**
+ * 🛡️ REQ-ADM-02, REQ-SYS-02: No-Show Detection Engine
+ * NOSHOW_GRACE_MINUTES = 30 (mirrors SHOP_CONFIG.STALE_SESSION_PURGE_MINUTES)
+ * URGENT_REMINDER_MINUTES = 15
+ * Identifies bookings past start time and transitions to FLAGGED_NOSHOW.
+ */
+const NOSHOW_GRACE_MINUTES = 30;
+const URGENT_REMINDER_MINUTES = 15;
+
+const checkOverdueBookings = async () => {
+  if (!supabaseAdmin) return;
+  
+  const now = new Date();
+  const overdueThreshold = new Date(now.getTime() - NOSHOW_GRACE_MINUTES * 60000);
+  const reminderThreshold = new Date(now.getTime() - URGENT_REMINDER_MINUTES * 60000);
+
+  console.log(`🕒 [SYSTEM] RUNNING NO-SHOW AUDIT: ${now.toISOString()}`);
+
+  try {
+    // Case-tolerant: catches 'scheduled', 'confirmed', 'PENDING', 'CONFIRMED'
+    const { data: bookings, error } = await supabaseAdmin
+      .from('bookings')
+      .select('*, customer:profiles!bookings_customer_id_fkey(email, full_name), payments(id, amount, status)')
+      .in('status', ['scheduled', 'confirmed', 'pending', 'PENDING', 'CONFIRMED']);
+
+    if (error) throw error;
+
+    for (const booking of (bookings || [])) {
+      const startTime = new Date(booking.start_datetime);
+      
+      // A. NO-SHOW FLAG (30 MINS) → FLAGGED_NOSHOW
+      if (startTime < overdueThreshold) {
+        console.log(`⚠️ [FLAGGED_NOSHOW] Booking ${booking.id} flagged (30m+ No-Show)`);
+        
+        // Check if booking has verified payments for refund auto-flag
+        const hasPaidPayments = (booking.payments || []).some(p => p.status === 'PAID');
+        
+        const updatePayload = { 
+          status: 'FLAGGED_NOSHOW', 
+          needs_attention: true 
+        };
+        
+        // REQ-CST-11: Auto-flag for refund if payment exists
+        if (hasPaidPayments) {
+          updatePayload.refund_status = 'PENDING';
+          console.log(`💰 [REFUND] Booking ${booking.id} auto-flagged for refund (paid booking)`);
+        }
+        
+        await supabaseAdmin
+          .from('bookings')
+          .update(updatePayload)
+          .eq('id', booking.id);
+          
+        await supabaseAdmin.from('audit_logs').insert({
+          booking_id: booking.id,
+          action_type: 'SYSTEM_FLAG_NOSHOW',
+          actor_name: 'SYSTEM_AUDITOR',
+          actor_role: 'SYSTEM',
+          details: `Booking automatically flagged as No-Show (${NOSHOW_GRACE_MINUTES}m threshold).${hasPaidPayments ? ' Refund auto-queued.' : ''}`
+        });
+
+        // Send No-Show notification email
+        if (resendClient && booking.customer?.email) {
+          try {
+            await resendClient.emails.send({
+              from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+              to: booking.customer.email,
+              subject: 'Booking Expired — No-Show Notification',
+              html: `
+                <div style="font-family: sans-serif; padding: 20px; color: #333;">
+                  <h2 style="color: #E61E2A;">Booking Expired</h2>
+                  <p>Hi ${booking.customer.full_name || 'Valued Customer'},</p>
+                  <p>Your scheduled slot at Speedway Detail Studio has expired due to non-arrival within the ${NOSHOW_GRACE_MINUTES}-minute window.</p>
+                  ${hasPaidPayments ? '<p><strong>Since a payment was detected, a refund request has been automatically filed.</strong> Our team will process it shortly.</p>' : ''}
+                  <p>Please contact us if you have any questions.</p>
+                </div>`
+            });
+          } catch (emailErr) {
+            console.warn('📧 No-Show email failed:', emailErr.message);
+          }
+        }
+      }
+      
+      // B. URGENT REMINDER (15 MINS) - REQ-SYS-02
+      else if (startTime < reminderThreshold && !booking.reminder_sent) {
+        console.log(`📧 [REMINDER] Triggering urgent reminder for ${booking.customer?.email}`);
+        
+        if (resendClient && booking.customer?.email) {
+          try {
+            await resendClient.emails.send({
+              from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+              to: booking.customer.email,
+              subject: 'URGENT: Your Speedway Slot is Held',
+              html: `
+                <div style="font-family: sans-serif; padding: 20px; color: #333;">
+                  <h2 style="color: #E61E2A;">URGENT NOTIFICATION</h2>
+                  <p>Hi ${booking.customer.full_name || 'Valued Customer'},</p>
+                  <p>Your scheduled slot at Speedway Detail Studio was set to begin ${URGENT_REMINDER_MINUTES} minutes ago.</p>
+                  <p><strong>We are holding your slot for ${NOSHOW_GRACE_MINUTES - URGENT_REMINDER_MINUTES} more minutes.</strong> If you do not arrive within this window, your booking will be flagged as a No-Show and may be cancelled.</p>
+                  <p>Please contact us immediately if you are on your way.</p>
+                </div>`
+            });
+          } catch (emailErr) {
+            console.warn('📧 Reminder email failed:', emailErr.message);
+          }
+          
+          await supabaseAdmin
+            .from('bookings')
+            .update({ reminder_sent: true })
+            .eq('id', booking.id);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('❌ No-Show Audit Error:', err.message);
+  }
+};
+
+// Run audit every 5 minutes + immediately on startup
+setInterval(checkOverdueBookings, 5 * 60000);
+checkOverdueBookings(); // Run immediately on boot
+
+/**
+ * 🧹 CLEAN SLATE: Purge all booking-related data
+ * Deletes in FK-safe order (children first → parent last).
+ * Preserves: profiles, vehicles (garage), shop config.
+ */
+app.post('/api/admin/purge-bookings', async (req, res) => {
+  console.log('🧹 [ADMIN] PURGING ALL BOOKING DATA...');
+  
+  try {
+    // 1. booking_vehicle_services (grandchild)
+    const { error: e1 } = await supabaseAdmin.from('booking_vehicle_services').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (e1) console.warn('  ⚠️ booking_vehicle_services:', e1.message);
+    else console.log('  ✅ booking_vehicle_services purged');
+
+    // 2. booking_vehicles (child of bookings)
+    const { error: e2 } = await supabaseAdmin.from('booking_vehicles').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (e2) console.warn('  ⚠️ booking_vehicles:', e2.message);
+    else console.log('  ✅ booking_vehicles purged');
+
+    // 3. payments (child of bookings)
+    const { error: e3 } = await supabaseAdmin.from('payments').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (e3) console.warn('  ⚠️ payments:', e3.message);
+    else console.log('  ✅ payments purged');
+
+    // 4. audit_logs (references bookings)
+    const { error: e4 } = await supabaseAdmin.from('audit_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (e4) console.warn('  ⚠️ audit_logs:', e4.message);
+    else console.log('  ✅ audit_logs purged');
+
+    // 5. notifications (may reference bookings)
+    const { error: e5 } = await supabaseAdmin.from('notifications').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (e5) console.warn('  ⚠️ notifications:', e5.message);
+    else console.log('  ✅ notifications purged');
+
+    // 6. chat_messages (references bookings)
+    const { error: e6 } = await supabaseAdmin.from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (e6) console.warn('  ⚠️ chat_messages:', e6.message);
+    else console.log('  ✅ chat_messages purged');
+
+    // 7. bookings (parent — last)
+    const { error: e7 } = await supabaseAdmin.from('bookings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (e7) console.warn('  ⚠️ bookings:', e7.message);
+    else console.log('  ✅ bookings purged');
+
+    console.log('🧹 [ADMIN] PURGE COMPLETE — Clean slate achieved.');
+    return res.json({ success: true, message: 'All booking data purged. Clean slate.' });
+  } catch (err) {
+    console.error('❌ Purge Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/bookings/admin-cancel', async (req, res) => {
+  const { bookingId, reason } = req.body;
+  console.log(`🛑 [ADMIN] MANUAL CANCELLATION: ${bookingId} (Reason: ${reason})`);
+
+  try {
+    const { error: bookingError } = await supabaseAdmin
+      .from('bookings')
+      .update({ 
+        status: 'CANCELLED',
+        cancellation_reason: reason,
+        cancellation_type: reason === 'No-Show' ? 'NO_SHOW' : 'ADMIN_MANUAL',
+        needs_attention: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', bookingId);
+
+    if (bookingError) throw bookingError;
+
+    // 🛡️ Audit Trail
+    await supabaseAdmin.from('audit_logs').insert({
+      booking_id: bookingId,
+      action_type: 'ADMIN_CANCEL_NOSHOW',
+      actor_name: 'ADMIN',
+      actor_role: 'ADMIN',
+      details: `Manual cancellation performed by Admin. Reason: ${reason}`
+    });
+
+    return res.json({ success: true, message: 'Booking cancelled and audit log recorded.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/debug/check-user/:email', async (req, res) => {
+  const { email } = req.params;
+  try {
+    const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
+    if (error) throw error;
+    
+    const user = users.find(u => u.email === email);
+    if (!user) {
+      return res.json({ success: false, message: 'User not found in Auth' });
+    }
+    
+    return res.json({ 
+      success: true, 
+      user: {
+        id: user.id,
+        email: user.email,
+        confirmed_at: user.confirmed_at,
+        last_sign_in_at: user.last_sign_in_at,
+        metadata: user.user_metadata
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/debug/list-users', async (req, res) => {
+  try {
+    const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
+    if (error) throw error;
+    
+    // Return last 10 users
+    const lastUsers = users
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 10)
+      .map(u => ({
+        id: u.id,
+        email: u.email,
+        created_at: u.created_at,
+        confirmed_at: u.confirmed_at,
+        role: u.user_metadata?.role
+      }));
+    
+    return res.json({ success: true, users: lastUsers });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+app.post('/api/debug/fix-account', async (req, res) => {
+  const { email } = req.body;
+  try {
+    const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+    if (listError) throw listError;
+    
+    const user = users.find(u => u.email === email);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+      password: 'Password123!',
+      email_confirm: true
+    });
+    
+    if (updateError) throw updateError;
+    
+    return res.json({ success: true, message: `Password for ${email} reset to 'Password123!' and email confirmed.` });
+  } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });

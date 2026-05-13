@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import Login from './Login';
 import logo from '../assets/logo.png';
+import { useAuth } from '../hooks/useAuth';
 
 const SERVICES_DATA = {
   "Exclusive Packages": [
@@ -66,7 +67,22 @@ const Landing = () => {
   const [openFaq, setOpenFaq] = useState(null);
   const [openService, setOpenService] = useState(null);
   const [scrolled, setScrolled] = useState(false);
+  const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
+
+  const handleAuthAction = () => {
+    if (user && profile) {
+      const routes = {
+        ADMIN: '/admin',
+        SUPER_ADMIN: '/admin',
+        STAFF: '/staff',
+        CUSTOMER: '/customer'
+      };
+      navigate(routes[profile.role] || '/customer');
+    } else {
+      setShowLoginModal(true);
+    }
+  };
 
   // Handle scroll effect for header
   useEffect(() => {
@@ -133,10 +149,29 @@ const Landing = () => {
           <span onClick={() => scrollToSection('contact')} style={navItemStyle} className="nav-link">Contact</span>
         </nav>
 
-        {/* LOGIN (Right) */}
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+        {/* LOGIN/DASHBOARD (Right) */}
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', gap: '1rem', alignItems: 'center' }}>
+          {user && (
+            <button 
+              onClick={() => signOut()}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: 'transparent',
+                color: 'white',
+                border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: '4px',
+                fontWeight: '950',
+                fontSize: '0.75rem',
+                textTransform: 'uppercase',
+                letterSpacing: '1px',
+                cursor: 'pointer',
+              }}
+            >
+              SIGN OUT
+            </button>
+          )}
           <button 
-            onClick={() => setShowLoginModal(true)}
+            onClick={handleAuthAction}
             style={{
               padding: '0.75rem clamp(1rem, 3vw, 2rem)',
               background: '#E61E2A',
@@ -153,7 +188,7 @@ const Landing = () => {
             onMouseEnter={e => e.target.style.transform = 'scale(1.05)'}
             onMouseLeave={e => e.target.style.transform = 'scale(1)'}
           >
-            LOGIN
+            {user ? 'DASHBOARD' : 'LOGIN'}
           </button>
         </div>
       </header>
@@ -181,8 +216,8 @@ const Landing = () => {
             Experience premium automotive detailing services that bring out the true brilliance 
             of your vehicle. Our expert team uses cutting-edge techniques to deliver stunning results.
           </p>
-          <button onClick={() => setShowLoginModal(true)} style={{ padding: '1.25rem 3.5rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '2px', cursor: 'pointer', boxShadow: '0 10px 30px rgba(230, 30, 42, 0.3)' }}>
-            BOOK NOW
+          <button onClick={handleAuthAction} style={{ padding: '1.25rem 3.5rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '2px', cursor: 'pointer', boxShadow: '0 10px 30px rgba(230, 30, 42, 0.3)' }}>
+            {user ? 'DASHBOARD' : 'BOOK NOW'}
           </button>
         </div>
       </section>

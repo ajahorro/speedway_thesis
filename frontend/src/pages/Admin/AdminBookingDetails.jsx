@@ -11,6 +11,7 @@ import {
 import { SERVICES_DATA } from '../../data/servicesCatalog';
 import { calculateOccupancy, filterActiveBookings } from '../../utils/schedulingUtils';
 import { SHOP_CONFIG } from '../../config/constants';
+import { getStatusColor, isStaffOccupied } from '../../utils/bookingHelpers';
 import toast from 'react-hot-toast';
 import BookingAuditTrail from '../../components/BookingAuditTrail';
 import BookingChat from '../../components/BookingChat';
@@ -165,26 +166,18 @@ const AdminBookingDetails = () => {
   const fetchStaffList = async () => {
     try {
       const { data: allStaff } = await supabase.from('profiles').select('*').eq('role', 'STAFF');
-      if (!allStaff || !booking) {
-        if (allStaff) setStaffList(allStaff);
-        return;
-      }
+      if (!allStaff) return;
 
-      // TECHNICIAN COLLISION GUARD: Find staff busy during this booking's window
-      const { data: busyAssignments } = await supabase
+      // REQ-NFR-01: Dynamic staff availability — occupied if assigned to ANY in_progress booking
+      const { data: activeBookings } = await supabase
         .from('bookings')
         .select('staff_id')
-        .neq('id', id)
-        .neq('status', 'cancelled')
-        .not('staff_id', 'is', null)
-        .lte('start_datetime', booking.end_datetime)
-        .gte('end_datetime', booking.start_datetime);
+        .eq('status', 'in_progress')
+        .not('staff_id', 'is', null);
 
-      const busyIds = new Set(busyAssignments?.map(a => a.staff_id) || []);
-      
       const filteredStaff = allStaff.map(s => ({
         ...s,
-        isBusy: busyIds.has(s.id)
+        isBusy: isStaffOccupied(s.id, activeBookings || [])
       }));
 
       setStaffList(filteredStaff);
@@ -230,6 +223,9 @@ const AdminBookingDetails = () => {
     try {
       const { data: { user: admin } } = await supabase.auth.getUser();
       
+      // REQ-ADM-04: Determine if this is a post-service assignment
+      const isPostService = booking.status === 'completed';
+      
       const updatePayload = { 
         staff_id: staffId, 
         assigned_by: admin?.id, 
@@ -245,17 +241,19 @@ const AdminBookingDetails = () => {
       // Notify Staff
       await notifyUser(staffId, 'New Fleet Assigned! 🔧', `You have been assigned to lead the detailing session for ${booking.customer?.full_name}.`, 'TASK_ASSIGNED', `/staff/tasks`);
       
-      // LOG AUDIT
+      // LOG AUDIT — differentiate post-service vs normal assignment
       const staffName = staffList.find(s => s.id === staffId)?.full_name || 'Staff';
       await supabase.from('audit_logs').insert({
         booking_id: id,
-        action_type: 'STAFF_ASSIGNED',
+        action_type: isPostService ? 'POST_SERVICE_ASSIGNMENT' : 'STAFF_ASSIGNED',
         actor_name: admin?.email || 'Admin',
         actor_role: 'ADMIN',
-        details: `Assigned technician ${staffName} to lead this session.`
+        details: isPostService 
+          ? `Post-service assignment: Linked technician ${staffName} to completed session for reporting.` 
+          : `Assigned technician ${staffName} to lead this session.`
       });
 
-      toast.success('Technician Assigned Successfully', { id: toastId });
+      toast.success(isPostService ? 'Post-Service Assignment Recorded' : 'Technician Assigned Successfully', { id: toastId });
       fetchBookingDetails(); fetchAuditLogs();
     } catch (error) { 
       logger.error('CRITICAL ASSIGNMENT FAILURE:', error);
@@ -311,6 +309,32 @@ const AdminBookingDetails = () => {
       toast.success(`Booking ${status.toUpperCase()}`, { id: toastId });
       fetchBookingDetails();
     } catch (err) { toast.error('Update failed', { id: toastId }); }
+  };
+
+  // 🛡️ REQ-ADM-02: Manual No-Show Cancellation with Audit
+  const handleNoShowCancel = async () => {
+    const confirm = window.confirm('Are you sure you want to cancel this as a NO-SHOW? This will be recorded in the audit log.');
+    if (!confirm) return;
+
+    const toastId = toast.loading('Recording No-Show cancellation...');
+    try {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/bookings/admin-cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: id, reason: 'No-Show' })
+      });
+
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error);
+
+      await notifyUser(booking.customer_id, 'Booking Cancelled (No-Show) ❌', 'Your booking was cancelled due to non-arrival within the 30-minute window.', 'BOOKING_CANCELLED', `/my-bookings/${id}`);
+
+      toast.success('Cancelled as No-Show', { id: toastId });
+      fetchBookingDetails();
+      fetchAuditLogs();
+    } catch (err) {
+      toast.error(err.message || 'Cancellation failed', { id: toastId });
+    }
   };
 
   const handleRecordPayment = async () => {
@@ -525,7 +549,7 @@ const AdminBookingDetails = () => {
   const totalPaid = bookingPayments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
   const balance = Math.max(0, (booking.total_amount || 0) - totalPaid);
   const surplus = Math.max(0, totalPaid - (booking.total_amount || 0));
-  const isLocked = booking.status === 'cancelled';
+  const isLocked = booking.status?.toUpperCase() === 'CANCELLED';
 
   return (
     <div style={{ 
@@ -630,11 +654,11 @@ const AdminBookingDetails = () => {
             {/* 💰 DYNAMIC FINANCIAL LEDGER - REQ-ADM-05 */}
             <div style={{ 
               padding: '1rem', 
-              background: surplus > 0 ? 'rgba(59, 130, 246, 0.05)' : (balance <= 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)'), 
+              background: isLocked ? 'rgba(255, 255, 255, 0.05)' : (surplus > 0 ? 'rgba(59, 130, 246, 0.05)' : (balance <= 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(239, 68, 68, 0.05)')), 
               borderRadius: '4px', 
               textAlign: 'center', 
-              border: `1px solid ${surplus > 0 ? 'rgba(59, 130, 246, 0.3)' : (balance <= 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)')}`,
-              color: surplus > 0 ? '#3b82f6' : (balance <= 0 ? '#10b981' : '#ef4444'), 
+              border: `1px solid ${isLocked ? 'rgba(255, 255, 255, 0.2)' : (surplus > 0 ? 'rgba(59, 130, 246, 0.3)' : (balance <= 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'))}`,
+              color: isLocked ? '#a0a0a0' : (surplus > 0 ? '#3b82f6' : (balance <= 0 ? '#10b981' : '#ef4444')), 
               fontSize: '0.8rem', 
               fontWeight: '950',
               textTransform: 'uppercase', 
@@ -647,7 +671,9 @@ const AdminBookingDetails = () => {
               marginBottom: '1rem'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                {surplus > 0 ? (
+                {isLocked ? (
+                  <><ShieldAlert size={16} /> BOOKING CANCELLED</>
+                ) : surplus > 0 ? (
                   <><TrendingUp size={16} /> ACCOUNT OVERPAID • SURPLUS: ₱{surplus.toLocaleString()}</>
                 ) : (
                   balance <= 0 ? (
@@ -735,15 +761,17 @@ const AdminBookingDetails = () => {
                             </button>
                             <button 
                               onClick={() => updateVehicleStatus(v.id, v.status === 'in_progress' ? 'completed' : 'in_progress')}
+                              disabled={isLocked}
                               style={{ 
                                 background: v.status === 'completed' ? '#10b981' : (v.status === 'in_progress' ? '#a855f7' : 'var(--admin-brand)'), 
                                 border: 'none',
                                 padding: '0.45rem 1rem', borderRadius: '4px', color: 'white', 
-                                cursor: 'pointer', fontSize: '0.65rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem',
-                                boxShadow: '0 4px 10px rgba(0,0,0,0.3)', transition: 'all 0.2s ease'
+                                cursor: isLocked ? 'not-allowed' : 'pointer', fontSize: '0.65rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                boxShadow: '0 4px 10px rgba(0,0,0,0.3)', transition: 'all 0.2s ease',
+                                opacity: isLocked ? 0.5 : 1
                               }}
-                              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                              onMouseEnter={(e) => { if (!isLocked) e.currentTarget.style.transform = 'scale(1.05)'; }}
+                              onMouseLeave={(e) => { if (!isLocked) e.currentTarget.style.transform = 'scale(1)'; }}
                             >
                               {v.status === 'completed' ? <><CheckCircle2 size={12} /> READY</> : <>{v.status === 'in_progress' ? <><Loader2 size={12} className="animate-spin" /> FINISH</> : <><Play size={12} /> START SERVICE</>}</>}
                             </button>
@@ -854,10 +882,10 @@ const AdminBookingDetails = () => {
               
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  <Zap size={18} color={booking.payment_status === 'Flagged for Review' ? '#ef4444' : 'var(--admin-brand)'} />
-                  <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'white', letterSpacing: '1px' }}>AI Financial Audit</h3>
+                  <ShieldCheck size={18} color={booking.payment_status === 'Flagged for Review' ? '#ef4444' : 'var(--admin-brand)'} />
+                  <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'white', letterSpacing: '1px' }}>Payment Verification Audit</h3>
                 </div>
-                <div style={{ fontSize: '0.55rem', fontWeight: '950', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>GEMINI-1.5-FLASH</div>
+                <div style={{ fontSize: '0.55rem', fontWeight: '950', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>AUTOMATED VERIFICATION</div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -952,7 +980,7 @@ const AdminBookingDetails = () => {
           )}
 
           {/* TECHNICIAN ASSIGNMENT */}
-          <div style={{ ...cardStyle, opacity: (booking.status === 'in_progress' || isLocked) ? 0.6 : 1, pointerEvents: (booking.status === 'in_progress' || isLocked) ? 'none' : 'auto' }}>
+          <div style={{ ...cardStyle, opacity: isLocked ? 0.6 : 1, pointerEvents: isLocked ? 'none' : 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', textTransform: 'uppercase', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>Personnel</h3>
             </div>
@@ -1094,7 +1122,7 @@ const AdminBookingDetails = () => {
       </div>
 
       {/* 3. STICKY COMMAND BAR */}
-      {(!isLocked && (booking.status === 'pending' || booking.status === 'confirmed' || booking.status === 'in_progress')) && (
+      {(!isLocked && (booking.status === 'pending' || booking.status === 'confirmed' || booking.status === 'in_progress' || booking.status === 'FLAGGED_NOSHOW')) && (
         <div style={{ 
           position: 'fixed', bottom: 0, left: isMobile ? 0 : '260px', right: 0, 
           background: '#15171A', borderTop: '2px solid var(--admin-brand)', 
@@ -1117,6 +1145,14 @@ const AdminBookingDetails = () => {
             {booking.status === 'pending' && <button onClick={() => updateBookingStatus('confirmed')} style={{ padding: '0.85rem 2rem', background: '#10b981', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>CONFIRM BOOKING</button>}
             {booking.status === 'confirmed' && <button onClick={() => updateBookingStatus('in_progress')} style={{ padding: '0.85rem 2rem', background: 'var(--admin-brand)', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>START SESSION</button>}
             {booking.status === 'in_progress' && <button onClick={() => updateBookingStatus('completed')} style={{ padding: '0.85rem 2rem', background: '#a855f7', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px' }}>MARK COMPLETED</button>}
+            {booking.status === 'FLAGGED_NOSHOW' && (
+              <button 
+                onClick={handleNoShowCancel} 
+                style={{ padding: '0.85rem 2rem', background: '#ef4444', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', letterSpacing: '0.5px', boxShadow: '0 0 15px rgba(239, 68, 68, 0.4)' }}
+              >
+                CANCEL AS NO-SHOW
+              </button>
+            )}
             <button onClick={() => updateBookingStatus('cancelled')} style={{ padding: '0.85rem 1.5rem', background: 'transparent', color: '#ef4444', borderRadius: '6px', border: '1px solid #ef4444', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer' }}>CANCEL SESSION</button>
           </div>
         </div>

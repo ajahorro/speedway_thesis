@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import { getStatusColor } from '../../utils/bookingHelpers';
 import { 
   LayoutDashboard, ClipboardList, CreditCard, Users, 
   TrendingUp, Calendar, AlertCircle, Clock, CheckCircle2,
@@ -138,13 +139,11 @@ const AdminDashboard = () => {
         .select('*', { count: 'exact', head: true })
         .eq('status', 'REJECTED');
 
-      // 7. Needs Attention - Overdue Services
-      // Definition: Past start time but not completed/cancelled
+      // 7. Needs Attention - No-Show Flagged (REQ-ADM-02)
       const { count: overdue } = await supabase
         .from('bookings')
         .select('*', { count: 'exact', head: true })
-        .lt('start_datetime', new Date().toISOString())
-        .not('status', 'in', '("completed","cancelled","COMPLETED","CANCELLED")');
+        .eq('status', 'FLAGGED_NOSHOW');
 
       // 7. Recent Bookings (DEDUPLICATED)
       const { data: recent } = await supabase
@@ -209,6 +208,21 @@ const AdminDashboard = () => {
       }
 
       rejectedItems.forEach(item => pItems.push({ id: item.id, type: 'ALERT', title: `Rejected Payment: ₱${item.amount}`, sub: item.bookings?.customer?.full_name, color: '#ef4444' }));
+      
+      // Add FLAGGED_NOSHOW items (REQ-ADM-02)
+      const { data: overdueRaw } = await supabase.from('bookings').select('id, customer_id, start_datetime').eq('status', 'FLAGGED_NOSHOW').limit(2);
+      if (overdueRaw) {
+        for (const item of overdueRaw) {
+          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).single();
+          pItems.push({ 
+            id: item.id, 
+            type: 'NO-SHOW', 
+            title: `No-Show: ${profile?.full_name || 'Unknown'}`, 
+            sub: `Missed ${new Date(item.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} slot`, 
+            color: '#E61E2A' 
+          });
+        }
+      }
 
       setState({
         loading: false,
@@ -237,6 +251,24 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     fetchDashboardData();
+
+    // REQ-NFR-05: Realtime subscription for auto-refresh
+    const debounceRef = { current: null };
+    const debouncedRefresh = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(fetchDashboardData, 500);
+    };
+
+    const channel = supabase
+      .channel('admin-dashboard-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, debouncedRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, debouncedRefresh)
+      .subscribe();
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      supabase.removeChannel(channel);
+    };
   }, [fetchDashboardData]);
 
   return (
@@ -375,7 +407,12 @@ const AdminDashboard = () => {
                 <div style={{ width: '40px', height: '40px', borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-brand)', fontWeight: '900', border: '1px solid var(--admin-border)' }}>{b.customer?.full_name?.charAt(0) || '#'}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>{b.customer?.full_name}</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>{b.customer?.full_name || b.customer_name || 'Guest Checkout'}</div>
+                    {b.status?.toUpperCase() === 'CANCELLED' && (
+                      <span style={{ fontSize: '0.65rem', fontWeight: '950', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '0.2rem 0.5rem', borderRadius: '4px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                        <ShieldAlert size={10} /> Cancelled
+                      </span>
+                    )}
                     {b.vehicles?.length > 1 && (
                       <span style={{ fontSize: '0.65rem', fontWeight: '950', background: 'rgba(var(--admin-brand-rgb), 0.1)', color: 'var(--admin-brand)', padding: '0.2rem 0.5rem', borderRadius: '4px', textTransform: 'uppercase' }}>
                         Fleet: {b.vehicles.length} Units

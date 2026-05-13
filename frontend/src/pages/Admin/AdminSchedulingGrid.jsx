@@ -187,10 +187,12 @@ const AdminSchedulingGrid = ({ onBack }) => {
           
           {/* Staff Rows */}
           {staff.map(member => (
-            renderRow(
-              member.full_name?.split(' ')[0] || 'Staff', 
-              bookings.filter(b => b.staff_id === member.id)
-            )
+            <React.Fragment key={member.id}>
+              {renderRow(
+                member.full_name?.split(' ')[0] || 'Staff', 
+                bookings.filter(b => b.staff_id === member.id)
+              )}
+            </React.Fragment>
           ))}
 
           {staff.length === 0 && !loading && (

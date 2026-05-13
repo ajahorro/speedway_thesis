@@ -69,10 +69,11 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
     width: '100%',
     background: 'var(--admin-bg)',
     border: '1px solid var(--admin-border)',
-    padding: '1rem 1rem 1rem 1rem',
-    borderRadius: 'var(--admin-radius-md)',
+    padding: '0.85rem 1rem',
+    borderRadius: '8px',
     color: 'var(--admin-text-primary)',
     fontSize: '0.95rem',
+    fontWeight: '800',
     outline: 'none',
     boxSizing: 'border-box'
   };
@@ -99,7 +100,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Full Name
             </label>
             <input 
@@ -112,7 +113,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Active Contact Number
             </label>
             <div style={{ position: 'relative' }}>
@@ -128,7 +129,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Select Date
             </label>
             <CustomCalendar 
@@ -138,7 +139,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Special Instructions / Notes (Optional)
             </label>
             <textarea 
@@ -156,7 +157,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           
           {/* Time Slots Section */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Available Time Slots
             </label>
             

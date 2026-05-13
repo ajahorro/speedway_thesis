@@ -120,7 +120,7 @@ const CustomerBookAppointment = () => {
   }
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+    <div style={{ padding: '2rem', paddingBottom: '5rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
       
       {/* Header with Back Arrow */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '2rem' }}>

@@ -161,17 +161,17 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             </label>
             <select 
               onChange={handleSelectFromGarage}
-              style={{ width: '100%', padding: '0.85rem', background: 'rgba(var(--admin-brand-rgb), 0.1)', border: '1px solid var(--admin-brand)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none' }}
+              style={{ width: '100%', padding: '0.85rem 1rem', background: '#1a1c20', border: '1px solid var(--admin-brand)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none' }}
               defaultValue=""
             >
-              <option value="" disabled>{isLoadingGarage ? 'Syncing garage assets...' : 'Select a saved vehicle...'}</option>
+              <option value="" disabled style={{ background: '#1a1c20', color: '#999' }}>{isLoadingGarage ? 'Syncing garage assets...' : 'Select a saved vehicle...'}</option>
               {garageVehicles.map(v => (
-                <option key={v.id} value={v.id}>{v.brand} {v.model} ({v.plate_number})</option>
+                <option key={v.id} value={v.id} style={{ background: '#1a1c20', color: '#fff' }}>{v.brand} {v.model} ({v.plate_number})</option>
               ))}
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Type</label>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Type</label>
             <select
               value={vehicleType || ''}
               disabled={vehicle.useSameVehicle}
@@ -180,7 +180,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                 updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], type: e.target.value, services: [] };
                 setBookingData({ ...bookingData, vehicles: updatedVehicles });
               }}
-              style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '700', opacity: vehicle.useSameVehicle ? 0.6 : 1 }}
+              style={{ width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none', opacity: vehicle.useSameVehicle ? 0.6 : 1 }}
             >
               <option value="" disabled>Select Type</option>
               <option value="Sedan">Sedan</option>
@@ -191,7 +191,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             </select>
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Brand</label>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Brand</label>
             <input 
               type="text"
               value={vehicle?.brand || ''}
@@ -201,12 +201,12 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                 updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], brand: e.target.value };
                 setBookingData({ ...bookingData, vehicles: updatedVehicles });
               }}
-              style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '700', opacity: vehicle.useSameVehicle ? 0.6 : 1 }}
+              style={{ width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none', opacity: vehicle.useSameVehicle ? 0.6 : 1 }}
               placeholder="e.g. Toyota"
             />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Model</label>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Model</label>
             <input 
               type="text"
               value={vehicle?.model || ''}
@@ -216,12 +216,12 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                 updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], model: e.target.value };
                 setBookingData({ ...bookingData, vehicles: updatedVehicles });
               }}
-              style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '700', opacity: vehicle.useSameVehicle ? 0.6 : 1 }}
+              style={{ width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none', opacity: vehicle.useSameVehicle ? 0.6 : 1 }}
               placeholder="e.g. Camry"
             />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.4rem', textTransform: 'uppercase' }}>Plate #</label>
+            <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Plate #</label>
             <input 
               type="text"
               value={vehicle?.plateNumber || ''}
@@ -232,8 +232,8 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                 setBookingData({ ...bookingData, vehicles: updatedVehicles });
               }}
               style={{ 
-                width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', 
-                borderRadius: '4px', color: 'white', fontWeight: '700', opacity: vehicle.useSameVehicle ? 0.6 : 1,
+                width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', 
+                borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none', opacity: vehicle.useSameVehicle ? 0.6 : 1,
                 borderColor: (vehicle?.plateNumber && vehicle.plateNumber.length < 1) ? 'var(--admin-brand)' : 'var(--admin-border)'
               }}
               placeholder="e.g. ABC-1234"

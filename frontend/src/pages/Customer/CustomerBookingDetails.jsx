@@ -10,8 +10,10 @@ import BookingChat from '../../components/BookingChat';
 import toast from 'react-hot-toast';
 import { X } from 'lucide-react';
 import { cancelBooking } from '../../services/bookingService';
+import { getStatusColor, getStatusLabel } from '../../utils/bookingHelpers';
 
 const STATUS_STEPS = ['scheduled', 'confirmed', 'ongoing', 'completed'];
+const STATUS_STEPS_WITH_NOSHOW = ['scheduled', 'confirmed', 'FLAGGED_NOSHOW'];
 
 const CustomerBookingDetails = () => {
   const { id } = useParams();
@@ -107,16 +109,7 @@ const CustomerBookingDetails = () => {
   const labelStyle = { fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' };
   const valStyle = { fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' };
 
-  const getStatusColor = (s) => {
-    switch (s) {
-      case 'scheduled': return 'var(--admin-brand)';
-      case 'confirmed': return 'var(--admin-info)';
-      case 'ongoing': return '#a855f7';
-      case 'completed': return 'var(--admin-success)';
-      case 'cancelled': return '#ef4444';
-      default: return 'var(--admin-text-secondary)';
-    }
-  };
+  // Status color now from shared helper (bookingHelpers.js)
 
   if (loading || !booking) {
     return (
@@ -131,7 +124,11 @@ const CustomerBookingDetails = () => {
   const timeStr = dt ? dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
   const balance = Math.max(0, (booking.total_amount || 0) - (booking.totalPaid || 0));
   const staffName = booking.assigned_staff ? `${booking.assigned_staff.first_name} ${booking.assigned_staff.last_name}` : 'Pending Assignment';
-  const currentStepIndex = STATUS_STEPS.indexOf(booking.status);
+  
+  // Use appropriate lifecycle steps based on booking status
+  const isNoShow = booking.status === 'FLAGGED_NOSHOW';
+  const activeSteps = isNoShow ? STATUS_STEPS_WITH_NOSHOW : STATUS_STEPS;
+  const currentStepIndex = activeSteps.indexOf(isNoShow ? 'FLAGGED_NOSHOW' : booking.status);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '3rem' }}>
@@ -168,9 +165,9 @@ const CustomerBookingDetails = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', marginTop: '1.5rem', marginBottom: '0.5rem' }}>
           {/* Track */}
           <div style={{ position: 'absolute', top: '50%', left: '5%', right: '5%', height: '4px', background: 'var(--admin-border)', transform: 'translateY(-50%)', zIndex: 0 }} />
-          <div style={{ position: 'absolute', top: '50%', left: '5%', width: `${Math.max(0, currentStepIndex / (STATUS_STEPS.length - 1)) * 90}%`, height: '4px', background: getStatusColor(booking.status), transform: 'translateY(-50%)', zIndex: 1, transition: 'width 0.5s ease' }} />
+          <div style={{ position: 'absolute', top: '50%', left: '5%', width: `${Math.max(0, currentStepIndex / (activeSteps.length - 1)) * 90}%`, height: '4px', background: getStatusColor(booking.status), transform: 'translateY(-50%)', zIndex: 1, transition: 'width 0.5s ease' }} />
 
-          {STATUS_STEPS.map((step, i) => {
+          {activeSteps.map((step, i) => {
             const isCompleted = i < currentStepIndex;
             const isActive = i === currentStepIndex;
             return (
@@ -187,7 +184,7 @@ const CustomerBookingDetails = () => {
                   {isCompleted ? <CheckCircle size={18} /> : <Circle size={18} />}
                 </div>
                 <div style={{ position: 'absolute', top: '44px', whiteSpace: 'nowrap', fontSize: '0.65rem', fontWeight: isActive ? '950' : '700', color: isActive ? 'var(--admin-text-primary)' : 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>
-                  {step}
+                  {getStatusLabel(step)}
                 </div>
               </div>
             );
@@ -215,11 +212,11 @@ const CustomerBookingDetails = () => {
                 </div>
                 <div style={{
                   fontSize: '0.65rem', fontWeight: '950', padding: '0.3rem 0.6rem', borderRadius: '4px', textTransform: 'uppercase',
-                  background: v.status === 'completed' ? 'rgba(16,185,129,0.1)' : v.status === 'in_progress' ? 'rgba(168,85,247,0.1)' : 'rgba(255,255,255,0.05)',
-                  color: v.status === 'completed' ? '#10b981' : v.status === 'in_progress' ? '#a855f7' : 'var(--admin-text-secondary)',
+                  background: v.status === 'completed' ? 'rgba(16,185,129,0.1)' : v.status === 'in_progress' ? 'rgba(168,85,247,0.1)' : v.status === 'QUEUED' ? 'rgba(245,158,11,0.1)' : 'rgba(255,255,255,0.05)',
+                  color: v.status === 'completed' ? '#10b981' : v.status === 'in_progress' ? '#a855f7' : v.status === 'QUEUED' ? '#f59e0b' : 'var(--admin-text-secondary)',
                   border: '1px solid currentColor'
                 }}>
-                  {(v.status || 'pending').toUpperCase()}
+                  {v.status === 'QUEUED' ? 'QUEUED' : (v.status || 'pending').toUpperCase()}
                 </div>
               </div>
 

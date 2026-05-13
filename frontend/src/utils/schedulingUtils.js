@@ -35,9 +35,11 @@ export const getOccupancyColor = (count) => {
  * Formats 24h hour to display string (e.g., 13 -> "1 PM").
  */
 export const formatDisplayHour = (hour) => {
-  if (hour === 0) return '12 AM';
-  if (hour === 12) return '12 PM';
-  return hour > 12 ? `${hour - 12} PM` : `${hour} AM`;
+  if (hour === 0) return '12:00 AM';
+  if (hour === 12) return '12:00 PM';
+  const displayHour = hour > 12 ? hour - 12 : hour;
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  return `${String(displayHour).padStart(2, '0')}:00 ${ampm}`;
 };
 
 /**

@@ -1,12 +1,25 @@
 import React from 'react';
-import { CheckCircle, Calendar, ShieldCheck, MapPin, ArrowRight, Printer, CheckCircle2 } from 'lucide-react';
+import { CheckCircle, Calendar, ShieldCheck, MapPin, ArrowRight, Printer, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const BookingSuccess = ({ bookingData }) => {
   const navigate = useNavigate();
   
   // Calculate total amount from services if not explicitly in bookingData
+  const totalAmount = bookingData.payment?.amount || (bookingData.vehicles || []).reduce((sum, v) => 
+    sum + (v.services || []).reduce((sSum, s) => sSum + (s.price || 0), 0)
+  , 0);
+
   const isConfirmed = false; // Always provisional on the immediate success screen
+
+  const labelStyle = { 
+    fontSize: '0.65rem', 
+    fontWeight: '950', 
+    color: '#666', 
+    textTransform: 'uppercase', 
+    letterSpacing: '1px', 
+    marginBottom: '0.2rem' 
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem', gap: '2rem' }}>

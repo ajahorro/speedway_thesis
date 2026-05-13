@@ -116,7 +116,7 @@ const CustomerNotifications = () => {
         {loading ? (
           <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--admin-brand)', fontWeight: '900' }}>SYNCHRONIZING LEDGER...</div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding: '5rem 2rem', textAlign: 'center', background: 'var(--admin-card)', borderRadius: 'var(--admin-radius-lg)', border: '1px dashed var(--admin-border)' }}>
+          <div style={{ padding: '5rem 2rem', textAlign: 'center', background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px dashed var(--admin-border)' }}>
             <Bell size={48} color="var(--admin-text-secondary)" style={{ opacity: 0.2, marginBottom: '1.5rem' }} />
             <h3 style={{ color: 'white', fontWeight: '950', margin: '0 0 0.5rem 0' }}>LEDGER IS EMPTY</h3>
             <p style={{ color: 'var(--admin-text-secondary)', fontWeight: '600', fontSize: '0.9rem' }}>No operational alerts match your current filter.</p>
@@ -128,7 +128,7 @@ const CustomerNotifications = () => {
               style={{
                 background: 'var(--admin-card)',
                 border: '1px solid var(--admin-border)',
-                borderRadius: 'var(--admin-radius-lg)',
+                borderRadius: 'var(--admin-radius)',
                 padding: '1.5rem',
                 display: 'flex',
                 gap: '1.5rem',
