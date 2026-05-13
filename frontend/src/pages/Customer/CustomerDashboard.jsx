@@ -12,12 +12,18 @@ const CustomerDashboard = () => {
 
   // Calculate Metrics
   const totalBookings = allBookings?.length || 0;
-  const pendingPayments = allBookings?.filter(b => b.payment_status === 'Flagged for Review' || b.payment_status === 'Unpaid').length || 0;
-  const activeServices = allBookings?.filter(b => b.status === 'in_progress').length || 0;
+  const activeServices = allBookings?.filter(b => b.status === 'ongoing' || b.status === 'in_progress').length || 0;
+  
+  // REQ-CST-09: BALANCE TRACKER (Real-time calculation)
+  const totalOutstanding = (allBookings || []).reduce((sum, b) => {
+    if (['cancelled', 'completed'].includes(b.status)) return sum;
+    const totalPaid = (b.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
+    return sum + Math.max(0, (b.total_amount || 0) - totalPaid);
+  }, 0);
 
   const stats = [
     { label: 'Total Bookings', value: totalBookings, icon: ClipboardList, color: 'var(--admin-brand)' },
-    { label: 'Pending Actions', value: pendingPayments, icon: CreditCard, color: '#f59e0b' },
+    { label: 'Outstanding Balance', value: `₱${totalOutstanding.toLocaleString()}`, icon: CreditCard, color: '#f59e0b' },
     { label: 'Active Services', value: activeServices, icon: Activity, color: '#10b981' },
     { label: 'Fleet Units', value: profile?.fleet_count || 0, icon: Car, color: '#3b82f6' }
   ];

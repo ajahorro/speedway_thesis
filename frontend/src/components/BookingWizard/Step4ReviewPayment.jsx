@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Upload, CheckCircle2, Wallet, Banknote, ShieldAlert } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useConfig } from '../../context/ConfigContext';
+import Tesseract from 'tesseract.js';
 
 const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSubmit, isSubmitting }) => {
   const { settings } = useConfig();
@@ -52,14 +53,56 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         formData.append('bookingId', bookingData.id || 'PENDING');
         formData.append('requiredAmount', targetAmount);
 
-        const response = await fetch('http://localhost:3000/api/ocr/verify-receipt', {
-          method: 'POST',
-          body: formData
-        });
+        let result;
+        try {
+          const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+          const response = await fetch(`${BACKEND_URL}/api/ocr/verify-receipt`, {
+            method: 'POST',
+            body: formData
+          });
 
-        if (!response.ok) throw new Error('AI analysis service unavailable. Please try again.');
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || 'Gemini service unavailable');
+          }
 
-        const result = await response.json();
+          result = await response.json();
+          console.log('🤖 [AI AUDIT] Gemini Result Received:', result);
+        } catch (geminiErr) {
+          console.warn('⚠️ [AI AUDIT] Gemini Failed. Falling back to local Tesseract scan:', geminiErr.message);
+          setScanStep('GEMINI UNAVAILABLE. RUNNING LOCAL TESSERACT SCAN...');
+          
+          // LOCAL FALLBACK: Tesseract.js
+          const tResult = await Tesseract.recognize(file, 'eng');
+          const text = tResult.data.text;
+          const confidence = tResult.data.confidence; // Raw confidence from Tesseract (0-100)
+          
+          console.log('🤖 [AI AUDIT] Tesseract Raw Text:', text);
+          console.log('🤖 [AI AUDIT] Tesseract Confidence:', confidence);
+          
+          // Broadened REGEX: Look for any sequence of 9-15 digits
+          const refMatch = text.match(/\d{9,15}/);
+          
+          // Improved Amount REGEX: Look for numbers near keywords
+          const amountMatch = text.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
+          
+          result = {
+            success: true,
+            status: 'Manual Review Required',
+            isMatch: false,
+            data: {
+              referenceNo: refMatch ? refMatch[0] : 'N/A',
+              amount: amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0,
+              date: new Date().toLocaleDateString(),
+              recipient: 'N/A', 
+              integrity: Math.round(confidence), // Use raw engine score
+              isReceipt: true,
+              description: "" 
+            }
+          };
+          console.log('🤖 [AI AUDIT] Tesseract Result:', result);
+        }
+
         if (!result.success) throw new Error(result.error);
 
         const extractedData = result.data;
@@ -76,12 +119,10 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
           requiredAmount: targetAmount,
           date: extractedData.date,
           status: isAmountMatched ? 'MATCHED' : 'MISMATCHED',
-          recipient: settings?.GCASH_NAME || 'SPEEDWAY STUDIO',
+          recipient: extractedData.recipient || 'N/A',
           recipientMatch: extractedData.isReceipt,
           integrity: extractedData.integrity,
-          description: isAmountMatched 
-            ? `AI AUDIT COMPLETE: High-fidelity receipt detected. Reference and Amount verified.`
-            : `DISCREPANCY DETECTED: Receipt amount (₱${extractedData.amount.toLocaleString()}) does not match the required amount (₱${requiredAmount.toLocaleString()}).`
+          description: extractedData.description || ""
         };
 
         setReceiptDetails(resultObj);

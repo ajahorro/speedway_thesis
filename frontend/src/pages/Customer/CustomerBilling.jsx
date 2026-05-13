@@ -56,6 +56,18 @@ const CustomerBilling = () => {
     display: 'block'
   };
 
+  const canAccessReceipt = (booking) => {
+    return (booking.payments || []).some(p => p.status === 'PAID');
+  };
+
+  const openReceipt = async (booking) => {
+    if (!canAccessReceipt(booking)) return;
+    
+    // In a real production system, we'd fetch the official secure data from the backend here
+    // For the thesis demo, we already have the booking object, but we'll simulate the secure check
+    setSelectedReceipt(booking);
+  };
+
   if (loading) return <div style={{ padding: '2rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Synchronizing financial records...</div>;
 
   return (
@@ -63,12 +75,21 @@ const CustomerBilling = () => {
       {/* 🖨️ DEDICATED PRINT TEMPLATE (Hidden on Screen) */}
       {selectedReceipt && (
         <div id="printable-receipt" style={{ display: 'none' }}>
+          {/* Watermark Overlay (Security Fallback) */}
+          {!canAccessReceipt(selectedReceipt) && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, pointerEvents: 'none', opacity: 0.1 }}>
+              <div style={{ fontSize: '10rem', fontWeight: '950', border: '20px solid red', color: 'red', padding: '2rem', transform: 'rotate(-45deg)', borderRadius: '40px' }}>
+                VOID
+              </div>
+            </div>
+          )}
+
           <div style={{ textAlign: 'center', borderBottom: '4px solid #A91B18', paddingBottom: '20px', marginBottom: '30px' }}>
             <h1 style={{ fontSize: '2.5rem', fontWeight: '950', color: 'black', margin: 0, fontStyle: 'italic', textTransform: 'uppercase', letterSpacing: '-2px' }}>
               SPEEDWAY<span style={{ color: '#A91B18' }}>AUTOXMOTO</span>
             </h1>
             <p style={{ margin: '5px 0', fontSize: '0.9rem', fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: '3px' }}>
-              Official Detailing Receipt
+              {canAccessReceipt(selectedReceipt) ? 'Official Detailing Receipt' : 'PROVISIONAL / UNVERIFIED BILLING'}
             </p>
           </div>
 
@@ -125,22 +146,25 @@ const CustomerBilling = () => {
                 <div style={{ fontWeight: '900', fontSize: '1rem', color: 'black' }}>{selectedReceipt.payments?.[0]?.method || 'GCash'}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', marginBottom: '4px' }}>Reference Number</div>
+                <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', marginBottom: '4px' }}>Transaction Reference</div>
                 <div style={{ fontWeight: '900', fontSize: '1rem', color: 'black', fontFamily: 'monospace' }}>
-                  {selectedReceipt.payments?.[0]?.reference_no || selectedReceipt.ocr_metadata?.referenceNo || 'N/A'}
+                  {canAccessReceipt(selectedReceipt) 
+                    ? (selectedReceipt.payments?.[0]?.reference_number || selectedReceipt.ocr_metadata?.referenceNo || 'VERIFIED')
+                    : 'Awaiting Verification'}
                 </div>
               </div>
               <div style={{ marginTop: '10px' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', marginBottom: '4px' }}>Transaction Status</div>
-                <div style={{ fontWeight: '950', fontSize: '1rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <CheckCircle size={16} /> SETTLED / PAID
+                <div style={{ fontWeight: '950', fontSize: '1rem', color: canAccessReceipt(selectedReceipt) ? '#10b981' : '#f59e0b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {canAccessReceipt(selectedReceipt) ? <CheckCircle size={16} /> : <Clock size={16} />}
+                  {canAccessReceipt(selectedReceipt) ? 'SETTLED / PAID' : 'AWAITING VERIFICATION'}
                 </div>
               </div>
             </div>
           </div>
 
           <div style={{ textAlign: 'center', color: '#999', fontSize: '0.75rem', marginTop: '100px', borderTop: '1px dashed #ccc', paddingTop: '20px' }}>
-            This is an official computer-generated commercial receipt from Speedway AutoXMoto. &bull; No signature required.
+            This is an official computer-generated document from Speedway AutoXMoto. &bull; No signature required.
           </div>
         </div>
       )}
@@ -198,37 +222,55 @@ const CustomerBilling = () => {
                     <td colSpan="5" style={{ padding: '4rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '1px' }}>No records in the current pipeline.</td>
                   </tr>
                 ) : (
-                  bookings.map((booking) => (
-                    <tr key={booking.id} className="admin-card-hover" style={{ borderBottom: '1px solid var(--admin-border)', transition: 'all 0.2s ease' }}>
-                      <td style={{ padding: '1.25rem 2rem', fontSize: '0.95rem', fontWeight: '900', color: 'white', fontFamily: 'monospace' }}>
-                        INV-{booking.id.substring(0, 8).toUpperCase()}
-                      </td>
-                      <td style={{ padding: '1.25rem 2rem', fontSize: '0.85rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>
-                        {new Date(booking.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
-                      </td>
-                      <td style={{ padding: '1.25rem 2rem', fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-brand)' }}>
-                        ₱{booking.total_amount.toLocaleString()}
-                      </td>
-                      <td style={{ padding: '1.25rem 2rem' }}>
-                        <span style={{ 
-                          fontSize: '0.65rem', fontWeight: '950', 
-                          background: (booking.payments || []).some(p => p.status === 'PAID') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                          color: (booking.payments || []).some(p => p.status === 'PAID') ? '#10b981' : '#f59e0b',
-                          padding: '0.3rem 0.75rem', borderRadius: '4px', textTransform: 'uppercase', border: '1px solid currentColor'
-                        }}>
-                          {(booking.payments || []).some(p => p.status === 'PAID') ? 'PAID' : 'PENDING'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '1.25rem 2rem', textAlign: 'center' }}>
-                        <button 
-                          onClick={() => setSelectedReceipt(booking)}
-                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--admin-border)', color: 'white', borderRadius: '8px', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s ease' }}
-                        >
-                          <FileText size={18} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  bookings.map((booking) => {
+                    const accessible = canAccessReceipt(booking);
+                    return (
+                      <tr key={booking.id} className="admin-card-hover" style={{ borderBottom: '1px solid var(--admin-border)', transition: 'all 0.2s ease' }}>
+                        <td style={{ padding: '1.25rem 2rem', fontSize: '0.95rem', fontWeight: '900', color: 'white', fontFamily: 'monospace' }}>
+                          INV-{booking.id.substring(0, 8).toUpperCase()}
+                        </td>
+                        <td style={{ padding: '1.25rem 2rem', fontSize: '0.85rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>
+                          {new Date(booking.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                        </td>
+                        <td style={{ padding: '1.25rem 2rem', fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-brand)' }}>
+                          ₱{booking.total_amount.toLocaleString()}
+                        </td>
+                        <td style={{ padding: '1.25rem 2rem' }}>
+                          <span style={{ 
+                            fontSize: '0.65rem', fontWeight: '950', 
+                            background: accessible ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                            color: accessible ? '#10b981' : '#f59e0b',
+                            padding: '0.3rem 0.75rem', borderRadius: '4px', textTransform: 'uppercase', border: '1px solid currentColor'
+                          }}>
+                            {accessible ? 'PAID' : 'AWAITING VERIFICATION'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '1.25rem 2rem', textAlign: 'center' }}>
+                          <div style={{ position: 'relative', display: 'inline-block' }}>
+                            <button 
+                              onClick={() => openReceipt(booking)}
+                              disabled={!accessible}
+                              title={!accessible ? "Receipt pending Admin confirmation" : "View Official Receipt"}
+                              style={{ 
+                                background: 'rgba(255,255,255,0.03)', 
+                                border: '1px solid var(--admin-border)', 
+                                color: accessible ? 'white' : 'rgba(255,255,255,0.1)', 
+                                borderRadius: '8px', width: '40px', height: '40px', 
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                                cursor: accessible ? 'pointer' : 'not-allowed', 
+                                transition: 'all 0.2s ease' 
+                              }}
+                            >
+                              <FileText size={18} />
+                            </button>
+                            {!accessible && (
+                              <div style={{ position: 'absolute', top: '-10px', right: '-5px', width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -240,17 +282,28 @@ const CustomerBilling = () => {
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}>
             <div style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
               
+              {/* VOID WATERMARK FALLBACK */}
+              {!canAccessReceipt(selectedReceipt) && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, pointerEvents: 'none', opacity: 0.1 }}>
+                  <div style={{ fontSize: '8rem', fontWeight: '950', border: '10px solid red', color: 'red', padding: '1rem', transform: 'rotate(-30deg)', borderRadius: '20px' }}>
+                    UNVERIFIED
+                  </div>
+                </div>
+              )}
+
               <div style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <ShieldCheck size={24} color="var(--admin-brand)" />
-                  <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>Receipt Explorer</span>
+                  <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>
+                    {canAccessReceipt(selectedReceipt) ? 'Official Receipt Explorer' : 'Provisional Preview'}
+                  </span>
                 </div>
                 <button onClick={() => setSelectedReceipt(null)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <X size={18} />
                 </button>
               </div>
 
-              <div style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto' }}>
+              <div style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
                 <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
                   <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#A91B18', fontStyle: 'italic' }}>SPEEDWAY</h2>
                   <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#666', textTransform: 'uppercase', letterSpacing: '2px' }}>AutoxMoto Detail Studio</div>
@@ -297,8 +350,12 @@ const CustomerBilling = () => {
                         <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedReceipt.payments?.[0]?.method || 'GCash'}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Reference</div>
-                        <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>{selectedReceipt.payments?.[0]?.reference_no || selectedReceipt.ocr_metadata?.referenceNo || 'N/A'}</div>
+                        <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Transaction Reference</div>
+                        <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
+                          {canAccessReceipt(selectedReceipt) 
+                            ? (selectedReceipt.payments?.[0]?.reference_number || selectedReceipt.ocr_metadata?.referenceNo || 'VERIFIED')
+                            : 'Awaiting Verification'}
+                        </div>
                       </div>
                    </div>
                 </div>
@@ -306,16 +363,23 @@ const CustomerBilling = () => {
 
               <div style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
                 <button 
+                  disabled={!canAccessReceipt(selectedReceipt)}
                   onClick={() => window.print()}
-                  style={{ flex: 2, padding: '1rem', background: '#000', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}
+                  style={{ 
+                    flex: 2, padding: '1rem', background: canAccessReceipt(selectedReceipt) ? '#000' : '#ccc', 
+                    color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', 
+                    cursor: canAccessReceipt(selectedReceipt) ? 'pointer' : 'not-allowed', 
+                    textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' 
+                  }}
                 >
-                  <Printer size={20} /> Print Document
+                  <Printer size={20} /> {canAccessReceipt(selectedReceipt) ? 'Print Official Receipt' : 'Locked'}
                 </button>
                 <button 
                   onClick={() => setSelectedReceipt(null)}
                   style={{ flex: 1, padding: '1rem', background: '#fff', color: '#000', border: '1px solid #ddd', borderRadius: '12px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem' }}
                 >
-                  Cancel
+                  Close
                 </button>
               </div>
             </div>

@@ -7,15 +7,15 @@ import { supabase } from '../lib/supabase';
 
 export const fetchUserGarage = async (userId) => {
   const { data, error } = await supabase
-    .from('user_vehicles')
+    .from('vehicles')
     .select('*')
-    .eq('user_id', userId)
+    .eq('owner_id', userId)
     .order('is_primary', { ascending: false })
     .order('created_at', { ascending: false });
 
   if (error) {
     if (error.code === 'PGRST116' || error.message.includes('does not exist')) {
-      console.warn('user_vehicles table might not exist yet. Returning empty garage.');
+      console.warn('vehicles table might not exist yet. Returning empty garage.');
       return [];
     }
     throw error;
@@ -24,28 +24,31 @@ export const fetchUserGarage = async (userId) => {
 };
 
 export const addVehicleToGarage = async (userId, vehicle) => {
-  const { data, error } = await supabase
-    .from('user_vehicles')
-    .insert({
-      user_id: userId,
-      vehicle_type: vehicle.type,
-      brand: vehicle.brand,
-      model: vehicle.model,
-      plate_number: vehicle.plateNumber.toUpperCase(),
-      is_primary: vehicle.isPrimary || false
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  try {
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+    const response = await fetch(`${BACKEND_URL}/api/garage/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customerId: userId, vehicle })
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to sync vehicle to garage');
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error('Garage Service Error:', err);
+    throw err;
+  }
 };
 
 export const updateGarageVehicle = async (vehicleId, updates) => {
   const { data, error } = await supabase
-    .from('user_vehicles')
+    .from('vehicles')
     .update({
-      vehicle_type: updates.type,
+      type: updates.type,
       brand: updates.brand,
       model: updates.model,
       plate_number: updates.plateNumber.toUpperCase(),
@@ -61,7 +64,7 @@ export const updateGarageVehicle = async (vehicleId, updates) => {
 
 export const deleteGarageVehicle = async (vehicleId) => {
   const { error } = await supabase
-    .from('user_vehicles')
+    .from('vehicles')
     .delete()
     .eq('id', vehicleId);
 

@@ -85,9 +85,10 @@ const AdminRefunds = () => {
   }, [state.refundItems, state.searchQuery, state.filter]);
 
   const handleProcessRefund = async (item) => {
-    const toastId = toast.loading('Updating refund status...');
+    const toastId = toast.loading('Synchronizing financial reversal...');
     try {
-      const { error } = await supabase
+      // 1. Update Booking Status
+      const { error: bError } = await supabase
         .from('bookings')
         .update({ 
           refund_status: 'PROCESSED',
@@ -95,14 +96,39 @@ const AdminRefunds = () => {
         })
         .eq('id', item.id);
 
-      if (error) throw error;
+      if (bError) throw bError;
 
-      toast.success('Refund marked as PROCESSED', { id: toastId });
+      // 2. Update Related Payments (Transactional Transparency)
+      const { error: pError } = await supabase
+        .from('payments')
+        .update({
+          status: 'REFUNDED',
+          refund_reason: state.refundReason,
+          refunded_at: new Date().toISOString()
+        })
+        .eq('booking_id', item.id)
+        .eq('status', 'PAID');
+
+      if (pError) throw pError;
+
+      // 3. MASTER AUDIT LOG (REQ-NFR-15)
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('audit_logs').insert({
+        booking_id: item.id,
+        action_type: 'ADMIN_PROCESSED_REFUND',
+        details: `Administrator processed refund of ₱${item.totalPaid.toLocaleString()}. Reason: ${state.refundReason}`,
+        actor_name: 'Administrator', // Simplified, could pull from profile
+        actor_role: 'ADMIN',
+        actor_id: user?.id,
+        metadata: { amount: item.totalPaid, reason: state.refundReason }
+      });
+
+      toast.success('Refund Lifecycle Finalized', { id: toastId });
       fetchRefundData();
-      setState(prev => ({ ...prev, selectedItem: null, confirmRefundItem: null }));
+      setState(prev => ({ ...prev, selectedItem: null, confirmRefundItem: null, refundReason: '' }));
     } catch (err) {
       logger.error('Refund Process Error', err);
-      toast.error('Failed to update refund status', { id: toastId });
+      toast.error('Failed to synchronize refund records', { id: toastId });
     }
   };
 
@@ -217,6 +243,29 @@ const AdminRefunds = () => {
                   style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', minHeight: '80px', resize: 'none', fontSize: '0.8rem', fontWeight: '700' }}
                 />
               </div>
+
+              {/* OCR METADATA PERSISTENCE (THESIS REQUIREMENT) */}
+              {state.selectedItem.ocr_metadata && (
+                <div style={{ background: 'rgba(var(--admin-info-rgb), 0.05)', border: '1px dashed var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', padding: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', color: 'var(--admin-info)', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase' }}>
+                    <ShieldCheck size={14} /> AI Verification Archive
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Reference No:</span>
+                      <span style={{ color: 'white', fontWeight: '900', fontFamily: 'monospace' }}>{state.selectedItem.ocr_metadata.referenceNo}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Extracted Amount:</span>
+                      <span style={{ color: 'white', fontWeight: '900' }}>₱{state.selectedItem.ocr_metadata.amount?.toLocaleString()}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '600' }}>AI Audit Result:</span>
+                      <span style={{ color: state.selectedItem.ocr_metadata.status === 'MATCHED' ? '#10b981' : '#f59e0b', fontWeight: '900' }}>{state.selectedItem.ocr_metadata.status}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid var(--admin-border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'center' }}>

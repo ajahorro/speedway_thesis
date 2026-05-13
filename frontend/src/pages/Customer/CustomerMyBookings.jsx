@@ -208,8 +208,16 @@ const CustomerMyBookings = () => {
                 {/* Total & Action */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Total</div>
-                    <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{(b.total_amount || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.25rem' }}>Status</div>
+                    {(() => {
+                      const totalPaid = (b.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
+                      const balance = Math.max(0, (b.total_amount || 0) - totalPaid);
+                      return (
+                        <div style={{ fontSize: '0.8rem', fontWeight: '950', color: balance === 0 ? 'var(--admin-success)' : 'var(--admin-brand)' }}>
+                          {balance === 0 ? 'FULLY PAID' : `BALANCE: ₱${balance.toLocaleString()}`}
+                        </div>
+                      );
+                    })()}
                   </div>
                   
                   <div style={{ display: 'flex', gap: '0.5rem' }}>

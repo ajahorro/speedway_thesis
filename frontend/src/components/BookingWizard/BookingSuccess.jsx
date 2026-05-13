@@ -6,49 +6,71 @@ const BookingSuccess = ({ bookingData }) => {
   const navigate = useNavigate();
   
   // Calculate total amount from services if not explicitly in bookingData
-  const calculateTotal = () => {
-    return bookingData.vehicles.reduce((sum, v) => {
-      return sum + v.services.reduce((sSum, s) => sSum + (s.price || 0), 0);
-    }, 0);
-  };
-
-  const totalAmount = calculateTotal();
-
-  const labelStyle = {
-    fontSize: '0.65rem',
-    fontWeight: '950',
-    color: '#666',
-    textTransform: 'uppercase',
-    letterSpacing: '1px',
-    marginBottom: '0.25rem',
-    display: 'block'
-  };
+  const isConfirmed = false; // Always provisional on the immediate success screen
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem', gap: '2rem' }}>
       
+      {/* REQ-NFR-30: PRINT ISOLATION LOGIC */}
+      <style>{`
+        @media print {
+          /* Only allow printing if confirmed */
+          ${!isConfirmed ? 'body { display: none !important; }' : ''}
+          
+          body * { visibility: hidden; }
+          #printable-receipt, #printable-receipt * { visibility: visible; }
+          #printable-receipt { 
+            position: absolute; 
+            left: 0; 
+            top: 0; 
+            width: 100%; 
+            max-width: none !important;
+            box-shadow: none !important;
+            border: 1px solid #000 !important;
+          }
+          .no-print { display: none !important; }
+          @page { size: portrait; margin: 20mm; }
+          h2 { font-size: 2.5rem !important; }
+          .receipt-total { font-size: 1.5rem !important; }
+          .receipt-ref { font-size: 1.2rem !important; }
+        }
+      `}</style>
+
       {/* Success Animation */}
-      <div style={{ textAlign: 'center' }}>
+      <div className="no-print" style={{ textAlign: 'center' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(var(--admin-success-rgb), 0.1)', marginBottom: '1rem' }}>
           <CheckCircle size={40} color="var(--admin-success)" />
         </div>
-        <h1 style={{ fontSize: '2rem', fontWeight: '950', color: '#fff', margin: 0, textTransform: 'uppercase' }}>Booking Confirmed!</h1>
-        <p style={{ color: 'var(--admin-text-secondary)', fontWeight: '600', marginTop: '0.5rem' }}>Your appointment has been successfully logged.</p>
+        <h1 style={{ fontSize: '2rem', fontWeight: '950', color: '#fff', margin: 0, textTransform: 'uppercase' }}>Booking Logged!</h1>
+        <p style={{ color: 'var(--admin-text-secondary)', fontWeight: '600', marginTop: '0.5rem' }}>Your appointment is awaiting payment verification.</p>
       </div>
 
       {/* 🧾 DIGITAL RECEIPT */}
-      <div style={{ 
+      <div id="printable-receipt" style={{ 
         background: '#fff', color: '#000', width: '100%', maxWidth: '500px', 
         borderRadius: 'var(--admin-radius-lg)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
-        overflow: 'hidden'
+        overflow: 'hidden', position: 'relative'
       }}>
         
+        {/* Provisional Watermark */}
+        {!isConfirmed && (
+          <div style={{ 
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-30deg)',
+            fontSize: '4rem', fontWeight: '950', color: 'rgba(0,0,0,0.05)', pointerEvents: 'none',
+            whiteSpace: 'nowrap', zIndex: 0, textTransform: 'uppercase'
+          }}>
+            Provisional
+          </div>
+        )}
+
         {/* Receipt Header */}
         <div style={{ background: '#000', color: '#fff', padding: '1rem 2rem', textAlign: 'center' }}>
-          <div style={{ fontWeight: '950', fontSize: '0.8rem', letterSpacing: '2px', textTransform: 'uppercase' }}>Official Digital Receipt</div>
+          <div style={{ fontWeight: '950', fontSize: '0.8rem', letterSpacing: '2px', textTransform: 'uppercase' }}>
+            {isConfirmed ? 'Official Digital Receipt' : 'Provisional Booking Receipt'}
+          </div>
         </div>
 
-        <div style={{ padding: '2rem' }}>
+        <div style={{ padding: '2rem', position: 'relative', zIndex: 1 }}>
           {/* Brand */}
           <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
             <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.5rem', color: '#A91B18' }}>SPEEDWAY</h2>
@@ -92,34 +114,39 @@ const BookingSuccess = ({ bookingData }) => {
           <div style={{ borderTop: '2px solid #000', paddingTop: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontWeight: '950', fontSize: '1.1rem', textTransform: 'uppercase' }}>Total Amount</span>
-              <span style={{ fontWeight: '950', fontSize: '1.1rem', color: '#A91B18' }}>₱{totalAmount.toLocaleString()}</span>
+              <span className="receipt-total" style={{ fontWeight: '950', fontSize: '1.1rem', color: '#A91B18' }}>₱{totalAmount.toLocaleString()}</span>
             </div>
             <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.25rem', textAlign: 'right', fontWeight: '700' }}>
               Payment Method: {bookingData.payment.method} ({bookingData.payment.type})
             </div>
           </div>
 
-          {/* AI Verification Footer */}
+          {/* Reference Footer (PROFESSIONALIZED) */}
           {bookingData.payment.method === 'GCash' && (
-            <div style={{ marginTop: '2rem', padding: '1rem', background: '#f9f9f9', borderRadius: 'var(--admin-radius-sm)', border: '1px dashed #ddd', textAlign: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--admin-success)', marginBottom: '0.25rem' }}>
-                <CheckCircle2 size={16} />
-                <span style={{ fontWeight: '950', fontSize: '0.8rem', textTransform: 'uppercase' }}>AI-Verified Reference</span>
+            <div style={{ marginTop: '2rem', padding: '1rem', background: '#f9f9f9', borderRadius: 'var(--admin-radius-sm)', border: '1px solid #eee', textAlign: 'center' }}>
+              <div style={{ color: 'var(--admin-text-secondary)', marginBottom: '0.25rem' }}>
+                <span style={{ fontWeight: '950', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Transaction Reference</span>
               </div>
-              <div style={{ fontSize: '0.75rem', color: '#666', fontWeight: '800', fontFamily: 'monospace' }}>
-                {bookingData.payment.ocrData?.referenceNo || 'LOGGED_TO_AUDIT'}
+              <div className="receipt-ref" style={{ fontSize: '0.85rem', color: '#000', fontWeight: '900', fontFamily: 'monospace' }}>
+                {bookingData.payment.ocrData?.referenceNo || 'Awaiting Verification'}
               </div>
             </div>
           )}
         </div>
 
-        {/* Receipt Footer Buttons */}
-        <div style={{ display: 'flex', borderTop: '1px solid #eee' }}>
+        {/* Receipt Footer Buttons (LOCKED UNTIL VERIFIED) */}
+        <div className="no-print" style={{ display: 'flex', borderTop: '1px solid #eee' }}>
           <button 
+            disabled={!isConfirmed}
             onClick={() => window.print()}
-            style={{ flex: 1, padding: '1rem', background: '#f5f5f5', border: 'none', borderRight: '1px solid #eee', fontWeight: '900', color: '#000', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+            style={{ 
+              flex: 1, padding: '1rem', background: '#f5f5f5', border: 'none', borderRight: '1px solid #eee', 
+              fontWeight: '900', color: isConfirmed ? '#000' : '#ccc', 
+              cursor: isConfirmed ? 'pointer' : 'not-allowed', 
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' 
+            }}
           >
-            <Printer size={16} /> Print
+            <Printer size={16} /> {isConfirmed ? 'Print Receipt' : 'Verification Pending'}
           </button>
           <button 
             onClick={() => navigate('/customer/dashboard')}
@@ -130,9 +157,12 @@ const BookingSuccess = ({ bookingData }) => {
         </div>
       </div>
 
-      <div style={{ color: 'var(--admin-text-secondary)', fontSize: '0.8rem', fontWeight: '600', maxWidth: '400px', textAlign: 'center' }}>
-        You can always view and download this receipt later from your <span style={{ color: 'var(--admin-brand)' }}>Transactions & Billing</span> section.
-      </div>
+      {!isConfirmed && (
+        <div className="no-print" style={{ color: 'var(--admin-text-secondary)', fontSize: '0.8rem', fontWeight: '600', maxWidth: '400px', textAlign: 'center' }}>
+          <AlertCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px', color: 'var(--admin-brand)' }} />
+          Official receipt will be available for download once our staff verifies your payment reference.
+        </div>
+      )}
 
     </div>
   );

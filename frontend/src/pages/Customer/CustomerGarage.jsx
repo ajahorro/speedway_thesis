@@ -9,6 +9,7 @@ import {
   fetchVehicleHistory 
 } from '../../services/garageService';
 import toast from 'react-hot-toast';
+import ConfirmationToast from '../../components/ConfirmationToast';
 
 const CustomerGarage = () => {
   const { user } = useAuth();
@@ -63,7 +64,7 @@ const CustomerGarage = () => {
   const handleOpenEdit = (vehicle) => {
     setSelectedVehicle(vehicle);
     setFormData({
-      type: vehicle.vehicle_type,
+      type: vehicle.type,
       brand: vehicle.brand,
       model: vehicle.model,
       plateNumber: vehicle.plate_number,
@@ -105,15 +106,29 @@ const CustomerGarage = () => {
   };
 
   const handleDelete = async (vehicleId) => {
-    if (!window.confirm('Are you sure you want to remove this vehicle from your garage?')) return;
-    const toastId = toast.loading('Removing vehicle...');
-    try {
-      await deleteGarageVehicle(vehicleId);
-      toast.success('Vehicle Removed', { id: toastId });
-      loadGarage();
-    } catch (error) {
-      toast.error('Failed to remove vehicle', { id: toastId });
-    }
+    toast.custom((t) => (
+      <ConfirmationToast
+        t={t}
+        title="Remove Vehicle"
+        message="Are you sure you want to remove this vehicle from your garage? This action cannot be undone."
+        icon={Trash2}
+        confirmLabel="Remove Unit"
+        variant="danger"
+        centered={true}
+        onConfirm={async () => {
+          toast.dismiss(t.id);
+          const deleteToastId = toast.loading('Removing vehicle...');
+          try {
+            await deleteGarageVehicle(vehicleId);
+            toast.success('Vehicle Removed', { id: deleteToastId });
+            loadGarage();
+          } catch (error) {
+            toast.error('Failed to remove vehicle', { id: deleteToastId });
+          }
+        }}
+        onCancel={() => toast.dismiss(t.id)}
+      />
+    ), { duration: Infinity });
   };
 
   if (loading) {
@@ -184,7 +199,7 @@ const CustomerGarage = () => {
                   </div>
                   <div>
                     <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'white', letterSpacing: '-0.5px' }}>{vehicle.brand} {vehicle.model}</div>
-                    <div style={{ fontSize: '0.8rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>{vehicle.vehicle_type}</div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>{vehicle.type}</div>
                   </div>
                 </div>
                 

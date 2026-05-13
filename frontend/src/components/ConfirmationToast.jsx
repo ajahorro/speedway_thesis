@@ -1,4 +1,5 @@
 import React from 'react';
+import ReactDOM from 'react-dom';
 import { confirmationStyles as s } from '../styles/confirmationStyles';
 
 const ConfirmationToast = ({ 
@@ -10,9 +11,10 @@ const ConfirmationToast = ({
   cancelLabel = 'Cancel', 
   onConfirm, 
   onCancel,
-  variant = 'danger' 
+  variant = 'danger',
+  centered = false
 }) => {
-  return (
+  const content = (
     <div style={{
       ...s.container,
       animation: t.visible ? 'toastEnter 0.35s cubic-bezier(0.21, 1.02, 0.73, 1) forwards' : 'toastExit 0.4s cubic-bezier(0.06, 0.71, 0.55, 1) forwards',
@@ -63,6 +65,27 @@ const ConfirmationToast = ({
       </div>
     </div>
   );
+
+  if (centered) {
+    return ReactDOM.createPortal(
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0,0,0,0.6)',
+        backdropFilter: 'blur(10px)',
+        zIndex: 999999,
+        pointerEvents: 'auto'
+      }}>
+        {content}
+      </div>,
+      document.body
+    );
+  }
+
+  return content;
 };
 
 export default ConfirmationToast;

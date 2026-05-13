@@ -1,63 +1,58 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Bell, Check, Trash2, Loader2, Calendar, 
-  MessageCircle, CreditCard, CheckCircle2, 
-  AlertCircle, ChevronRight, Inbox, Filter, MoreVertical, CheckCircle
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Bell, CreditCard, Clock, CheckCircle2, MessageCircle, CheckCircle, AlertCircle, Trash2, CheckCircle as CheckIcon } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import { 
-  fetchNotifications, 
-  markNotificationAsRead, 
-  markAllAsRead, 
-  deleteNotification, 
-  clearAllNotifications 
-} from '../../services/notificationService';
+import { supabase } from '../../lib/supabase';
+import { fetchNotifications, markNotificationAsRead, markAllAsRead, deleteNotification } from '../../services/notificationService';
 import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
 
 const CustomerNotifications = () => {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('ALL'); // ALL, UNREAD
+  const [filter, setFilter] = useState('ALL');
 
-  const loadNotifications = useCallback(async () => {
+  const load = async () => {
     if (!user) return;
     setLoading(true);
     try {
       const data = await fetchNotifications(user.id);
       setNotifications(data);
-    } catch (error) {
-      console.error('Notif Load Error:', error);
-      toast.error('Failed to sync notification ledger.');
+    } catch (err) {
+      console.error('Failed to load notifications:', err);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  };
 
   useEffect(() => {
-    loadNotifications();
-  }, [loadNotifications]);
+    load();
+    const channel = supabase.channel(`notifs-${user?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user?.id}` }, () => load())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
+
+  const filtered = notifications.filter(n => {
+    if (filter === 'UNREAD') return !n.is_read;
+    return true;
+  });
 
   const handleMarkRead = async (id) => {
     try {
       await markNotificationAsRead(id);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    } catch (error) {
-      toast.error('Failed to update notification.');
+    } catch (err) {
+      toast.error('Failed to update notification');
     }
   };
 
   const handleMarkAllRead = async () => {
-    if (notifications.filter(n => !n.is_read).length === 0) return;
-    const toastId = toast.loading('Marking all as read...');
     try {
       await markAllAsRead(user.id);
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-      toast.success('All notifications marked as read', { id: toastId });
-    } catch (error) {
-      toast.error('Failed to update notifications', { id: toastId });
+      toast.success('All notifications marked as read');
+    } catch (err) {
+      toast.error('Operation failed');
     }
   };
 
@@ -65,184 +60,114 @@ const CustomerNotifications = () => {
     try {
       await deleteNotification(id);
       setNotifications(prev => prev.filter(n => n.id !== id));
-      toast.success('Notification removed');
-    } catch (error) {
-      toast.error('Failed to delete notification.');
-    }
-  };
-
-  const handleClearAll = async () => {
-    if (!window.confirm('Are you sure you want to clear your entire notification history?')) return;
-    const toastId = toast.loading('Clearing history...');
-    try {
-      await clearAllNotifications(user.id);
-      setNotifications([]);
-      toast.success('History cleared', { id: toastId });
-    } catch (error) {
-      toast.error('Failed to clear notifications', { id: toastId });
+      toast.success('Notification deleted');
+    } catch (err) {
+      toast.error('Failed to delete');
     }
   };
 
   const getIcon = (type) => {
     switch (type) {
-      case 'PAYMENT_APPROVED':
-      case 'PAYMENT_RECEIVED':
-        return <CreditCard size={18} color="#10b981" />;
-      case 'PAYMENT_REJECTED':
-        return <AlertCircle size={18} color="#ef4444" />;
-      case 'TASK_ASSIGNED':
-      case 'STATUS_UPDATE':
-        return <Calendar size={18} color="var(--admin-brand)" />;
-      case 'VEHICLE_COMPLETED':
-        return <CheckCircle2 size={18} color="#10b981" />;
-      case 'CHAT_MESSAGE':
-        return <MessageCircle size={18} color="#3b82f6" />;
-      default:
-        return <Bell size={18} color="var(--admin-text-secondary)" />;
+      case 'PAYMENT_VERIFIED': return <CreditCard size={20} color="#10b981" />;
+      case 'VEHICLE_COMPLETED': return <CheckCircle2 size={20} color="#10b981" />;
+      case 'READY_FOR_PICKUP': return <CheckIcon size={20} color="var(--admin-brand)" />;
+      case 'BOOKING_CONFIRMED': return <CheckCircle size={20} color="var(--admin-info)" />;
+      case 'PAYMENT_REJECTED': return <AlertCircle size={20} color="#ef4444" />;
+      case 'CHAT_MESSAGE': return <MessageCircle size={20} color="#3b82f6" />;
+      default: return <Bell size={20} color="var(--admin-text-secondary)" />;
     }
   };
 
-  const filteredNotifications = filter === 'UNREAD' 
-    ? notifications.filter(n => !n.is_read) 
-    : notifications;
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '1rem' }}>
-        <Loader2 size={40} className="animate-spin" color="var(--admin-brand)" />
-        <p style={{ fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '0.8rem' }}>Synchronizing Ledger...</p>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', maxWidth: '900px', margin: '0 auto', width: '100%', paddingBottom: '5rem' }}>
+    <div style={{ maxWidth: '800px', margin: '0 auto', paddingBottom: '5rem' }}>
       
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2rem' }}>
         <div>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'white', letterSpacing: '-1.5px' }}>Notifications</h1>
-          <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.95rem', fontWeight: '600', opacity: 0.8 }}>
-            Real-time updates from the Speedway Fleet Engine.
+          <h1 style={{ fontSize: '2rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'white' }}>Notification Ledger</h1>
+          <p style={{ color: 'var(--admin-text-secondary)', fontWeight: '600', fontSize: '0.9rem', margin: 0 }}>
+            Official record of system alerts, payment verifications, and service milestones.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button 
-            onClick={handleMarkAllRead}
-            style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <CheckCircle size={14} /> Mark All Read
-          </button>
-          <button 
-            onClick={handleClearAll}
-            style={{ padding: '0.75rem 1.25rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <Trash2 size={14} /> Clear All
-          </button>
-        </div>
+        <button 
+          onClick={handleMarkAllRead}
+          disabled={!notifications.some(n => !n.is_read)}
+          style={{ padding: '0.75rem 1.25rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'white', borderRadius: '8px', fontSize: '0.75rem', fontWeight: '900', cursor: 'pointer', textTransform: 'uppercase', opacity: notifications.some(n => !n.is_read) ? 1 : 0.5 }}
+        >
+          Mark all as read
+        </button>
       </div>
 
-      {/* Filter Bar */}
-      <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--admin-card)', padding: '0.4rem', borderRadius: 'var(--admin-radius-md)', border: '1px solid var(--admin-border)', width: 'fit-content' }}>
+      {/* Filter Tabs */}
+      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', background: 'var(--admin-card)', padding: '0.5rem', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', width: 'fit-content' }}>
         {['ALL', 'UNREAD'].map(f => (
-          <button 
+          <button
             key={f}
             onClick={() => setFilter(f)}
-            style={{ padding: '0.5rem 1.25rem', background: filter === f ? 'var(--admin-brand)' : 'transparent', color: filter === f ? 'white' : 'var(--admin-text-secondary)', border: 'none', borderRadius: '4px', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px', transition: 'all 0.2s ease' }}
+            style={{ padding: '0.5rem 1.5rem', background: filter === f ? 'var(--admin-brand)' : 'transparent', color: filter === f ? 'white' : 'var(--admin-text-secondary)', border: 'none', borderRadius: '6px', fontWeight: '900', fontSize: '0.8rem', cursor: 'pointer', textTransform: 'uppercase' }}
           >
-            {f} {f === 'UNREAD' && notifications.filter(n => !n.is_read).length > 0 && `(${notifications.filter(n => !n.is_read).length})`}
+            {f} ({f === 'ALL' ? notifications.length : notifications.filter(n => !n.is_read).length})
           </button>
         ))}
       </div>
 
-      {/* Notifications List */}
+      {/* List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {filteredNotifications.length === 0 ? (
-          <div style={{ background: 'var(--admin-card)', border: '2px dashed var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', padding: '5rem 2rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
-            <Inbox size={60} strokeWidth={1} style={{ opacity: 0.1, color: 'white' }} />
-            <div>
-              <h3 style={{ margin: '0 0 0.5rem 0', fontWeight: '900', color: 'white', textTransform: 'uppercase' }}>No Notifications Found</h3>
-              <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>You're all caught up with the fleet operations.</p>
-            </div>
+        {loading ? (
+          <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--admin-brand)', fontWeight: '900' }}>SYNCHRONIZING LEDGER...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: '5rem 2rem', textAlign: 'center', background: 'var(--admin-card)', borderRadius: 'var(--admin-radius-lg)', border: '1px dashed var(--admin-border)' }}>
+            <Bell size={48} color="var(--admin-text-secondary)" style={{ opacity: 0.2, marginBottom: '1.5rem' }} />
+            <h3 style={{ color: 'white', fontWeight: '950', margin: '0 0 0.5rem 0' }}>LEDGER IS EMPTY</h3>
+            <p style={{ color: 'var(--admin-text-secondary)', fontWeight: '600', fontSize: '0.9rem' }}>No operational alerts match your current filter.</p>
           </div>
         ) : (
-          filteredNotifications.map(notif => (
-            <div 
-              key={notif.id}
-              onClick={() => {
-                if (!notif.is_read) handleMarkRead(notif.id);
-                if (notif.action_url) navigate(notif.action_url);
-              }}
+          filtered.map(n => (
+            <div
+              key={n.id}
               style={{
-                background: notif.is_read ? 'var(--admin-card)' : 'rgba(var(--admin-brand-rgb), 0.03)',
-                border: `1px solid ${notif.is_read ? 'var(--admin-border)' : 'rgba(var(--admin-brand-rgb), 0.2)'}`,
+                background: 'var(--admin-card)',
+                border: '1px solid var(--admin-border)',
                 borderRadius: 'var(--admin-radius-lg)',
                 padding: '1.5rem',
                 display: 'flex',
                 gap: '1.5rem',
-                alignItems: 'flex-start',
-                cursor: 'pointer',
-                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
                 position: 'relative',
-                overflow: 'hidden'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
-                e.currentTarget.style.transform = 'translateX(5px)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = notif.is_read ? 'var(--admin-card)' : 'rgba(var(--admin-brand-rgb), 0.03)';
-                e.currentTarget.style.transform = 'translateX(0)';
+                transition: 'all 0.2s ease',
+                opacity: n.is_read ? 0.7 : 1,
+                borderLeft: n.is_read ? '1px solid var(--admin-border)' : '4px solid var(--admin-brand)'
               }}
             >
-              {!notif.is_read && (
-                <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--admin-brand)' }} />
-              )}
-
               <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--admin-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {getIcon(notif.notification_type)}
+                {getIcon(n.notification_type)}
               </div>
 
               <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.25rem' }}>
-                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', color: notif.is_read ? 'var(--admin-text-primary)' : 'white' }}>{notif.title}</h3>
-                  <span style={{ fontSize: '0.65rem', fontWeight: '800', color: 'var(--admin-text-secondary)', opacity: 0.6 }}>
-                    {new Date(notif.created_at).toLocaleDateString()} • {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                  <span style={{ fontSize: '1rem', fontWeight: '950', color: 'white' }}>{n.title}</span>
+                  <span style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>
+                    {new Date(n.created_at).toLocaleString()}
                   </span>
                 </div>
-                <p style={{ margin: '0 0 1rem 0', color: 'var(--admin-text-secondary)', fontSize: '0.9rem', fontWeight: '600', lineHeight: 1.5 }}>{notif.message}</p>
-                
-                {notif.action_url && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--admin-brand)', fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    View Details <ChevronRight size={14} />
-                  </div>
-                )}
+                <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem', fontWeight: '600', margin: '0 0 1rem 0', lineHeight: 1.5 }}>
+                  {n.message}
+                </p>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  {!n.is_read && (
+                    <button onClick={() => handleMarkRead(n.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', padding: 0 }}>
+                      Mark as Read
+                    </button>
+                  )}
+                  <button onClick={() => handleDelete(n.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', padding: 0, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <Trash2 size={12} /> Delete
+                  </button>
+                </div>
               </div>
-
-              <button 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(notif.id);
-                }}
-                style={{ padding: '0.5rem', background: 'transparent', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer', opacity: 0, transition: 'opacity 0.2s' }}
-                className="notif-delete-btn"
-              >
-                <Trash2 size={16} />
-              </button>
             </div>
           ))
         )}
       </div>
 
-      <style>{`
-        div:hover > .notif-delete-btn {
-          opacity: 0.6 !important;
-        }
-        .notif-delete-btn:hover {
-          opacity: 1 !important;
-          color: #ef4444 !important;
-        }
-      `}</style>
     </div>
   );
 };

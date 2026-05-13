@@ -68,6 +68,18 @@ export const createBooking = async (customerId, bookingData) => {
       throw new Error(`Vehicle Error: ${bvError.message}`);
     }
 
+    // REQ-CST-10: POPULATE GARAGE (Silent Backend Sync)
+    try {
+      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      await fetch(`${BACKEND_URL}/api/garage/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerId, vehicle })
+      });
+    } catch (garageEx) {
+      console.warn('Silent Garage Sync Failure:', garageEx);
+    }
+
     // 3. Insert selected services for that vehicle
     const services = vehicle.services || [];
     if (services.length > 0) {
@@ -111,7 +123,7 @@ export const createBooking = async (customerId, bookingData) => {
         method: 'GCash',
         status: 'FOR_VERIFICATION',
         receipt_url: publicUrl,
-        reference_number: `GC-${bookingRef}` // Simplified ref
+        reference_number: bookingData.payment?.ocrData?.referenceNo || `GC-${bookingRef}` // Authoritative AI Extraction Ref
       });
 
       if (payError) throw payError;
@@ -255,3 +267,26 @@ function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
     return new Date().toISOString();
   }
 }
+
+/**
+ * Request a cancellation/refund for a booking.
+ */
+export const cancelBooking = async (bookingId, reason) => {
+  try {
+    const response = await fetch(`http://localhost:3000/api/bookings/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId, reason })
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error || 'Failed to cancel booking');
+    }
+    
+    return await response.json();
+  } catch (err) {
+    console.error('Error cancelling booking:', err);
+    throw err;
+  }
+};

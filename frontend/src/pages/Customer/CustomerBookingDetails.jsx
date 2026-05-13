@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import BookingChat from '../../components/BookingChat';
 import toast from 'react-hot-toast';
+import { X } from 'lucide-react';
+import { cancelBooking } from '../../services/bookingService';
 
 const STATUS_STEPS = ['scheduled', 'confirmed', 'ongoing', 'completed'];
 
@@ -20,6 +22,8 @@ const CustomerBookingDetails = () => {
   const [vehicles, setVehicles] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
   // --- DATA FETCHING ---
   const fetchAll = async () => {
@@ -139,7 +143,22 @@ const CustomerBookingDetails = () => {
         </button>
         <div>
           <div style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Booking Reference</div>
-          <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)', fontFamily: 'monospace' }}>#{id.substring(0, 8).toUpperCase()}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)', fontFamily: 'monospace' }}>#{id.substring(0, 8).toUpperCase()}</h1>
+            {['confirmed', 'completed'].includes(booking.status) && (
+              <button 
+                onClick={() => navigate(`/customer/receipt/${id}`)}
+                style={{ 
+                  padding: '0.4rem 0.8rem', background: 'rgba(var(--admin-success-rgb), 0.1)', 
+                  border: '1px solid var(--admin-success)', color: 'var(--admin-success)', 
+                  borderRadius: 'var(--admin-radius-sm)', fontSize: '0.65rem', fontWeight: '950', 
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', textTransform: 'uppercase'
+                }}
+              >
+                <Printer size={12} /> Print Official Receipt
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -380,26 +399,61 @@ const CustomerBookingDetails = () => {
                 {booking.totalPaid > 0 && " Since a payment was detected, a refund request will be automatically filed."}
               </p>
               <button 
-                onClick={async () => {
-                  if (!window.confirm('Are you sure you want to cancel this booking? This action cannot be undone.')) return;
-                  const toastId = toast.loading('Processing cancellation...');
-                  try {
-                    const { error } = await supabase
-                      .from('bookings')
-                      .update({ status: 'cancelled' })
-                      .eq('id', id);
-                    if (error) throw error;
-                    
-                    toast.success('Booking Cancelled', { id: toastId });
-                    fetchAll();
-                  } catch (err) {
-                    toast.error('Failed to cancel booking', { id: toastId });
-                  }
-                }}
+                onClick={() => setShowCancelModal(true)}
                 style={{ width: '100%', padding: '0.85rem', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer', textTransform: 'uppercase' }}
               >
                 Cancel Appointment
               </button>
+            </div>
+          )}
+
+          {/* CANCELLATION MODAL */}
+          {showCancelModal && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(8px)' }}>
+              <div style={{ background: 'var(--admin-card)', padding: '2.5rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', maxWidth: '450px', width: '90%', position: 'relative' }}>
+                <button onClick={() => setShowCancelModal(false)} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><X size={20} /></button>
+                <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                  <AlertCircle size={40} color="#ef4444" style={{ marginBottom: '1rem' }} />
+                  <h3 style={{ margin: 0, fontWeight: '950', fontSize: '1.25rem', color: 'white' }}>Confirm Cancellation?</h3>
+                  <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.85rem', marginTop: '0.5rem', fontWeight: '600' }}>
+                    Please provide a reason for cancelling this appointment.
+                    {booking.totalPaid > 0 && " A refund request will be initiated automatically."}
+                  </p>
+                </div>
+
+                <textarea
+                  placeholder="e.g. Change of plans / Conflict in schedule..."
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  style={{ width: '100%', padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', minHeight: '100px', resize: 'none', outline: 'none', fontSize: '0.9rem', fontWeight: '600', marginBottom: '1.5rem' }}
+                />
+
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button onClick={() => setShowCancelModal(false)} style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'white', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer' }}>GO BACK</button>
+                  <button 
+                    disabled={!cancelReason.trim()}
+                    onClick={async () => {
+                      const toastId = toast.loading('Processing cancellation...');
+                      try {
+                        const result = await cancelBooking(id, cancelReason);
+                        
+                        if (result.success) {
+                          toast.success('Booking Cancelled & Refund Queued', { id: toastId });
+                          setShowCancelModal(false);
+                          fetchAll();
+                        } else {
+                          throw new Error(result.error);
+                        }
+                      } catch (err) {
+                        toast.error(err.message || 'Failed to cancel booking', { id: toastId });
+                      }
+                    }} 
+                    style={{ flex: 1, padding: '1rem', background: '#ef4444', border: 'none', color: 'white', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', opacity: !cancelReason.trim() ? 0.5 : 1 }}
+                  >
+                    CONFIRM
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

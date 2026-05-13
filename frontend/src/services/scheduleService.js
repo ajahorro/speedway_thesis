@@ -45,14 +45,17 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
       if (config.slots_per_hour) maxBays = config.slots_per_hour;
     }
 
-    // 1. Fetch ALL bookings and blocks for the day (Local String Matching)
+    // 1. Fetch ALL bookings and blocks for the range (Local String Matching)
+    // We fetch 3 days ahead to handle multi-day duration checks
     const startOfDay = `${dateStr}T00:00:00`;
-    const endOfDay = `${dateStr}T23:59:59`;
+    const checkDateEnd = new Date(dateStr);
+    checkDateEnd.setDate(checkDateEnd.getDate() + 3);
+    const endOfRange = `${checkDateEnd.toISOString().split('T')[0]}T23:59:59`;
 
     const { data: bookings } = await supabase
       .from('bookings')
       .select('id, start_datetime, end_datetime, status, vehicles:booking_vehicles(id, status)')
-      .lte('start_datetime', endOfDay)
+      .lte('start_datetime', endOfRange)
       .gte('end_datetime', startOfDay)
       .neq('status', 'CANCELLED');
 
@@ -90,16 +93,29 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
       const isFullDay = requestedDuration >= SHOP_CONFIG.FULL_DAY_THRESHOLD_MINUTES;
 
       for (let offset = 0; offset < durationHours; offset++) {
-        const targetH = slotH + offset;
+        let checkHour = slotH + offset;
+        let checkDate = new Date(dateStr);
         
-        // If it's a SAME-DAY service, it MUST finish before closing
-        if (targetH >= endHour && !isFullDay) return false;
+        // Rollover Logic: If we exceed closing, move to next day's opening
+        // We only do this for MULTI-DAY (isFullDay) or if we want to support overnight? 
+        // Typically, same-day services MUST finish today.
+        if (checkHour >= endHour) {
+          if (!isFullDay) return false; // Same-day service can't finish
+          
+          // Multi-day: Calculate how many hours we overflow into the next day(s)
+          const totalHoursFromStart = offset;
+          const businessHoursPerDay = endHour - startHour;
+          
+          const daysToSkip = Math.floor((slotH + totalHoursFromStart - startHour) / businessHoursPerDay);
+          const hourInDay = ((slotH + totalHoursFromStart - startHour) % businessHoursPerDay) + startHour;
+          
+          checkDate.setDate(checkDate.getDate() + daysToSkip);
+          checkHour = hourInDay;
+        }
+
+        const checkDateStr = checkDate.toISOString().split('T')[0];
         
-        // If we reached closing but it's a MULTI-DAY service, we stop checking for TODAY
-        // (The system assumes it will continue tomorrow and tomorrow's slots will reflect this later)
-        if (targetH >= endHour && isFullDay) break;
-        
-        if (calculateOccupancy(targetH, dateStr, activeBookings, blocks || [], { ...SHOP_CONFIG, MAX_BAYS: maxBays }) >= maxBays) {
+        if (calculateOccupancy(checkHour, checkDateStr, activeBookings, blocks || [], { ...SHOP_CONFIG, MAX_BAYS: maxBays }) >= maxBays) {
           return false;
         }
       }

@@ -7,10 +7,10 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
   const [availableSlots, setAvailableSlots] = useState([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   
-  // Calculate total duration for all vehicles
-  const totalDuration = (bookingData.vehicles || []).reduce((total, v) => {
+  // Calculate total duration for all vehicles + 1 hour operational buffer
+  const totalDuration = ((bookingData.vehicles || []).reduce((total, v) => {
     return total + (v.services || []).reduce((sub, s) => sub + (s.durationMinutes || 60), 0);
-  }, 0) || 60;
+  }, 0) || 60) + 60; // REQ-SCH-05: 1-hour Buffer Enforcement
 
   // Basic validation
   const vehicle = bookingData.vehicles && bookingData.vehicles[activeVehicleIndex] ? bookingData.vehicles[activeVehicleIndex] : {};
