@@ -50,7 +50,7 @@ const CustomerLayout = () => {
   const handleLogout = async () => {
     confirmLogout(async () => {
       await signOut();
-      navigate('/login', { replace: true });
+      navigate('/', { replace: true });
     });
   };
 

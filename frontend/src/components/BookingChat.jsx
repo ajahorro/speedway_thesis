@@ -74,7 +74,7 @@ const BookingChat = ({ bookingId }) => {
     if (isNearBottom || prevMsgCount.current === 0) {
       container.scrollTo({ top: container.scrollHeight, behavior: prevMsgCount.current === 0 ? 'auto' : 'smooth' });
     } else if (messages.length > prevMsgCount.current) {
-      toast('New message received below', { icon: '⬇️', position: 'bottom-center' });
+      toast('New message received below', { icon: '⬇️', position: 'top-center' });
     }
     prevMsgCount.current = messages.length;
   }, [messages]);
@@ -113,7 +113,7 @@ const BookingChat = ({ bookingId }) => {
         message_type: 'text'
       });
       if (error) throw error;
-      toast.success('Message sent securely', { position: 'bottom-right' });
+      toast.success('Message sent securely', { position: 'top-center' });
     } catch (err) {
       console.error('Send error:', err);
       // Fallback to error state

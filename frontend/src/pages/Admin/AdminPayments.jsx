@@ -72,11 +72,6 @@ const AdminPayments = () => {
 
       // Apply REQ-ADM-05 Strict Audit Filter
       const auditCompliant = getAuditCompliantTransactions(processed);
-      const filteredOutRefunds = processed.length - auditCompliant.length;
-      
-      if (filteredOutRefunds > 0) {
-         toast.success('Financial Audit view filtered: Refund records moved to Refund Hub.', { id: 'refund-filter-toast', duration: 5000 });
-      }
 
       setState(prev => ({ ...prev, payments: auditCompliant, loading: false }));
       logger.admin('Payment Audit complete.');

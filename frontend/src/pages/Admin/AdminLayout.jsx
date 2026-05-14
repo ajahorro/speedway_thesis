@@ -64,7 +64,7 @@ const AdminLayout = () => {
   const handleLogout = async () => {
     confirmLogout(async () => {
       await signOut();
-      navigate('/login', { replace: true });
+      navigate('/', { replace: true });
     });
   };
   const navLinks = [

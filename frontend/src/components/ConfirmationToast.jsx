@@ -12,7 +12,7 @@ const ConfirmationToast = ({
   onConfirm, 
   onCancel,
   variant = 'danger',
-  centered = false
+  centered = true
 }) => {
   const content = (
     <div style={{

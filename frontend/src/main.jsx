@@ -131,7 +131,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <Toaster 
-          position="bottom-center" 
+          position="top-center" 
           toastOptions={{
             duration: 4000,
             style: {
