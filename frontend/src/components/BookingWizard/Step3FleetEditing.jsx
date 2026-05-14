@@ -22,12 +22,16 @@ const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, se
 
     // Fetch existing bookings that overlap with the selected date/time
     if (bookingData.date && bookingData.startTime) {
-      const dateStr = bookingData.date;
+      const dateStr = bookingData.date; // e.g. '2025-05-15'
+      const dayStart = `${dateStr}T00:00:00.000Z`;
+      const dayEnd   = `${dateStr}T23:59:59.999Z`;
       const { data: existingBookings } = await supabase
         .from('bookings')
         .select('id, start_datetime, end_datetime, vehicles:booking_vehicles(id, status, vehicle_type)')
-        .eq(dateStr, dateStr.substring(0, 10))
-        .neq('status', 'CANCELLED');
+        .lte('start_datetime', dayEnd)
+        .gte('end_datetime', dayStart)
+        .not('status', 'in', '("cancelled","CANCELLED","completed","COMPLETED")');
+
 
       // Sum occupancy from other bookings on the same slot
       let externalOccupancy = 0;

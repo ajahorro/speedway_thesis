@@ -120,7 +120,7 @@ const CustomerBookAppointment = () => {
   }
 
   return (
-    <div style={{ padding: '2rem', paddingBottom: '5rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+    <div style={{ paddingBottom: '5rem' }}>
       
       {/* Header with Back Arrow */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -144,7 +144,7 @@ const CustomerBookAppointment = () => {
           <ArrowLeft size={24} />
         </button>
         <div>
-          <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: '950', color: 'white', textTransform: 'uppercase' }}>Book Appointment</h1>
+          <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '-1.5px' }}>Book Appointment</h1>
           {isRebooking && <div className="pulse-animation" style={{ fontSize: '0.75rem', color: 'var(--admin-brand)', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.2rem' }}>🔄 Fast-Track Rebooking Active</div>}
         </div>
       </div>

@@ -712,6 +712,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
  */
 app.post('/api/auth/verify-password', async (req, res) => {
   const { email, password } = req.body;
+  if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Admin service unavailable' });
   console.log(`🔐 [AUTH] PASSWORD CHALLENGE FOR: ${email}`);
 
   try {
@@ -733,6 +734,7 @@ app.post('/api/auth/verify-password', async (req, res) => {
 app.post('/api/auth/recover-password', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+  if (!supabaseAdmin) return res.status(503).json({ success: false, error: 'Admin service unavailable' });
   console.log(`🔑 [AUTH] PASSWORD RECOVERY INITIATED: ${email}`);
 
   try {
@@ -1193,6 +1195,12 @@ const checkOverdueBookings = async () => {
  * Preserves: profiles, vehicles (garage), shop config.
  */
 app.post('/api/admin/purge-bookings', async (req, res) => {
+  const { secret } = req.body;
+  const DEBUG_SECRET = process.env.DEBUG_SECRET || 'speedway-dev-only';
+  if (secret !== DEBUG_SECRET) {
+    console.warn('🛑 [SECURITY] Unauthorized purge attempt blocked.');
+    return res.status(403).json({ success: false, error: 'Forbidden: invalid secret' });
+  }
   console.log('🧹 [ADMIN] PURGING ALL BOOKING DATA...');
   
   try {
@@ -1438,6 +1446,8 @@ app.get('/api/debug/user/:email', async (req, res) => {
 });
 
 app.get('/api/debug/list-users', async (req, res) => {
+  const DEBUG_SECRET = process.env.DEBUG_SECRET || 'speedway-dev-only';
+  if (req.query.secret !== DEBUG_SECRET) return res.status(403).json({ success: false, error: 'Forbidden' });
   try {
     const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
     if (error) throw error;
@@ -1462,7 +1472,12 @@ app.get('/api/debug/list-users', async (req, res) => {
 
 
 app.post('/api/debug/fix-account', async (req, res) => {
-  const { email } = req.body;
+  const { email, secret } = req.body;
+  const DEBUG_SECRET = process.env.DEBUG_SECRET || 'speedway-dev-only';
+  if (secret !== DEBUG_SECRET) {
+    console.warn(`🛑 [SECURITY] Unauthorized fix-account attempt for: ${email}`);
+    return res.status(403).json({ success: false, error: 'Forbidden: invalid secret' });
+  }
   try {
     const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
     if (listError) throw listError;

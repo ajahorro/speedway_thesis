@@ -61,7 +61,7 @@ const CustomerSettings = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', maxWidth: '800px', margin: '0 auto', width: '100%', paddingBottom: '10rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
       
       {/* Header */}
       <div>

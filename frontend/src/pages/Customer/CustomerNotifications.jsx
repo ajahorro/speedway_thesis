@@ -130,7 +130,7 @@ const CustomerNotifications = () => {
   const cardStyle = { background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', padding: '1.25rem' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
       {confirmDeleteId !== null && <DeleteConfirmModal onConfirm={handleConfirmDelete} onCancel={() => setConfirmDeleteId(null)} />}
 
       <PageHeader badge="FLEET UPDATES" title="NOTIFICATIONS" subtitle="Stay informed about your vehicle detailing progress and account activity." onRefresh={fetchNotifications}>

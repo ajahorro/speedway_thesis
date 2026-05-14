@@ -53,7 +53,7 @@ const CustomerMyBookings = () => {
   };
 
   return (
-    <div style={{ padding: '2rem', paddingBottom: '5rem', maxWidth: '1200px', margin: '0 auto' }}>
+    <div style={{ paddingBottom: '5rem' }}>
       
       {/* Rebook Confirmation Modal */}
       {showRebookModal && (
@@ -86,13 +86,13 @@ const CustomerMyBookings = () => {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'var(--admin-text-primary)' }}>My Bookings</h1>
-          <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.9rem', fontWeight: '600' }}>
+          <h1 style={{ fontSize: '2.5rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'white', letterSpacing: '-1.5px' }}>My Bookings</h1>
+          <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.95rem', fontWeight: '600', opacity: 0.8 }}>
             Track and manage all your past and upcoming service appointments.
           </p>
         </div>

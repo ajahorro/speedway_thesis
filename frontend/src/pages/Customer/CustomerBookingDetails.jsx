@@ -148,7 +148,7 @@ const CustomerBookingDetails = () => {
   const currentStepIndex = activeSteps.indexOf(derivedStatus);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '3rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
 
       {/* HEADER */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
