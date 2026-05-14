@@ -24,7 +24,9 @@ const CustomerDashboard = () => {
   
   // REQ-CST-09: BALANCE TRACKER (Real-time calculation)
   const totalOutstanding = (allBookings || []).reduce((sum, b) => {
-    if (['cancelled', 'completed'].includes(b.status)) return sum;
+    const status = b.status?.toLowerCase();
+    // REQ-ADM-10: Do not count balance for finalized or revoked sessions
+    if (['cancelled', 'completed', 'flagged_noshow'].includes(status)) return sum;
     const totalPaid = (b.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
     return sum + Math.max(0, (b.total_amount || 0) - totalPaid);
   }, 0);

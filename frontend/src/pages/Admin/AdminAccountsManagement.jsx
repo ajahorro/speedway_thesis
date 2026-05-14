@@ -141,7 +141,7 @@ const AdminAccountsManagement = () => {
     color: 'var(--admin-text-primary)'
   };
 
-  const isSuperAdmin = currentUserProfile?.role === 'ADMIN';
+  const isAdmin = currentUserProfile?.role === 'ADMIN';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -166,7 +166,7 @@ const AdminAccountsManagement = () => {
           >
             Staff Accounts
           </button>
-          {isSuperAdmin && (
+          {isAdmin && (
             <button 
               onClick={() => setActiveTab('ADMIN')}
               style={{ 

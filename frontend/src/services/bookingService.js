@@ -276,18 +276,59 @@ function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
  */
 export const cancelBooking = async (bookingId, reason) => {
   try {
-    const response = await fetch(`http://localhost:3000/api/bookings/cancel`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bookingId, reason })
-    });
+    // 1. Fetch the booking
+    const { data: booking, error: fetchError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    // 2. Update booking status to 'cancelled' and append reason to notes
+    const updatedNotes = booking.notes ? `${booking.notes}\nCancellation Reason: ${reason}` : `Cancellation Reason: ${reason}`;
     
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || 'Failed to cancel booking');
+    const { error: updateError } = await supabase
+      .from('bookings')
+      .update({
+        status: 'cancelled',
+        notes: updatedNotes
+      })
+      .eq('id', bookingId);
+
+    if (updateError) throw updateError;
+
+    // 3. Mark all related vehicles as cancelled to free up the queue
+    await supabase
+      .from('booking_vehicles')
+      .update({ status: 'cancelled' })
+      .eq('booking_id', bookingId);
+
+    // 4. Mark associated active payments as REFUND_PENDING
+    const { data: payments } = await supabase
+      .from('payments')
+      .select('id, status')
+      .eq('booking_id', bookingId);
+      
+    if (payments && payments.length > 0) {
+      for (const p of payments) {
+        if (p.status === 'PAID' || p.status === 'FOR_VERIFICATION') {
+          await supabase
+            .from('payments')
+            .update({ status: 'REFUND_PENDING' })
+            .eq('id', p.id);
+        }
+      }
     }
-    
-    return await response.json();
+
+    // 5. Fire Event for notifications
+    await emitEvent(EVENTS.BOOKING_CANCELLED, {
+      userId: booking.customer_id,
+      bookingId: bookingId,
+      meta: { bookingRef: bookingId.substring(0, 8).toUpperCase(), reason }
+    });
+
+    return { success: true };
   } catch (err) {
     console.error('Error cancelling booking:', err);
     throw err;

@@ -64,3 +64,22 @@ export const subscribeToNotifications = (userId, callback) => {
     }, callback)
     .subscribe();
 };
+
+/**
+ * REQ-SYS-02: Automated Status Notification Trigger
+ * Calls the Supabase Edge Function to dispatch professional emails.
+ */
+export const sendStatusEmail = async (bookingId, newStatus, remarks = '') => {
+  try {
+    const { data, error } = await supabase.functions.invoke('send-status-email', {
+      body: { bookingId, newStatus, remarks }
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('[NotificationService] Error:', error);
+    return { error: error.message };
+  }
+};
+

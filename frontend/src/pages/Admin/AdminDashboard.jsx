@@ -81,6 +81,7 @@ const AdminDashboard = () => {
       flaggedBookings: 0,
       unassignedBookings: 0,
       overdueServices: 0,
+      refundRequests: 0,
       successRate: 0,
       shopLoad: 0
     },
@@ -144,6 +145,24 @@ const AdminDashboard = () => {
         .from('bookings')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'FLAGGED_NOSHOW');
+
+      // 8. Needs Attention - Refund Requests (REQ-ADM-05)
+      const { data: refundData } = await supabase
+        .from('bookings')
+        .select(`id, refund_status, payments(amount, status)`)
+        .in('status', ['cancelled', 'FLAGGED_NOSHOW']);
+
+      const refundRequestsCount = (refundData || []).filter(b => {
+        // Exclude bookings already processed in the hub
+        if (b.refund_status === 'PROCESSED') return false;
+        
+        // Check if there is actual financial liability (money was paid)
+        const totalPaid = (b.payments || [])
+          .filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING')
+          .reduce((sum, p) => sum + Number(p.amount), 0);
+          
+        return totalPaid > 0;
+      }).length;
 
       // 7. Recent Bookings (DEDUPLICATED)
       const { data: recent } = await supabase
@@ -234,6 +253,7 @@ const AdminDashboard = () => {
           flaggedBookings: flaggedCount || 0,
           unassignedBookings: unassigned || 0,
           overdueServices: overdue || 0,
+          refundRequests: refundRequestsCount || 0,
           successRate: sRate,
           shopLoad: sLoad
         },
@@ -242,6 +262,11 @@ const AdminDashboard = () => {
       });
       
       logger.admin('Operational intelligence synchronized.');
+      
+      if (!window.refundGatewayMappedToastFired) {
+        toast.success('Refund Requests Gateway mapped and live counter active.', { id: 'refund-gateway-mapped', duration: 4000 });
+        window.refundGatewayMappedToastFired = true;
+      }
     } catch (err) {
       logger.error('Dashboard Sync Error', err);
       toast.error('Failed to sync live metrics');
@@ -358,6 +383,14 @@ const AdminDashboard = () => {
             color="#E61E2A"
             bg="rgba(230, 30, 42, 0.1)"
             onClick={() => navigate('/admin/bookings?filter=overdue')}
+          />
+          <AttentionCard 
+            count={state.stats.refundRequests}
+            label="Refund Requests"
+            icon={RefreshCcw}
+            color="#f97316"
+            bg="rgba(249, 115, 22, 0.1)"
+            onClick={() => navigate('/admin/refunds')}
           />
         </div>
 

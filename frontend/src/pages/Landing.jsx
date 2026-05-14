@@ -74,7 +74,6 @@ const Landing = () => {
     if (user && profile) {
       const routes = {
         ADMIN: '/admin',
-        SUPER_ADMIN: '/admin',
         STAFF: '/staff',
         CUSTOMER: '/customer'
       };

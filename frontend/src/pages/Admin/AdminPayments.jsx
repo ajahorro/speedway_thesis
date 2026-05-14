@@ -3,13 +3,15 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { 
   CheckCircle, AlertCircle, Search, RotateCw, Filter, 
-  CreditCard, XCircle, ArrowRight, Car, Sparkles, Loader2 
+  CreditCard, XCircle, ArrowRight, Car, Sparkles, Loader2,
+  FileText, ShieldCheck, Printer, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { getAuditCompliantTransactions } from '../../utils/bookingHelpers';
 
 const AdminPayments = () => {
   const navigate = useNavigate();
@@ -26,16 +28,28 @@ const AdminPayments = () => {
     isScanning: false
   });
 
+  const [receiptBooking, setReceiptBooking] = useState(null);
+
   // MEMOIZED FETCH: Optimized with deep relationship embedding
   const fetchPayments = useCallback(async () => {
     setState(prev => ({ ...prev, loading: true }));
     try {
       logger.admin('Auditing Payment Transactions...');
       
-      // One-shot join: payments -> bookings -> profiles (via explicit FK)
       const { data: paymentData, error: paymentError } = await supabase
         .from('payments')
-        .select(`*`)
+        .select(`
+          *,
+          booking:bookings (
+            *,
+            customer:profiles!bookings_customer_id_fkey (full_name, email),
+            payments (*),
+            vehicles:booking_vehicles (
+              *,
+              services:booking_vehicle_services (*)
+            )
+          )
+        `)
         .neq('method', 'Cash')
         .order('created_at', { ascending: false });
 
@@ -50,11 +64,20 @@ const AdminPayments = () => {
         return {
           ...p,
           receipt_url: url,
-          customer_name: 'Fleet Transaction'
+          customer_name: p.booking?.customer?.full_name || 'Fleet Transaction',
+          customer: p.booking?.customer
         };
       });
 
-      setState(prev => ({ ...prev, payments: processed, loading: false }));
+      // Apply REQ-ADM-05 Strict Audit Filter
+      const auditCompliant = getAuditCompliantTransactions(processed);
+      const filteredOutRefunds = processed.length - auditCompliant.length;
+      
+      if (filteredOutRefunds > 0) {
+         toast.success('Financial Audit view filtered: Refund records moved to Refund Hub.', { id: 'refund-filter-toast', duration: 5000 });
+      }
+
+      setState(prev => ({ ...prev, payments: auditCompliant, loading: false }));
       logger.admin('Payment Audit complete.');
     } catch (err) {
       logger.error('Payment Audit Error', err);
@@ -163,6 +186,56 @@ const AdminPayments = () => {
     }
   };
 
+  const formatCurrency = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(val || 0);
+
+  const getStatusBadgeColor = (status) => {
+    if (status === 'PAID') return '#10b981';
+    if (status === 'REFUND_PENDING' || status === 'REFUNDED') return '#f59e0b';
+    if (status === 'REJECTED') return '#ef4444';
+    return '#3b82f6'; // Blue for FOR_VERIFICATION / Pending
+  };
+
+  const canAccessReceipt = (booking) => {
+    // REQ-ADM-10: Admins can access receipts if payment is PAID OR if refund is PROCESSED
+    return (booking?.payments || []).some(p => p.status === 'PAID') || booking?.refund_status === 'PROCESSED';
+  };
+
+  const getReceiptStatusText = (receipt) => {
+    if (!receipt) return '';
+    
+    // REQ-ADM-10: Hardened check for refund state
+    if (receipt.refund_status === 'PROCESSED') return 'REFUNDED & CLOSED';
+    
+    const paidAmount = (receipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
+    const remaining = Math.max(0, receipt.total_amount - paidAmount);
+    if (!canAccessReceipt(receipt)) return 'AWAITING VERIFICATION';
+    if (remaining <= 0) return 'PAID IN FULL';
+    if (paidAmount > 0) return 'PARTIAL PAYMENT';
+    return 'BALANCE DUE';
+  };
+
+  const handleViewReceipt = async (payment) => {
+    const toastId = toast.loading('Verifying security clearance...');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+      
+      if (profile?.role !== 'ADMIN') {
+        throw new Error('ACCESS DENIED: Administrator clearance required.');
+      }
+      
+      toast.dismiss(toastId);
+      setReceiptBooking(payment.booking);
+    } catch (err) {
+      toast.error(err.message, { id: toastId });
+    }
+  };
+
+  const handlePrint = () => {
+    toast.success('System receipt printed for audit.');
+    window.print();
+  };
+
   const cardStyle = { 
     background: 'var(--admin-card)', 
     border: '1px solid var(--admin-border)', 
@@ -249,7 +322,7 @@ const AdminPayments = () => {
                   <div style={{ fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '950', letterSpacing: '0.5px' }}>#{p.id.slice(0, 8).toUpperCase()}</div>
                   <h3 style={{ margin: 0, fontWeight: '950', fontSize: isMobile ? '0.9rem' : '1rem', textTransform: 'uppercase' }}>{p.customer_name}</h3>
                 </div>
-                <span style={{ flexShrink: 0, fontSize: '0.55rem', padding: '0.25rem 0.6rem', borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-bg)', color: p.status === 'PAID' ? '#10b981' : '#f59e0b', fontWeight: '950', height: 'fit-content', border: '1px solid currentColor', textTransform: 'uppercase' }}>{p.status.replace('_', ' ')}</span>
+                <span style={{ flexShrink: 0, fontSize: '0.55rem', padding: '0.25rem 0.6rem', borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-bg)', color: getStatusBadgeColor(p.status), fontWeight: '950', height: 'fit-content', border: '1px solid currentColor', textTransform: 'uppercase' }}>{p.status.replace('_', ' ')}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: '1px solid var(--admin-border)', paddingTop: '0.75rem' }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
@@ -334,6 +407,9 @@ const AdminPayments = () => {
                       <button onClick={() => handleVerifyPayment(state.selectedItem)} style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>VERIFY PAID</button>
                     </div>
                   )}
+                  <button onClick={() => handleViewReceipt(state.selectedItem)} style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                    <FileText size={16} /> VIEW SYSTEM RECEIPT
+                  </button>
                   <button onClick={() => navigate(`/admin/bookings/${state.selectedItem.booking_id}`)} style={{ width: '100%', padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>VIEW BOOKING</button>
                 </div>
               </div>
@@ -385,7 +461,175 @@ const AdminPayments = () => {
                   <button onClick={() => handleVerifyPayment(state.selectedItem)} style={{ flex: 2, padding: '1rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: '0.75rem', fontWeight: '900', cursor: 'pointer' }}>VERIFY PAID</button>
                 </div>
               )}
+              <button onClick={() => handleViewReceipt(state.selectedItem)} style={{ width: '100%', padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '0.75rem', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <FileText size={18} /> VIEW SYSTEM RECEIPT
+              </button>
               <button onClick={() => navigate(`/admin/bookings/${state.selectedItem.booking_id}`)} style={{ width: '100%', padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>VIEW BOOKING</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🧾 ADMIN RECEIPT PREVIEW MODAL */}
+      {receiptBooking && (
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '2rem' }}>
+          <div className="no-print-bg" style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
+            
+            <div className="no-print" style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <ShieldCheck size={24} color="var(--admin-brand)" />
+                <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>
+                  Official Receipt Explorer (Audit View)
+                </span>
+              </div>
+              <button onClick={() => setReceiptBooking(null)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div id="printable-receipt" style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
+              <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+                <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#000', fontStyle: 'italic' }}>SPEEDWAY</h2>
+                <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#666', textTransform: 'uppercase', letterSpacing: '2px' }}>AutoxMoto Detail Studio</div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Invoice To</div>
+                  <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>{receiptBooking.customer?.full_name || 'Customer'}</div>
+                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{receiptBooking.customer?.email}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Receipt No.</div>
+                  <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>INV-{receiptBooking.id.substring(0, 8).toUpperCase()}</div>
+                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(receiptBooking.created_at).toLocaleDateString()}</div>
+                </div>
+              </div>
+
+              <div id="receipt-content-area" style={{ position: 'relative' }}>
+                {/* REQ-NFR-14: CSS-based Watermark for Admin Audit */}
+                {receiptBooking.refund_status === 'PROCESSED' && (
+                  <div style={{
+                    position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-45deg)',
+                    fontSize: '8rem', fontWeight: '900', color: 'rgba(239, 68, 68, 0.08)', pointerEvents: 'none', zIndex: 0, whiteSpace: 'nowrap'
+                  }}>
+                    VOID / REFUNDED
+                  </div>
+                )}
+
+              <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '1.5rem 0', margin: '2rem 0' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>
+                    {(() => {
+                      if (receiptBooking.vehicles && receiptBooking.vehicles.length > 0) {
+                        return receiptBooking.vehicles.map((v) => (
+                          <React.Fragment key={v.id}>
+                            <tr>
+                              <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
+                                {v.make} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
+                              </td>
+                            </tr>
+                            {(v.services || []).map((s) => (
+                              <tr key={s.id}>
+                                <td style={{ padding: '5px 5px 5px 20px', fontSize: '0.85rem', color: '#333' }}>
+                                  {s.service_name || s.service_name_snapshot}
+                                </td>
+                                <td style={{ padding: '5px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
+                                  {formatCurrency(s.price || s.price_snapshot)}
+                                </td>
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        ));
+                      } else {
+                        return (
+                          <tr>
+                            <td style={{ padding: '15px 5px', fontSize: '0.85rem', color: '#333' }}>
+                              Premium Detailing Package
+                            </td>
+                            <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
+                              {formatCurrency(receiptBooking.total_amount)}
+                            </td>
+                          </tr>
+                        );
+                      }
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
+                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
+                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>GRAND TOTAL</span>
+                  <span style={{ fontWeight: '900' }}>{formatCurrency(receiptBooking.total_amount)}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
+                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL AMOUNT PAID</span>
+                  <span style={{ fontWeight: '900' }}>
+                    {formatCurrency((receiptBooking.payments || []).filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING').reduce((s, p) => s + Number(p.amount), 0))}
+                  </span>
+                </div>
+                {receiptBooking.refund_status === 'PROCESSED' && (
+                  <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', color: '#ef4444' }}>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>AMOUNT REVERTED</span>
+                    <span style={{ fontWeight: '900' }}>
+                      {formatCurrency((receiptBooking.payments || []).filter(p => p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0))}
+                    </span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
+                  <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>REMAINING BALANCE</span>
+                  <span style={{ fontWeight: '950', fontSize: '1.25rem', color: '#000' }}>
+                    {formatCurrency(Math.max(0, receiptBooking.total_amount - (receiptBooking.payments || []).filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING' || p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0)))}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ padding: '1.25rem', background: '#f9f9f9', borderRadius: '12px', border: '1px solid #eee' }}>
+                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
+                      <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{receiptBooking.payments?.[0]?.method || 'Cash / Off-platform'}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Transaction Reference</div>
+                      <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
+                        {canAccessReceipt(receiptBooking) 
+                          ? (receiptBooking.payments?.[0]?.reference_number || receiptBooking.ocr_metadata?.referenceNo || 'VERIFIED')
+                          : 'Awaiting Verification'}
+                      </div>
+                    </div>
+                 </div>
+                 <div style={{ marginTop: '15px', textAlign: 'center', fontSize: '1rem', fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                   *** {getReceiptStatusText(receiptBooking)} ***
+                 </div>
+              </div>
+
+              <div style={{ textAlign: 'center', color: '#666', fontSize: '0.65rem', marginTop: '60px', fontWeight: '300' }}>
+                This is a computer-generated document from Speedway AutoXMoto. No signature required.
+              </div>
+              </div> {/* Close receipt-content-area */}
+            </div>
+
+            <div className="no-print" style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
+              <button 
+                onClick={handlePrint}
+                style={{ 
+                  flex: 2, padding: '1rem', background: '#000', 
+                  color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', 
+                  cursor: 'pointer', 
+                  textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' 
+                }}
+              >
+                <Printer size={20} /> Print For Audit
+              </button>
+              <button 
+                onClick={() => setReceiptBooking(null)}
+                style={{ flex: 1, padding: '1rem', background: '#fff', color: '#000', border: '1px solid #ddd', borderRadius: '12px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem' }}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
@@ -395,6 +639,63 @@ const AdminPayments = () => {
         @keyframes modalSlideUp {
           from { transform: translateY(20px); opacity: 0; }
           to { transform: translateY(0); opacity: 1; }
+        }
+        @media print {
+          html, body, #root, .admin-theme, .admin-main-wrapper, main { 
+            background: white !important; 
+            color: black !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            overflow: visible !important;
+          }
+
+          nav, aside, header, button, .no-print, [role="navigation"] {
+            display: none !important;
+          }
+
+          #printable-receipt {
+            display: block !important;
+            visibility: visible !important;
+            width: 100% !important;
+            max-width: 800px !important;
+            margin: 0 auto !important;
+            padding: 10mm !important;
+            background: white !important;
+            position: relative !important;
+            z-index: 9999 !important;
+            box-sizing: border-box !important;
+            height: auto !important;
+            overflow: visible !important;
+            max-height: none !important;
+          }
+
+          #printable-receipt * {
+            visibility: visible !important;
+            color: black !important;
+          }
+
+          .modal-overlay {
+            position: absolute !important;
+            inset: 0 !important;
+            background: white !important;
+            display: block !important;
+          }
+          
+          .no-print-bg {
+            box-shadow: none !important;
+            border-radius: 0 !important;
+          }
+
+          @page { 
+            size: auto;
+            margin: 0mm; 
+          }
+          
+          * { 
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important; 
+          }
         }
       `}</style>
     </div>

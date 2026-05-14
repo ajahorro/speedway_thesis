@@ -60,9 +60,9 @@ const StaffDashboard = () => {
       setLocalNotes(notesObj);
       
       // Calculate Stats
-      const pending = allVehicleTasks.filter(t => t.status === 'PENDING').length;
-      const active = allVehicleTasks.filter(t => t.status === 'IN_PROGRESS').length;
-      const completed = allVehicleTasks.filter(t => t.status === 'COMPLETED').length;
+      const pending = allVehicleTasks.filter(t => t.status?.toUpperCase() === 'PENDING').length;
+      const active = allVehicleTasks.filter(t => t.status?.toUpperCase() === 'IN_PROGRESS').length;
+      const completed = allVehicleTasks.filter(t => t.status?.toUpperCase() === 'COMPLETED').length;
       setStats({ pending, active, completed });
 
     } catch (err) {
@@ -73,19 +73,52 @@ const StaffDashboard = () => {
     }
   };
 
-  const handleUpdateStatus = async (taskId, newStatus) => {
+  const handleUpdateStatus = async (task, newStatus) => {
     const toastId = toast.loading(`Updating unit status...`);
     try {
-      const { error } = await supabase
+      // 1. Update the specific vehicle status
+      const { error: vError } = await supabase
         .from('booking_vehicles')
-        .update({ status: newStatus })
-        .eq('id', taskId);
+        .update({ 
+          status: newStatus,
+          // REQ-STF-04: Timestamping lifecycle milestones
+          started_at: newStatus === 'IN_PROGRESS' ? new Date().toISOString() : undefined,
+          completed_at: newStatus === 'COMPLETED' ? new Date().toISOString() : undefined
+        })
+        .eq('id', task.id);
 
-      if (error) throw error;
+      if (vError) throw vError;
+
+      // 2. Synchronize Parent Booking Status (REQ-SYS-05)
+      if (newStatus === 'IN_PROGRESS') {
+        // If any vehicle starts, the whole booking is 'ongoing'
+        await supabase
+          .from('bookings')
+          .update({ status: 'ongoing' })
+          .eq('id', task.booking_id);
+      } else if (newStatus === 'COMPLETED') {
+        // Check if all other vehicles in this booking are also completed
+        const { data: siblingVehicles } = await supabase
+          .from('booking_vehicles')
+          .select('status')
+          .eq('booking_id', task.booking_id)
+          .neq('id', task.id);
+
+        const allFinished = (siblingVehicles || []).every(v => v.status?.toUpperCase() === 'COMPLETED');
+        
+        if (allFinished) {
+          await supabase
+            .from('bookings')
+            .update({ status: 'completed' })
+            .eq('id', task.booking_id);
+          toast.success('Whole booking marked as COMPLETED!', { id: toastId });
+        }
+      }
 
       toast.success(`Unit marked as ${newStatus.toUpperCase()}`, { id: toastId });
       fetchAssignedTasks();
     } catch (err) {
+      console.error('Status Update Error:', err);
       toast.error('Failed to update status', { id: toastId });
     }
   };
@@ -115,13 +148,13 @@ const StaffDashboard = () => {
       const filePath = `service-proofs/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
-        .from('bookings') // Reusing bookings bucket for ease
+        .from('receipts') 
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage
-        .from('bookings')
+        .from('receipts')
         .getPublicUrl(filePath);
 
       const { error: dbError } = await supabase
@@ -151,17 +184,20 @@ const StaffDashboard = () => {
     gap: '1rem'
   };
 
-  const badgeStyle = (status) => ({
-    fontSize: '0.6rem',
-    fontWeight: '950',
-    padding: '0.3rem 0.6rem',
-    borderRadius: '2px',
-    textTransform: 'uppercase',
-    border: '1px solid currentColor',
-    background: status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.1)' : (status === 'IN_PROGRESS' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255,255,255,0.05)'),
-    color: status === 'COMPLETED' ? '#10b981' : (status === 'IN_PROGRESS' ? '#f59e0b' : '#8E9196'),
-    letterSpacing: '1px'
-  });
+  const badgeStyle = (status) => {
+    const s = status?.toUpperCase();
+    return {
+      fontSize: '0.6rem',
+      fontWeight: '950',
+      padding: '0.3rem 0.6rem',
+      borderRadius: '2px',
+      textTransform: 'uppercase',
+      border: '1px solid currentColor',
+      background: s === 'COMPLETED' ? 'rgba(16, 185, 129, 0.1)' : (s === 'IN_PROGRESS' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255,255,255,0.05)'),
+      color: s === 'COMPLETED' ? '#10b981' : (s === 'IN_PROGRESS' ? '#f59e0b' : '#8E9196'),
+      letterSpacing: '1px'
+    };
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -234,7 +270,7 @@ const StaffDashboard = () => {
                     <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase' }}>{task.make} {task.model}</h3>
                   </div>
                 </div>
-                <span style={badgeStyle(task.status)}>{task.status}</span>
+                <span style={badgeStyle(task.status)}>{task.status?.toUpperCase()}</span>
               </div>
 
               <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', background: '#15171A' }}>
@@ -254,7 +290,7 @@ const StaffDashboard = () => {
                 </div>
 
                 {/* Service Notes & Photos */}
-                {task.status !== 'PENDING' && (
+                {task.status?.toUpperCase() !== 'PENDING' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <div style={{ position: 'relative' }}>
                       <textarea 
@@ -318,9 +354,9 @@ const StaffDashboard = () => {
                 )}
 
                 <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-                  {task.status === 'PENDING' && (
+                  {task.status?.toUpperCase() === 'PENDING' && (
                     <button 
-                      onClick={() => handleUpdateStatus(task.id, 'IN_PROGRESS')}
+                      onClick={() => handleUpdateStatus(task, 'IN_PROGRESS')}
                       disabled={!profile?.is_clocked_in}
                       style={{ 
                         flex: 1, padding: '1rem', background: '#E61E2A', 
@@ -333,9 +369,9 @@ const StaffDashboard = () => {
                       <Play size={18} /> START SERVICE
                     </button>
                   )}
-                  {task.status === 'IN_PROGRESS' && (
+                  {task.status?.toUpperCase() === 'IN_PROGRESS' && (
                     <button 
-                      onClick={() => handleUpdateStatus(task.id, 'COMPLETED')}
+                      onClick={() => handleUpdateStatus(task, 'COMPLETED')}
                       disabled={!profile?.is_clocked_in}
                       style={{ 
                         flex: 1, padding: '1rem', background: '#10b981', 

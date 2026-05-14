@@ -81,7 +81,7 @@ const CustomerBookingDetails = () => {
         return { ...p, receipt_url: url };
       });
 
-      const totalPaid = processedPayments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
+      const totalPaid = processedPayments.filter(p => p.status === 'PAID' || p.status === 'REFUNDED').reduce((sum, p) => sum + Number(p.amount), 0);
 
       setBooking({ ...bData, assigned_staff: staff, totalPaid });
       setVehicles(vehiclesWithServices);
@@ -161,6 +161,21 @@ const CustomerBookingDetails = () => {
 
       {/* ===== A. LIVE STATUS TRACKER ===== */}
       <div style={cardStyle}>
+        {booking.refund_status === 'PROCESSED' && (
+          <div style={{ 
+            marginBottom: '1.5rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', 
+            border: '1px solid #ef4444', borderRadius: 'var(--admin-radius-sm)',
+            display: 'flex', alignItems: 'center', gap: '1rem'
+          }}>
+            <ShieldCheck color="#ef4444" size={24} />
+            <div>
+              <div style={{ fontWeight: '950', color: '#ef4444', fontSize: '0.9rem', textTransform: 'uppercase' }}>Financial Reversal Finalized</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>
+                A refund has been processed for this cancelled booking. Please check your financial provider for the reflected amount.
+              </div>
+            </div>
+          </div>
+        )}
         <div style={labelStyle}>Appointment Lifecycle</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', marginTop: '1.5rem', marginBottom: '0.5rem' }}>
           {/* Track */}
@@ -304,19 +319,23 @@ const CustomerBookingDetails = () => {
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                           <div>
-                            <div style={{ fontWeight: '900', fontSize: '0.85rem', color: 'var(--admin-text-primary)' }}>PAYMENT #{idx + 1} • {p.method}</div>
+                            <div style={{ fontWeight: '900', fontSize: '0.85rem', color: p.status === 'REFUNDED' ? '#ef4444' : 'var(--admin-text-primary)' }}>
+                              {p.status === 'REFUNDED' ? 'REFUND RECORD' : 'PAYMENT'} #{idx + 1} • {p.method}
+                            </div>
                             <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>{new Date(p.created_at).toLocaleString()}</div>
                           </div>
                           <div style={{
                             fontSize: '0.6rem', fontWeight: '950', padding: '0.2rem 0.5rem', borderRadius: '4px',
-                            background: p.status === 'PAID' ? 'rgba(16,185,129,0.1)' : p.status === 'REJECTED' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
-                            color: p.status === 'PAID' ? '#10b981' : p.status === 'REJECTED' ? '#ef4444' : '#f59e0b',
+                            background: p.status === 'PAID' ? 'rgba(16,185,129,0.1)' : p.status === 'REJECTED' || p.status === 'REFUNDED' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
+                            color: p.status === 'PAID' ? '#10b981' : p.status === 'REJECTED' || p.status === 'REFUNDED' ? '#ef4444' : '#f59e0b',
                             border: '1px solid currentColor'
                           }}>
                             {p.status}
                           </div>
                         </div>
-                        <div style={{ fontWeight: '950', fontSize: '1.1rem', marginTop: '0.25rem', color: 'var(--admin-text-primary)' }}>₱{p.amount?.toLocaleString()}</div>
+                        <div style={{ fontWeight: '950', fontSize: '1.1rem', marginTop: '0.25rem', color: p.status === 'REFUNDED' ? '#ef4444' : 'var(--admin-text-primary)' }}>
+                          {p.amount < 0 ? '-' : ''}₱{Math.abs(p.amount || 0).toLocaleString()}
+                        </div>
                         {p.status === 'REJECTED' && p.rejection_reason && (
                           <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', fontWeight: '700', color: '#ef4444', background: 'rgba(239,68,68,0.05)', padding: '0.5rem', borderRadius: '4px' }}>
                             <AlertCircle size={12} style={{ marginRight: '0.25rem', verticalAlign: 'middle' }} /> {p.rejection_reason}
@@ -380,8 +399,8 @@ const CustomerBookingDetails = () => {
               </div>
               <div>
                 <div style={{ fontSize: '1.05rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{staffName}</div>
-                <div style={{ fontSize: '0.75rem', fontWeight: '700', color: booking.staff_id ? 'var(--admin-brand)' : 'var(--admin-warning)' }}>
-                  {booking.staff_id ? 'Active Lead Technician' : 'Awaiting Admin Assignment'}
+                <div style={{ fontSize: '0.75rem', fontWeight: '700', color: booking.staff_id ? 'var(--admin-brand)' : 'var(--admin-text-secondary)' }}>
+                  {booking.staff_id ? 'Active Lead Technician' : (['cancelled', 'completed', 'FLAGGED_NOSHOW'].includes(booking.status) ? 'No Personnel Linked' : 'Awaiting Admin Assignment')}
                 </div>
               </div>
             </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { Send, Image as ImageIcon, Bot } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 /**
  * BookingChat — Unified real-time chat per booking.
@@ -14,6 +15,7 @@ const BookingChat = ({ bookingId }) => {
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef(null);
+  const chatContainerRef = useRef(null);
   const fileRef = useRef(null);
 
   // --- FETCH MESSAGES ---
@@ -39,42 +41,83 @@ const BookingChat = ({ bookingId }) => {
         table: 'booking_messages',
         filter: `booking_id=eq.${bookingId}`
       }, (payload) => {
-        // Optimistically append new message
-        setMessages(prev => [...prev, payload.new]);
-        // Then fetch full data to get sender profile
+        // Silently replace optimistic messages or append new DB confirmed ones
+        setMessages(prev => {
+          const filtered = prev.filter(m => !(m.status === 'sending' && m.message === payload.new.message));
+          // Only append if it doesn't already exist (in case fetch Messages already got it)
+          if (!filtered.some(m => m.id === payload.new.id)) {
+            return [...filtered, payload.new];
+          }
+          return filtered;
+        });
         fetchMessages();
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          toast.error('Chat connection offline. Please check your internet.', { id: 'chat-offline-toast' });
+        }
+      });
 
     return () => { supabase.removeChannel(channel); };
   }, [bookingId]); // eslint-disable-line
 
-  // Auto-scroll to bottom (Strictly for live updates only)
+  // Smart Auto-scroll (REQ-NFR-30)
   const prevMsgCount = useRef(0);
   useEffect(() => {
-    if (messages.length > prevMsgCount.current) {
-      const isInitialFetch = prevMsgCount.current === 0;
-      prevMsgCount.current = messages.length;
-      if (isInitialFetch) return; // Strictly ignore the first batch of history
+    if (messages.length === 0) return;
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    // Check if user is already near bottom (within 100px)
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+
+    if (isNearBottom || prevMsgCount.current === 0) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (messages.length > prevMsgCount.current) {
+      toast('New message received below', { icon: '⬇️', position: 'bottom-center' });
     }
+    prevMsgCount.current = messages.length;
   }, [messages]);
 
   // --- SEND MESSAGE ---
-  const handleSend = async () => {
-    if (!newMessage.trim() || sending) return;
+  const handleSend = async (retryMessage = null) => {
+    const textToSend = retryMessage?.message || newMessage.trim();
+    if (!textToSend || sending) return;
+    
+    const tempId = retryMessage?.id || `temp-${Date.now()}`;
     setSending(true);
+
+    if (!retryMessage) {
+      // Optimistically append to state
+      const optimisticMsg = {
+        id: tempId,
+        booking_id: bookingId,
+        sender_id: user?.id || profile?.id,
+        message: textToSend,
+        message_type: 'text',
+        created_at: new Date().toISOString(),
+        status: 'sending',
+        sender: profile ? { first_name: profile.first_name, role: profile.role } : null
+      };
+      setMessages(prev => [...prev, optimisticMsg]);
+      setNewMessage('');
+    } else {
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sending' } : m));
+    }
+
     try {
       const { error } = await supabase.from('booking_messages').insert({
         booking_id: bookingId,
-        sender_id: user.id,
-        message: newMessage.trim(),
+        sender_id: user?.id || profile?.id,
+        message: textToSend,
         message_type: 'text'
       });
       if (error) throw error;
-      setNewMessage('');
+      toast.success('Message sent securely', { position: 'bottom-right' });
     } catch (err) {
       console.error('Send error:', err);
+      // Fallback to error state
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
     } finally {
       setSending(false);
     }
@@ -144,7 +187,7 @@ const BookingChat = ({ bookingId }) => {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-md)', overflow: 'hidden' }}>
       
       {/* Message Area */}
-      <div style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div ref={chatContainerRef} style={{ flex: 1, padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         {messages.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: 0.4 }}>
             <Bot size={32} />
@@ -181,13 +224,13 @@ const BookingChat = ({ bookingId }) => {
                   <img 
                     src={msg.message} 
                     alt="attachment" 
-                    style={{ maxWidth: '200px', maxHeight: '200px', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', cursor: 'zoom-in', objectFit: 'cover' }}
+                    style={{ maxWidth: '200px', maxHeight: '200px', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', cursor: 'zoom-in', objectFit: 'cover', opacity: msg.status === 'sending' ? 0.6 : 1 }}
                     onClick={() => window.open(msg.message, '_blank')}
                   />
                 ) : (
                   <div style={{
-                    background: isMe ? 'var(--admin-brand)' : 'var(--admin-card)',
-                    color: isMe ? '#fff' : 'var(--admin-text-primary)',
+                    background: isSystem ? 'rgba(var(--admin-brand-rgb), 0.05)' : (isMe ? 'var(--admin-brand)' : 'var(--admin-card)'),
+                    color: isSystem ? 'var(--admin-text-secondary)' : (isMe ? '#fff' : 'var(--admin-text-primary)'),
                     padding: '0.6rem 1rem',
                     borderRadius: isMe ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
                     maxWidth: '75%',
@@ -195,15 +238,23 @@ const BookingChat = ({ bookingId }) => {
                     fontWeight: '600',
                     lineHeight: 1.5,
                     wordBreak: 'break-word',
-                    border: isMe ? 'none' : '1px solid var(--admin-border)'
+                    border: isMe ? 'none' : '1px solid var(--admin-border)',
+                    opacity: msg.status === 'sending' ? 0.7 : 1
                   }}>
                     {msg.message}
                   </div>
                 )}
 
-                {/* Timestamp */}
-                <div style={{ fontSize: '0.6rem', fontWeight: '700', color: 'var(--admin-text-secondary)', marginTop: '0.1rem' }}>
-                  {timeFormat(msg.created_at)}
+                {/* Status / Timestamp */}
+                <div style={{ fontSize: '0.6rem', fontWeight: '700', color: 'var(--admin-text-secondary)', marginTop: '0.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {msg.status === 'sending' && <span>Sending...</span>}
+                  {msg.status === 'failed' && (
+                    <span style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      Failed 
+                      <button onClick={() => handleSend(msg)} style={{ background: 'none', border: 'none', color: '#ef4444', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: '0.6rem', fontWeight: 'bold' }}>Retry</button>
+                    </span>
+                  )}
+                  {msg.status !== 'sending' && msg.status !== 'failed' && <span>{timeFormat(msg.created_at)}</span>}
                 </div>
               </div>
             );

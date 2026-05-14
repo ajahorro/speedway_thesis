@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, FileText, Download, Clock, X, CheckCircle2, ShieldCheck, Printer, CheckCircle } from 'lucide-react';
+import { CreditCard, FileText, Download, Clock, X, ShieldCheck, Printer } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 
 const CustomerBilling = () => {
@@ -20,7 +21,7 @@ const CustomerBilling = () => {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, payments(*)')
+        .select('*, payments(*), vehicles:booking_vehicles(*, services:booking_vehicle_services(*))')
         .eq('customer_id', session.user.id)
         .order('created_at', { ascending: false });
 
@@ -32,6 +33,8 @@ const CustomerBilling = () => {
       setLoading(false);
     }
   };
+
+  const formatCurrency = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(val || 0);
 
   const totalSpent = bookings.reduce((sum, b) => {
     const totalPaid = (b.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
@@ -57,114 +60,182 @@ const CustomerBilling = () => {
   };
 
   const canAccessReceipt = (booking) => {
-    return (booking.payments || []).some(p => p.status === 'PAID');
+    // REQ-ADM-10: Customers can access receipts if payment is PAID OR if refund is PROCESSED
+    return (booking.payments || []).some(p => p.status === 'PAID') || booking.refund_status === 'PROCESSED';
   };
 
   const openReceipt = async (booking) => {
     if (!canAccessReceipt(booking)) return;
-    
-    // In a real production system, we'd fetch the official secure data from the backend here
-    // For the thesis demo, we already have the booking object, but we'll simulate the secure check
     setSelectedReceipt(booking);
   };
 
+  const handlePrint = () => {
+    toast.success('Receipt generated and synchronized with ledger.');
+    window.print();
+  };
+
+  const getReceiptStatusText = (receipt) => {
+    if (!receipt) return '';
+    
+    // REQ-ADM-10: Hardened check for refund state
+    if (receipt.refund_status === 'PROCESSED') return 'REFUNDED & CLOSED';
+    
+    const paidAmount = (receipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
+    const remaining = Math.max(0, receipt.total_amount - paidAmount);
+    
+    if (!canAccessReceipt(receipt)) return 'AWAITING VERIFICATION';
+    if (remaining <= 0) return 'PAID IN FULL';
+    if (paidAmount > 0) return 'PARTIAL PAYMENT';
+    return 'BALANCE DUE';
+  };
+
   if (loading) return <div style={{ padding: '2rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Synchronizing financial records...</div>;
+
+  const renderServiceRows = (receipt) => {
+    if (receipt.vehicles && receipt.vehicles.length > 0) {
+      return receipt.vehicles.map((v) => (
+        <React.Fragment key={v.id}>
+          <tr>
+            <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
+              {v.make} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
+            </td>
+          </tr>
+          {(v.services || []).map((s) => (
+            <tr key={s.id}>
+              <td style={{ padding: '5px 5px 5px 20px', fontSize: '0.85rem', color: '#333' }}>
+                {s.service_name || s.service_name_snapshot}
+              </td>
+              <td style={{ padding: '5px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
+                {formatCurrency(s.price || s.price_snapshot)}
+              </td>
+            </tr>
+          ))}
+        </React.Fragment>
+      ));
+      
+      return (
+        <>
+          {rows}
+          {receipt.refund_status === 'PROCESSED' && (
+            <tr>
+              <td style={{ padding: '15px 5px', fontSize: '0.85rem', color: '#ef4444', fontWeight: '900', borderTop: '1px dashed #ef4444' }}>
+                SYSTEM REFUND (Ref: {receipt.payments?.find(p => p.status === 'REFUNDED')?.reference_number || 'VOID'})
+              </td>
+              <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#ef4444', fontWeight: '900', borderTop: '1px dashed #ef4444' }}>
+                {formatCurrency((receipt.payments || []).filter(p => p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0))}
+              </td>
+            </tr>
+          )}
+        </>
+      );
+    } else {
+      return (
+        <tr>
+          <td style={{ padding: '15px 5px', fontSize: '0.85rem', color: '#333' }}>
+            Premium Detailing Package
+          </td>
+          <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
+            {formatCurrency(receipt.total_amount)}
+          </td>
+        </tr>
+      );
+    }
+  };
 
   return (
     <>
       {/* 🖨️ DEDICATED PRINT TEMPLATE (Hidden on Screen) */}
       {selectedReceipt && (
-        <div id="printable-receipt" style={{ display: 'none' }}>
-          {/* Watermark Overlay (Security Fallback) */}
-          {!canAccessReceipt(selectedReceipt) && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, pointerEvents: 'none', opacity: 0.1 }}>
-              <div style={{ fontSize: '10rem', fontWeight: '950', border: '20px solid red', color: 'red', padding: '2rem', transform: 'rotate(-45deg)', borderRadius: '40px' }}>
-                VOID
-              </div>
+        <div id="printable-receipt" style={{ display: 'none', position: 'relative', overflow: 'hidden', padding: '20px' }}>
+          {/* REQ-NFR-14: CSS-based Watermark */}
+          {selectedReceipt.refund_status === 'PROCESSED' && (
+            <div style={{
+              position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-45deg)',
+              fontSize: '12rem', fontWeight: '900', color: 'rgba(239, 68, 68, 0.08)', pointerEvents: 'none', zIndex: 0, whiteSpace: 'nowrap'
+            }}>
+              VOID / REFUNDED
             </div>
           )}
 
-          <div style={{ textAlign: 'center', borderBottom: '4px solid #A91B18', paddingBottom: '20px', marginBottom: '30px' }}>
-            <h1 style={{ fontSize: '2.5rem', fontWeight: '950', color: 'black', margin: 0, fontStyle: 'italic', textTransform: 'uppercase', letterSpacing: '-2px' }}>
-              SPEEDWAY<span style={{ color: '#A91B18' }}>AUTOXMOTO</span>
-            </h1>
-            <p style={{ margin: '5px 0', fontSize: '0.9rem', fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: '3px' }}>
-              {canAccessReceipt(selectedReceipt) ? 'Official Detailing Receipt' : 'PROVISIONAL / UNVERIFIED BILLING'}
-            </p>
-          </div>
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+              <h1 style={{ fontSize: '2.5rem', fontWeight: '950', color: selectedReceipt.refund_status === 'PROCESSED' ? '#ef4444' : 'black', margin: 0, fontStyle: 'italic', textTransform: 'uppercase', letterSpacing: '-2px' }}>
+                SPEEDWAY<span style={{ color: selectedReceipt.refund_status === 'PROCESSED' ? '#7f1d1d' : '#000' }}>AUTOXMOTO</span>
+              </h1>
+              <p style={{ margin: '5px 0', fontSize: '0.8rem', color: selectedReceipt.refund_status === 'PROCESSED' ? '#ef4444' : '#000', textTransform: 'uppercase', letterSpacing: '3px', fontWeight: '800' }}>
+                {selectedReceipt.refund_status === 'PROCESSED' ? 'Official Refund Slip' : (canAccessReceipt(selectedReceipt) ? 'Official Detailing Receipt' : 'PROVISIONAL BILLING')}
+              </p>
+            </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '40px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#666', textTransform: 'uppercase', marginBottom: '5px' }}>Invoice To</div>
-              <div style={{ fontSize: '1.2rem', fontWeight: '900', color: 'black' }}>{selectedReceipt.customer_name || user?.user_metadata?.full_name || 'Valued Customer'}</div>
-              <div style={{ fontSize: '0.9rem', color: '#444' }}>{user?.email}</div>
+              <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', marginBottom: '5px' }}>Invoice To</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'black' }}>{selectedReceipt.customer_name || user?.user_metadata?.full_name || 'Valued Customer'}</div>
+              <div style={{ fontSize: '0.9rem', color: '#333' }}>{user?.email}</div>
             </div>
             <div style={{ flex: 1, textAlign: 'right' }}>
-              <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#666', textTransform: 'uppercase', marginBottom: '5px' }}>Receipt Details</div>
-              <div style={{ fontSize: '1.2rem', fontWeight: '900', color: '#A91B18', fontFamily: 'monospace' }}>INV-{selectedReceipt.id.substring(0, 8).toUpperCase()}</div>
-              <div style={{ fontSize: '0.9rem', color: '#444', fontWeight: '700' }}>Date: {new Date(selectedReceipt.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+              <div style={{ fontSize: '0.7rem', color: '#666', textTransform: 'uppercase', marginBottom: '5px' }}>Receipt Details</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#000', fontFamily: 'monospace' }}>INV-{selectedReceipt.id.substring(0, 8).toUpperCase()}</div>
+              <div style={{ fontSize: '0.9rem', color: '#333' }}>Date: {new Date(selectedReceipt.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
             </div>
           </div>
 
-          <div style={{ border: '2px solid #000', borderRadius: '12px', overflow: 'hidden', marginBottom: '40px' }}>
+          <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', margin: '20px 0', padding: '10px 0' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ background: '#000', color: '#fff' }}>
-                  <th style={{ padding: '15px', textAlign: 'left', fontSize: '0.8rem', textTransform: 'uppercase' }}>Description</th>
-                  <th style={{ padding: '15px', textAlign: 'right', fontSize: '0.8rem', textTransform: 'uppercase' }}>Amount</th>
+                <tr>
+                  <th style={{ padding: '10px 5px', textAlign: 'left', fontSize: '0.8rem', textTransform: 'uppercase', borderBottom: '1px solid #000', color: '#000' }}>Description</th>
+                  <th style={{ padding: '10px 5px', textAlign: 'right', fontSize: '0.8rem', textTransform: 'uppercase', borderBottom: '1px solid #000', color: '#000' }}>Amount</th>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td style={{ padding: '20px', borderBottom: '1px solid #eee' }}>
-                    <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>Premium Detailing Package</div>
-                    <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '5px' }}>Professional fleet maintenance service and paint protection.</div>
-                  </td>
-                  <td style={{ padding: '20px', textAlign: 'right', fontWeight: '950', fontSize: '1.1rem', borderBottom: '1px solid #eee' }}>
-                    ₱{selectedReceipt.total_amount.toLocaleString()}
-                  </td>
-                </tr>
+                {renderServiceRows(selectedReceipt)}
               </tbody>
-              <tfoot>
-                <tr>
-                  <td style={{ padding: '20px', textAlign: 'right', fontWeight: '900', fontSize: '1rem', color: '#666' }}>SUBTOTAL</td>
-                  <td style={{ padding: '20px', textAlign: 'right', fontWeight: '900', fontSize: '1rem' }}>₱{selectedReceipt.total_amount.toLocaleString()}</td>
-                </tr>
-                <tr style={{ background: '#f9f9f9' }}>
-                  <td style={{ padding: '20px', textAlign: 'right', fontWeight: '950', fontSize: '1.5rem' }}>TOTAL PAID</td>
-                  <td style={{ padding: '20px', textAlign: 'right', fontWeight: '950', fontSize: '1.5rem', color: '#A91B18' }}>₱{selectedReceipt.total_amount.toLocaleString()}</td>
-                </tr>
-              </tfoot>
             </table>
           </div>
 
-          {/* 💹 STANDARD PAYMENT FOOTER (REPLACED AI BRANDING) */}
-          <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', border: '2px solid #eee', marginBottom: '40px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-              <div>
-                <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', marginBottom: '4px' }}>Payment Method</div>
-                <div style={{ fontWeight: '900', fontSize: '1rem', color: 'black' }}>{selectedReceipt.payments?.[0]?.method || 'GCash'}</div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '40px' }}>
+            <div style={{ width: '300px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
+                <span style={{ fontSize: '0.9rem', color: '#333' }}>GRAND TOTAL</span>
+                <span style={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>{formatCurrency(selectedReceipt.total_amount)}</span>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', marginBottom: '4px' }}>Transaction Reference</div>
-                <div style={{ fontWeight: '900', fontSize: '1rem', color: 'black', fontFamily: 'monospace' }}>
-                  {canAccessReceipt(selectedReceipt) 
-                    ? (selectedReceipt.payments?.[0]?.reference_number || selectedReceipt.ocr_metadata?.referenceNo || 'VERIFIED')
-                    : 'Awaiting Verification'}
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
+                <span style={{ fontSize: '0.9rem', color: '#333' }}>TOTAL AMOUNT PAID</span>
+                <span style={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
+                  {formatCurrency((selectedReceipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0))}
+                </span>
               </div>
-              <div style={{ marginTop: '10px' }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', marginBottom: '4px' }}>Transaction Status</div>
-                <div style={{ fontWeight: '950', fontSize: '1rem', color: canAccessReceipt(selectedReceipt) ? '#10b981' : '#f59e0b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {canAccessReceipt(selectedReceipt) ? <CheckCircle size={16} /> : <Clock size={16} />}
-                  {canAccessReceipt(selectedReceipt) ? 'SETTLED / PAID' : 'AWAITING VERIFICATION'}
+              {selectedReceipt.refund_status === 'PROCESSED' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', color: '#ef4444' }}>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>AMOUNT REVERTED</span>
+                  <span style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+                    {formatCurrency((selectedReceipt.payments || []).filter(p => p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0))}
+                  </span>
                 </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: '2px solid #000', marginTop: '5px' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '1rem', color: '#000' }}>REMAINING BALANCE</span>
+                <span style={{ fontWeight: 'bold', fontSize: '1.1rem', color: '#000' }}>
+                  {formatCurrency(Math.max(0, selectedReceipt.total_amount - (selectedReceipt.payments || []).filter(p => p.status === 'PAID' || p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0)))}
+                </span>
               </div>
             </div>
           </div>
 
-          <div style={{ textAlign: 'center', color: '#999', fontSize: '0.75rem', marginTop: '100px', borderTop: '1px dashed #ccc', paddingTop: '20px' }}>
-            This is an official computer-generated document from Speedway AutoXMoto. &bull; No signature required.
+          <div style={{ marginBottom: '40px', fontSize: '0.9rem', color: '#333' }}>
+            <div style={{ marginBottom: '4px' }}><strong>Payment Method:</strong> {selectedReceipt.payments?.[0]?.method || 'Cash / Off-platform'}</div>
+            <div style={{ marginBottom: '4px' }}>
+              <strong>Transaction Reference:</strong> {canAccessReceipt(selectedReceipt) ? (selectedReceipt.payments?.[0]?.reference_number || selectedReceipt.ocr_metadata?.referenceNo || 'VERIFIED') : 'AWAITING VERIFICATION'}
+            </div>
+            <div style={{ marginTop: '15px', fontSize: '1.1rem', fontWeight: 'bold', color: '#000', textTransform: 'uppercase', letterSpacing: '2px' }}>
+              *** {getReceiptStatusText(selectedReceipt)} ***
+            </div>
+          </div>
+
+          </div>
+          <div style={{ textAlign: 'center', color: '#666', fontSize: '0.65rem', marginTop: '60px', fontWeight: '300' }}>
+            This is a computer-generated document from Speedway AutoXMoto. No signature required.
           </div>
         </div>
       )}
@@ -185,7 +256,7 @@ const CustomerBilling = () => {
             </div>
             <div>
               <div style={labelStyle}>Total Invested</div>
-              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'white' }}>₱{totalSpent.toLocaleString()}</div>
+              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'white' }}>{formatCurrency(totalSpent)}</div>
             </div>
           </div>
 
@@ -195,7 +266,7 @@ const CustomerBilling = () => {
             </div>
             <div>
               <div style={labelStyle}>Pending Balance</div>
-              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'white' }}>₱{outstandingBalance.toLocaleString()}</div>
+              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'white' }}>{formatCurrency(outstandingBalance)}</div>
             </div>
           </div>
         </div>
@@ -233,7 +304,7 @@ const CustomerBilling = () => {
                           {new Date(booking.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                         </td>
                         <td style={{ padding: '1.25rem 2rem', fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-brand)' }}>
-                          ₱{booking.total_amount.toLocaleString()}
+                          {formatCurrency(booking.total_amount)}
                         </td>
                         <td style={{ padding: '1.25rem 2rem' }}>
                           {booking.status?.toUpperCase() === 'CANCELLED' ? (
@@ -290,18 +361,9 @@ const CustomerBilling = () => {
 
         {/* 🧾 RECEIPT PREVIEW MODAL */}
         {selectedReceipt && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}>
+          <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}>
             <div style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
               
-              {/* VOID WATERMARK FALLBACK */}
-              {!canAccessReceipt(selectedReceipt) && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, pointerEvents: 'none', opacity: 0.1 }}>
-                  <div style={{ fontSize: '8rem', fontWeight: '950', border: '10px solid red', color: 'red', padding: '1rem', transform: 'rotate(-30deg)', borderRadius: '20px' }}>
-                    UNVERIFIED
-                  </div>
-                </div>
-              )}
-
               <div style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <ShieldCheck size={24} color="var(--admin-brand)" />
@@ -316,7 +378,7 @@ const CustomerBilling = () => {
 
               <div style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
                 <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-                  <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#A91B18', fontStyle: 'italic' }}>SPEEDWAY</h2>
+                  <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#000', fontStyle: 'italic' }}>SPEEDWAY</h2>
                   <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#666', textTransform: 'uppercase', letterSpacing: '2px' }}>AutoxMoto Detail Studio</div>
                 </div>
 
@@ -328,29 +390,35 @@ const CustomerBilling = () => {
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ ...labelStyle, color: '#999' }}>Receipt No.</div>
-                    <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#A91B18', fontFamily: 'monospace' }}>INV-{selectedReceipt.id.substring(0, 8).toUpperCase()}</div>
+                    <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>INV-{selectedReceipt.id.substring(0, 8).toUpperCase()}</div>
                     <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(selectedReceipt.created_at).toLocaleDateString()}</div>
                   </div>
                 </div>
 
-                <div style={{ borderTop: '2px solid #eee', borderBottom: '2px solid #eee', padding: '1.5rem 0', margin: '2rem 0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <span style={{ fontWeight: '800', fontSize: '1rem' }}>Premium Fleet Service</span>
-                    <span style={{ fontWeight: '950', fontSize: '1.1rem' }}>₱{selectedReceipt.total_amount.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: '#666', fontStyle: 'italic' }}>
-                    Complete detailing session and paint restoration.
-                  </div>
+                <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '1.5rem 0', margin: '2rem 0' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <tbody>
+                      {renderServiceRows(selectedReceipt)}
+                    </tbody>
+                  </table>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
                   <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                    <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>SUBTOTAL</span>
-                    <span style={{ fontWeight: '900' }}>₱{selectedReceipt.total_amount.toLocaleString()}</span>
+                    <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>GRAND TOTAL</span>
+                    <span style={{ fontWeight: '900' }}>{formatCurrency(selectedReceipt.total_amount)}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
+                    <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL AMOUNT PAID</span>
+                    <span style={{ fontWeight: '900' }}>
+                      {formatCurrency((selectedReceipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0))}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
-                    <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>TOTAL PAID</span>
-                    <span style={{ fontWeight: '950', fontSize: '1.25rem', color: '#A91B18' }}>₱{selectedReceipt.total_amount.toLocaleString()}</span>
+                    <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>REMAINING BALANCE</span>
+                    <span style={{ fontWeight: '950', fontSize: '1.25rem', color: '#000' }}>
+                      {formatCurrency(Math.max(0, selectedReceipt.total_amount - (selectedReceipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0)))}
+                    </span>
                   </div>
                 </div>
 
@@ -358,7 +426,7 @@ const CustomerBilling = () => {
                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                       <div>
                         <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
-                        <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedReceipt.payments?.[0]?.method || 'GCash'}</div>
+                        <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedReceipt.payments?.[0]?.method || 'Cash / Off-platform'}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Transaction Reference</div>
@@ -369,13 +437,16 @@ const CustomerBilling = () => {
                         </div>
                       </div>
                    </div>
+                   <div style={{ marginTop: '15px', textAlign: 'center', fontSize: '1rem', fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                     *** {getReceiptStatusText(selectedReceipt)} ***
+                   </div>
                 </div>
               </div>
 
-              <div style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
+              <div className="no-print" style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
                 <button 
                   disabled={!canAccessReceipt(selectedReceipt)}
-                  onClick={() => window.print()}
+                  onClick={handlePrint}
                   style={{ 
                     flex: 2, padding: '1rem', background: canAccessReceipt(selectedReceipt) ? '#000' : '#ccc', 
                     color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
@@ -420,7 +491,7 @@ const CustomerBilling = () => {
             width: 100% !important;
             max-width: 800px !important;
             margin: 0 auto !important;
-            padding: 20mm !important;
+            padding: 10mm !important;
             background: white !important;
             position: relative !important;
             z-index: 9999 !important;

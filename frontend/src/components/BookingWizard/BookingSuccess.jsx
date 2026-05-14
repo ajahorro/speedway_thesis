@@ -5,10 +5,14 @@ import { useNavigate } from 'react-router-dom';
 const BookingSuccess = ({ bookingData }) => {
   const navigate = useNavigate();
   
-  // Calculate total amount from services if not explicitly in bookingData
-  const totalAmount = bookingData.payment?.amount || (bookingData.vehicles || []).reduce((sum, v) => 
+  const grandTotal = (bookingData.vehicles || []).reduce((sum, v) => 
     sum + (v.services || []).reduce((sSum, s) => sSum + (s.price || 0), 0)
-  , 0);
+  , 0) || bookingData.totalAmount || 0;
+
+  const totalPaid = bookingData.payment?.method === 'Cash' ? 0 : 
+    (bookingData.payment?.type === 'Downpayment' ? Math.ceil(grandTotal * 0.3) : grandTotal);
+    
+  const remainingBalance = Math.max(0, grandTotal - totalPaid);
 
   const isConfirmed = false; // Always provisional on the immediate success screen
 
@@ -125,12 +129,20 @@ const BookingSuccess = ({ bookingData }) => {
 
           {/* Totals */}
           <div style={{ borderTop: '2px solid #000', paddingTop: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: '950', fontSize: '1.1rem', textTransform: 'uppercase' }}>Total Amount</span>
-              <span className="receipt-total" style={{ fontWeight: '950', fontSize: '1.1rem', color: '#A91B18' }}>₱{totalAmount.toLocaleString()}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+              <span style={{ fontWeight: '800', fontSize: '0.9rem', textTransform: 'uppercase', color: '#666' }}>Grand Total</span>
+              <span style={{ fontWeight: '900', fontSize: '0.9rem' }}>₱{grandTotal.toLocaleString()}</span>
             </div>
-            <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.25rem', textAlign: 'right', fontWeight: '700' }}>
-              Payment Method: {bookingData.payment.method} ({bookingData.payment.type})
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <span style={{ fontWeight: '800', fontSize: '0.9rem', textTransform: 'uppercase', color: '#666' }}>Total Amount Paid</span>
+              <span style={{ fontWeight: '900', fontSize: '0.9rem' }}>₱{totalPaid.toLocaleString()}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
+              <span style={{ fontWeight: '950', fontSize: '1.1rem', textTransform: 'uppercase' }}>Remaining Balance</span>
+              <span className="receipt-total" style={{ fontWeight: '950', fontSize: '1.1rem', color: '#A91B18' }}>₱{remainingBalance.toLocaleString()}</span>
+            </div>
+            <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.5rem', textAlign: 'right', fontWeight: '700' }}>
+              Payment Method: {bookingData.payment.method} {bookingData.payment.type ? `(${bookingData.payment.type})` : ''}
             </div>
           </div>
 

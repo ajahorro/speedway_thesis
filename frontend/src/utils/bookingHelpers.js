@@ -105,3 +105,16 @@ export const getVehicleQueueBreakdown = (vehicles = []) => {
     pending: vehicles.filter(v => !v.status || v.status === 'pending'),
   };
 };
+
+// ─── FINANCIAL FILTERS ──────────────────────────────────────────
+/**
+ * REQ-ADM-05: Strict filter to exclude refund records from 
+ * the primary payment verification pipeline.
+ */
+export const getAuditCompliantTransactions = (payments = []) => {
+  return payments.filter(p => 
+    p.transaction_type !== 'REFUND' && 
+    p.status !== 'REFUND_PENDING' &&
+    p.status !== 'REFUNDED'
+  );
+};

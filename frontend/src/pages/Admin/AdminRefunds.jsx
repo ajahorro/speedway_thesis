@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import {
   AlertTriangle, CreditCard, ArrowRight, Clock,
   CheckCircle, XCircle, Search, Filter, MessageCircle,
-  Car, Calendar, User, Eye, Download, Box, ExternalLink
+  Car, Calendar, User, Eye, Download, Box, ExternalLink, ShieldCheck
 } from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
@@ -24,7 +24,8 @@ const AdminRefunds = () => {
     filter: 'PENDING',
     selectedItem: null,
     confirmRefundItem: null,
-    refundReason: ''
+    refundReason: '',
+    refundAmount: 0
   });
 
   const fetchRefundData = useCallback(async () => {
@@ -40,14 +41,14 @@ const AdminRefunds = () => {
           vehicles:booking_vehicles(*),
           payments:payments(*)
         `)
-        .eq('status', 'cancelled')
+        .in('status', ['cancelled', 'FLAGGED_NOSHOW'])
         .order('updated_at', { ascending: false });
 
       if (error) throw error;
 
       const processed = (data || []).map(b => {
         const totalPaid = (b.payments || [])
-          .filter(p => p.status === 'PAID')
+          .filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING' || p.status === 'REFUNDED')
           .reduce((sum, p) => sum + Number(p.amount), 0);
         
         return {
@@ -86,51 +87,92 @@ const AdminRefunds = () => {
 
   const handleProcessRefund = async (item) => {
     const toastId = toast.loading('Synchronizing financial reversal...');
+    
+    // OPTIMISTIC UI: Update local state immediately
+    const previousRefundItems = [...state.refundItems];
+    const updatedItems = state.refundItems.map(b => 
+      b.id === item.id ? { ...b, refundStatus: 'PROCESSED' } : b
+    );
+    setState(prev => ({ ...prev, refundItems: updatedItems, selectedItem: { ...prev.selectedItem, refundStatus: 'PROCESSED' } }));
+
     try {
-      // 1. Update Booking Status
+      const refundRef = `RFD-${Date.now().toString().slice(-6)}-${item.id.substring(0,4).toUpperCase()}`;
+
+      // 1. Update Booking Status (REQ-NFR-20)
       const { error: bError } = await supabase
         .from('bookings')
         .update({ 
           refund_status: 'PROCESSED',
-          refund_notes: state.refundReason 
+          refund_notes: state.refundReason,
+          status: 'cancelled' 
         })
         .eq('id', item.id);
 
-      if (bError) throw bError;
+      if (bError) throw new Error(`Booking update failed: ${bError.message}`);
 
-      // 2. Update Related Payments (Transactional Transparency)
-      const { error: pError } = await supabase
+      // 2. CRITICAL: Update Original Payments to PAID to resolve 'REFUND_PENDING' ghosting
+      // We must ensure this executes successfully to clear the "Refund Pending" badge in customer UI
+      const { data: pUpdateData, error: pUpdateError } = await supabase
         .from('payments')
-        .update({
-          status: 'REFUNDED',
-          refund_reason: state.refundReason,
-          refunded_at: new Date().toISOString()
+        .update({ 
+          status: 'PAID',
+          notes: `REFUND_PROCESSED_ON_${new Date().toLocaleDateString()}` 
         })
         .eq('booking_id', item.id)
-        .eq('status', 'PAID');
+        .eq('status', 'REFUND_PENDING');
 
-      if (pError) throw pError;
+      if (pUpdateError) throw new Error(`Payment status update failed: ${pUpdateError.message}`);
 
-      // 3. MASTER AUDIT LOG (REQ-NFR-15)
+      // 3. Insert Negative Line Item for Partial/Full Refund (REQ-ADM-10)
+      const { error: pInsertError } = await supabase
+        .from('payments')
+        .insert({
+          booking_id: item.id,
+          amount: -Math.abs(state.refundAmount),
+          status: 'REFUNDED', 
+          method: 'SYSTEM_REFUND',
+          reference_number: refundRef,
+          refund_reason: state.refundReason,
+          notes: `REFUND_PROCESSED: ${state.refundReason}`, 
+          refunded_at: new Date().toISOString()
+        });
+
+      if (pInsertError) throw new Error(`Refund ledger insertion failed: ${pInsertError.message}`);
+
+
+      // 4. MASTER AUDIT LOG (REQ-NFR-15)
       const { data: { user } } = await supabase.auth.getUser();
       await supabase.from('audit_logs').insert({
         booking_id: item.id,
         action_type: 'ADMIN_PROCESSED_REFUND',
-        details: `Administrator processed refund of ₱${item.totalPaid.toLocaleString()}. Reason: ${state.refundReason}`,
-        actor_name: 'Administrator', // Simplified, could pull from profile
+        details: `Administrator processed refund of ₱${state.refundAmount.toLocaleString()}. Ref: ${refundRef}. Reason: ${state.refundReason}`,
+        actor_name: 'Administrator',
         actor_role: 'ADMIN',
         actor_id: user?.id,
-        metadata: { amount: item.totalPaid, reason: state.refundReason }
+        metadata: { amount: state.refundAmount, reason: state.refundReason, refund_reference_id: refundRef }
       });
 
-      toast.success('Refund Lifecycle Finalized', { id: toastId });
-      fetchRefundData();
-      setState(prev => ({ ...prev, selectedItem: null, confirmRefundItem: null, refundReason: '' }));
+      // 5. System Chat Injection (REQ-NFR-20)
+      await supabase.from('booking_messages').insert({
+        booking_id: item.id,
+        sender_id: null, 
+        message: `[SYSTEM] Refund Processed. Amount: ₱${state.refundAmount.toLocaleString()}. Reason: ${state.refundReason}`,
+        message_type: 'system'
+      });
+
+      // 6. Final State Synchronization
+      toast.success('Financial record has been updated. Notification queued.', { id: toastId });
+      await fetchRefundData();
+      setState(prev => ({ ...prev, selectedItem: null, confirmRefundItem: null, refundReason: '', refundAmount: 0 }));
     } catch (err) {
       logger.error('Refund Process Error', err);
-      toast.error('Failed to synchronize refund records', { id: toastId });
+      toast.error(err.message || 'Failed to synchronize refund records', { id: toastId });
+      // ROLLBACK Optimistic UI on error
+      setState(prev => ({ ...prev, refundItems: previousRefundItems }));
     }
   };
+
+
 
   const cardStyle = { background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius)', overflow: 'hidden', boxShadow: 'var(--admin-card-shadow)', color: 'var(--admin-text-primary)' };
 
@@ -192,7 +234,7 @@ const AdminRefunds = () => {
           ) : filteredItems.map(b => (
             <div 
               key={b.id} 
-              onClick={() => setState(prev => ({ ...prev, selectedItem: b }))} 
+              onClick={() => setState(prev => ({ ...prev, selectedItem: b, refundAmount: b.totalPaid }))} 
               style={{ 
                 ...cardStyle, 
                 padding: isMobile ? '1rem' : '1.25rem', 
@@ -236,11 +278,27 @@ const AdminRefunds = () => {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Reason for Refund</label>
-                <textarea 
-                  placeholder="e.g. Technical issue / Double payment..."
+                <select 
                   value={state.refundReason}
                   onChange={(e) => setState(prev => ({ ...prev, refundReason: e.target.value }))}
-                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', minHeight: '80px', resize: 'none', fontSize: '0.8rem', fontWeight: '700' }}
+                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', fontSize: '0.8rem', fontWeight: '700', marginBottom: '1rem', appearance: 'none' }}
+                >
+                  <option value="" disabled>Select Reason</option>
+                  <option value="No-Show">No-Show</option>
+                  <option value="Schedule Conflict">Schedule Conflict</option>
+                  <option value="Customer Request">Customer Request</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Refund Amount (₱) - Supports Partial Fleet Refunds</label>
+                <input 
+                  type="number"
+                  max={state.selectedItem.totalPaid}
+                  min={0}
+                  value={state.refundAmount}
+                  onChange={(e) => setState(prev => ({ ...prev, refundAmount: Number(e.target.value) }))}
+                  style={{ width: '100%', padding: '0.75rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', fontSize: '1rem', fontWeight: '950' }}
                 />
               </div>
 
@@ -281,9 +339,9 @@ const AdminRefunds = () => {
 
                 {state.selectedItem.refundStatus === 'PENDING' && (
                   <button 
-                    disabled={!state.refundReason}
+                    disabled={!state.refundReason || state.refundAmount <= 0}
                     onClick={() => setState(prev => ({ ...prev, confirmRefundItem: state.selectedItem }))} 
-                    style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', opacity: !state.refundReason ? 0.5 : 1 }}
+                    style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', opacity: (!state.refundReason || state.refundAmount <= 0) ? 0.5 : 1 }}
                   >
                     MARK AS REFUNDED
                   </button>
@@ -302,12 +360,12 @@ const AdminRefunds = () => {
       {state.confirmRefundItem && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(8px)' }}>
           <div style={{ background: 'var(--admin-card)', padding: '2.5rem', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
-            <CheckCircle size={48} color="#10b981" style={{ marginBottom: '1.5rem' }} />
+            <AlertTriangle size={48} color="#ef4444" style={{ marginBottom: '1.5rem' }} />
             <h2 style={{ fontWeight: '950', fontSize: '1.25rem' }}>Confirm Refund?</h2>
-            <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem', marginBottom: '2rem' }}>Ensure you have sent ₱{state.confirmRefundItem.totalPaid.toLocaleString()} back to the customer before confirming.</p>
+            <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem', marginBottom: '2rem' }}>Are you sure you want to revert ₱{state.refundAmount.toLocaleString()} back to the customer?</p>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <button onClick={() => setState(prev => ({ ...prev, confirmRefundItem: null }))} style={{ flex: 1, padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '800' }}>CANCEL</button>
-              <button onClick={() => handleProcessRefund(state.confirmRefundItem)} style={{ flex: 1, padding: '1rem', background: '#10b981', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900' }}>YES, REFUNDED</button>
+              <button onClick={() => handleProcessRefund(state.confirmRefundItem)} style={{ flex: 1, padding: '1rem', background: '#ef4444', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900' }}>YES, REVERT ₱{state.refundAmount.toLocaleString()}</button>
             </div>
           </div>
         </div>
