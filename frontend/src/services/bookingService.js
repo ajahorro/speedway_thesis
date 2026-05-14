@@ -160,7 +160,8 @@ export const fetchCustomerBookings = async (customerId) => {
     .select(`
       *,
       vehicles:booking_vehicles(*, services:booking_vehicle_services!booking_vehicle_id(*)),
-      payments:payments(*)
+      payments:payments(*),
+      assigned_staff:profiles!bookings_staff_id_fkey(first_name, last_name, email)
     `)
     .eq('customer_id', customerId)
     .order('created_at', { ascending: false });

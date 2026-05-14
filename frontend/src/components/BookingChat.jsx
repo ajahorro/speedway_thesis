@@ -54,7 +54,7 @@ const BookingChat = ({ bookingId }) => {
       })
       .subscribe((status) => {
         if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          toast.error('Chat connection offline. Please check your internet.', { id: 'chat-offline-toast' });
+          console.warn('Chat connection temporarily offline. Reconnecting...');
         }
       });
 
@@ -72,7 +72,7 @@ const BookingChat = ({ bookingId }) => {
     const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
 
     if (isNearBottom || prevMsgCount.current === 0) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      container.scrollTo({ top: container.scrollHeight, behavior: prevMsgCount.current === 0 ? 'auto' : 'smooth' });
     } else if (messages.length > prevMsgCount.current) {
       toast('New message received below', { icon: '⬇️', position: 'bottom-center' });
     }

@@ -144,3 +144,11 @@ img, video {
   animation: pulse 2s infinite ease-in-out;
 }
 
+@media (max-width: 768px) {
+  .stack-on-mobile {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 1.5rem !important;
+  }
+}
+

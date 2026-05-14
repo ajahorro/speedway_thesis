@@ -65,6 +65,36 @@ export const subscribeToNotifications = (userId, callback) => {
     .subscribe();
 };
 
+export const sendBookingConfirmationEmail = async (bookingId) => {
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/emails/booking-confirmation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId })
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('[NotificationService] Booking Email Error:', error);
+    return { error: error.message };
+  }
+};
+
+export const sendPaymentReceiptEmail = async (bookingId, paymentId) => {
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/emails/payment-receipt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId, paymentId })
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('[NotificationService] Payment Email Error:', error);
+    return { error: error.message };
+  }
+};
+
 /**
  * REQ-SYS-02: Automated Status Notification Trigger
  * Calls the Supabase Edge Function to dispatch professional emails.

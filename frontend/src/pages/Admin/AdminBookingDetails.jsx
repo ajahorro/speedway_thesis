@@ -21,7 +21,7 @@ import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { logger } from '../../utils/logger';
 
-import { sendStatusEmail } from '../../services/notificationService';
+import { sendStatusEmail, sendBookingConfirmationEmail, sendPaymentReceiptEmail } from '../../services/notificationService';
 
 const AdminBookingDetails = () => {
   const { id } = useParams();
@@ -42,6 +42,7 @@ const AdminBookingDetails = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isUpdatingDuration, setIsUpdatingDuration] = useState(false);
   const [receiptModal, setReceiptModal] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
   const isMobile = useMediaQuery('(max-width: 1024px)');
 
   useEffect(() => {
@@ -147,7 +148,6 @@ const AdminBookingDetails = () => {
       toast.error('Data pipeline error. Check console.'); 
     } finally { 
       setLoading(false); 
-      window.scrollTo(0, 0);
     }
   };
 
@@ -323,7 +323,11 @@ const AdminBookingDetails = () => {
       await notifyUser(booking.customer_id, 'Booking Status Update ℹ️', `Your session has been marked as ${status.toUpperCase()}.`, 'STATUS_UPDATE', `/my-bookings/${id}`);
       
       // DISPATCH PROFESSIONAL EMAIL VIA RESEND (REQ-SYS-02)
-      await sendStatusEmail(id, status);
+      if (status === 'confirmed') {
+        await sendBookingConfirmationEmail(id);
+      } else {
+        await sendStatusEmail(id, status);
+      }
       
       toast.success(`Booking ${status.toUpperCase()}`, { id: toastId });
       fetchBookingDetails();
@@ -489,8 +493,8 @@ const AdminBookingDetails = () => {
     const v = vehicles.find(item => item.id === vehicleId);
     const toastId = toast.loading(`Updating ${v?.brand || 'unit'} status...`);
     
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
     try {
-      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
       const response = await fetch(`${BACKEND_URL}/api/bookings/update-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -504,15 +508,43 @@ const AdminBookingDetails = () => {
         })
       });
 
-      const result = await response.json();
-      if (!result.success) throw new Error(result.error);
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          toast.success(`Unit marked as ${status.toUpperCase()}`, { id: toastId });
+          fetchBookingDetails();
+          fetchAuditLogs();
+          return;
+        }
+      }
+    } catch (backendErr) {
+      console.warn('Backend Propagator offline, using Frontend Fallback:', backendErr.message);
+    }
 
-      toast.success(`Unit marked as ${status.toUpperCase()}`, { id: toastId });
+    // 🔄 FRONTEND FALLBACK
+    try {
+      const { error: vError } = await supabase
+        .from('booking_vehicles')
+        .update({ 
+          status: status.toUpperCase(),
+          started_at: status.toUpperCase() === 'IN_PROGRESS' ? new Date().toISOString() : undefined,
+          completed_at: status.toUpperCase() === 'COMPLETED' ? new Date().toISOString() : undefined
+        })
+        .eq('id', vehicleId);
+
+      if (vError) throw vError;
+
+      // 📧 FALLBACK NOTIFICATIONS
+      if (status === 'IN_PROGRESS' || status === 'COMPLETED') {
+        await sendStatusEmail(id, status.toLowerCase());
+      }
+
+      toast.success(`Unit marked as ${status.toUpperCase()} (Syncing...)`, { id: toastId });
       fetchBookingDetails();
       fetchAuditLogs();
-    } catch (err) { 
+    } catch (err) {
       console.error(err);
-      toast.error(err.message || 'Vehicle update failed', { id: toastId }); 
+      toast.error('Vehicle update failed', { id: toastId });
     }
   };
 
@@ -611,9 +643,20 @@ const AdminBookingDetails = () => {
 
   const pendingVerification = bookingPayments.find(p => p.status === 'FOR_VERIFICATION');
   const totalPaid = bookingPayments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
-  const balance = Math.max(0, (booking.total_amount || 0) - totalPaid);
+  const balance = Math.max(0, (booking?.total_amount || 0) - totalPaid);
+  
+  // 🚀 DERIVED STATUS & LOCK LOGIC
+  const vehicleStatuses = (vehicles || []).map(v => v.status?.toUpperCase());
+  const anyUnitStarted = vehicleStatuses.includes('IN_PROGRESS');
+  const allUnitsFinished = vehicleStatuses.length > 0 && vehicleStatuses.every(s => s === 'COMPLETED' || s === 'CANCELLED');
+  const isFullySettled = (booking?.total_amount || 0) > 0 && balance === 0;
+
+  let derivedStatus = (booking?.status || 'scheduled').toLowerCase();
+  if (anyUnitStarted && derivedStatus === 'scheduled') derivedStatus = 'in_progress';
+  if (allUnitsFinished && isFullySettled && derivedStatus !== 'cancelled') derivedStatus = 'completed';
+
+  const isLocked = ['completed', 'cancelled', 'flagged_noshow'].includes(derivedStatus);
   const surplus = Math.max(0, totalPaid - (booking.total_amount || 0));
-  const isLocked = ['CANCELLED', 'COMPLETED'].includes(booking.status?.toUpperCase());
 
   return (
     <div style={{ 
@@ -693,6 +736,7 @@ const AdminBookingDetails = () => {
                     <th style={{ padding: '1rem 0.75rem', textAlign: 'left', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>METHOD</th>
                     <th style={{ padding: '1rem 0.75rem', textAlign: 'left', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>STATUS</th>
                     <th style={{ padding: '1rem 0.75rem', textAlign: 'right', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>AMOUNT</th>
+                    <th style={{ padding: '1rem 0.75rem', textAlign: 'center', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>RECEIPT</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -716,10 +760,27 @@ const AdminBookingDetails = () => {
                         </span>
                       </td>
                       <td style={{ padding: '1.25rem 0.75rem', verticalAlign: 'middle', textAlign: 'right', fontWeight: '950' }}>₱{p.amount?.toLocaleString()}</td>
+                      <td style={{ padding: '1.25rem 0.75rem', verticalAlign: 'middle', textAlign: 'center' }}>
+                        {p.status === 'PAID' && (
+                          <button 
+                            onClick={() => { setSelectedPayment(p); setReceiptModal(true); }}
+                            style={{ 
+                              background: 'transparent', border: 'none', color: 'var(--admin-brand)', 
+                              cursor: 'pointer', transition: 'all 0.2s ease', padding: '0.5rem',
+                              borderRadius: '4px'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            title="Generate Transaction Receipt"
+                          >
+                            <Printer size={16} />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {bookingPayments.length === 0 && (
-                    <tr><td colSpan="5" style={{ padding: '3rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>NO TRANSACTIONS RECORDED</td></tr>
+                    <tr><td colSpan="6" style={{ padding: '3rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontWeight: '800' }}>NO TRANSACTIONS RECORDED</td></tr>
                   )}
                 </tbody>
               </table>
@@ -745,8 +806,10 @@ const AdminBookingDetails = () => {
               marginBottom: '1rem'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                {isLocked ? (
-                  <><ShieldAlert size={16} /> BOOKING CANCELLED</>
+                {derivedStatus === 'cancelled' ? (
+                  <><ShieldAlert size={16} /> BOOKING CANCELLED & VOIDED</>
+                ) : derivedStatus === 'completed' ? (
+                  <><ShieldCheck size={16} /> SERVICE FINISHED & CLOSED</>
                 ) : surplus > 0 ? (
                   <><TrendingUp size={16} /> ACCOUNT OVERPAID • SURPLUS: {formatCurrency(surplus)}</>
                 ) : (
@@ -836,27 +899,49 @@ const AdminBookingDetails = () => {
                             <button 
                               onClick={() => {
                                 const currentStatus = v.status?.toUpperCase();
-                                if (currentStatus === 'IN_PROGRESS') {
-                                  updateVehicleStatus(v.id, 'COMPLETED');
-                                } else if (currentStatus === 'COMPLETED') {
-                                  updateVehicleStatus(v.id, 'IN_PROGRESS'); // Toggle back if needed
-                                } else {
+                                if (currentStatus === 'SCHEDULED' || !currentStatus) {
                                   updateVehicleStatus(v.id, 'IN_PROGRESS');
+                                } else if (currentStatus === 'IN_PROGRESS') {
+                                  toast((t) => (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                      <div style={{ fontSize: '0.8rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>
+                                        FINALIZE {v.brand.toUpperCase()} {v.model.toUpperCase()}?
+                                      </div>
+                                      <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>
+                                        This will notify the customer and lock the service state.
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <button 
+                                          onClick={() => {
+                                            updateVehicleStatus(v.id, 'COMPLETED');
+                                            toast.dismiss(t.id);
+                                          }}
+                                          style={{ padding: '0.5rem 1rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.65rem', cursor: 'pointer' }}
+                                        >
+                                          YES, FINISH
+                                        </button>
+                                        <button 
+                                          onClick={() => toast.dismiss(t.id)}
+                                          style={{ padding: '0.5rem 1rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid var(--admin-border)', borderRadius: '4px', fontWeight: '950', fontSize: '0.65rem', cursor: 'pointer' }}
+                                        >
+                                          CANCEL
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ), { duration: 5000, position: 'top-center' });
                                 }
                               }}
-                              disabled={isLocked}
+                              disabled={isLocked || v.status?.toUpperCase() === 'COMPLETED'}
                               style={{ 
-                                background: v.status?.toUpperCase() === 'COMPLETED' ? '#10b981' : (v.status?.toUpperCase() === 'IN_PROGRESS' ? '#a855f7' : 'var(--admin-brand)'), 
-                                border: 'none',
-                                padding: '0.45rem 1rem', borderRadius: '4px', color: 'white', 
-                                cursor: isLocked ? 'not-allowed' : 'pointer', fontSize: '0.65rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem',
-                                boxShadow: '0 4px 10px rgba(0,0,0,0.3)', transition: 'all 0.2s ease',
+                                background: v.status?.toUpperCase() === 'COMPLETED' ? 'rgba(255, 255, 255, 0.05)' : (v.status?.toUpperCase() === 'IN_PROGRESS' ? '#10b981' : 'var(--admin-brand)'), 
+                                border: v.status?.toUpperCase() === 'COMPLETED' ? '1px solid var(--admin-border)' : 'none',
+                                padding: '0.45rem 1rem', borderRadius: '4px', color: v.status?.toUpperCase() === 'COMPLETED' ? 'var(--admin-text-secondary)' : 'white', 
+                                cursor: (isLocked || v.status?.toUpperCase() === 'COMPLETED') ? 'not-allowed' : 'pointer', fontSize: '0.65rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                boxShadow: v.status?.toUpperCase() === 'COMPLETED' ? 'none' : '0 4px 10px rgba(0,0,0,0.3)', transition: 'all 0.2s ease',
                                 opacity: isLocked ? 0.5 : 1
                               }}
-                              onMouseEnter={(e) => { if (!isLocked) e.currentTarget.style.transform = 'scale(1.05)'; }}
-                              onMouseLeave={(e) => { if (!isLocked) e.currentTarget.style.transform = 'scale(1)'; }}
                             >
-                              {v.status?.toUpperCase() === 'COMPLETED' ? <><CheckCircle2 size={12} /> READY</> : <>{v.status?.toUpperCase() === 'IN_PROGRESS' ? <><Loader2 size={12} className="animate-spin" /> FINISH</> : <><Play size={12} /> START SERVICE</>}</>}
+                              {v.status?.toUpperCase() === 'COMPLETED' ? <><CheckCircle2 size={12} /> SERVICE FINISHED</> : <>{v.status?.toUpperCase() === 'IN_PROGRESS' ? <><CheckCircle2 size={12} /> FINISH SERVICE</> : <><Play size={12} /> START SERVICE</>}</>}
                             </button>
                           </div>
                         </div>
@@ -944,7 +1029,9 @@ const AdminBookingDetails = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               <div>
                 <div style={{ ...labelStyle, opacity: 0.6 }}>Registered Contact</div>
-                <div style={booking.customer?.phone_number ? valueStyle : naStyle}>{booking.customer?.phone_number || 'N/A'}</div>
+                <div style={(booking.customer?.phone_number || booking.contact_number || booking.customer_phone) ? valueStyle : naStyle}>
+                  {booking.customer?.phone_number || booking.contact_number || booking.customer_phone || 'N/A'}
+                </div>
               </div>
               <div>
                 <div style={{ ...labelStyle, opacity: 0.6 }}>Primary Email ID</div>
@@ -1025,6 +1112,16 @@ const AdminBookingDetails = () => {
                           });
                           
                           toast.success('Manual Override Successful: Payment Confirmed');
+                          
+                          // 📧 DISPATCH RECEIPT EMAIL (Since this is a manual confirmation of a payment)
+                          // We'll try to find the relevant payment ID if available, 
+                          // but for override it might be complex. 
+                          // For now, let's trigger it if we have a payment in 'FOR_VERIFICATION' status
+                          const p = bookingPayments.find(p => p.status === 'FOR_VERIFICATION');
+                          if (p) {
+                            sendPaymentReceiptEmail(id, p.id).catch(console.error);
+                          }
+
                           fetchBookingDetails();
                         }}
                         style={{ flex: 1, padding: '0.75rem', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.65rem', cursor: 'pointer' }}
@@ -1158,6 +1255,14 @@ const AdminBookingDetails = () => {
                       <img src={p.receipt_url || p.evidence_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Receipt" />
                     </div>
 
+                    {p.status === 'PAID' && (
+                      <button 
+                        onClick={() => { setSelectedPayment(p); setReceiptModal(true); }}
+                        style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', color: 'var(--admin-brand)', border: '1px solid var(--admin-brand)', borderRadius: '6px', fontWeight: '950', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}
+                      >
+                        <Printer size={14} /> GENERATE SYSTEM RECEIPT
+                      </button>
+                    )}
                     {p.status === 'FOR_VERIFICATION' ? (
                       <div style={{ display: 'flex', gap: '0.75rem' }}>
                         <button onClick={() => handleVerifyPayment(p)} style={{ flex: 1, padding: '0.85rem', background: '#10b981', color: 'white', borderRadius: '6px', border: 'none', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer' }}>APPROVE</button>
@@ -1324,23 +1429,23 @@ const AdminBookingDetails = () => {
           <div className="no-print-bg" style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
             
             <div className="no-print" style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <ShieldCheck size={24} color="var(--admin-brand)" />
                 <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>
-                  Official Receipt Explorer (Audit View)
+                  {selectedPayment ? 'Transaction Receipt (Verified)' : 'Official Invoice (Consolidated)'}
                 </span>
               </div>
-              <button onClick={() => setReceiptModal(false)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <button onClick={() => { setReceiptModal(false); setSelectedPayment(null); }} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <X size={18} />
               </button>
             </div>
 
             <div id="printable-receipt" style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
-              {/* REQ-NFR-14: CSS-based Watermark for Admin Audit */}
-              {booking.refund_status === 'PROCESSED' && (
+              {/* Watermark Logic */}
+              {(booking.refund_status === 'PROCESSED' || selectedPayment?.status === 'REFUNDED') && (
                 <div style={{
                   position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-45deg)',
-                  fontSize: '10rem', fontWeight: '900', color: 'rgba(239, 68, 68, 0.08)', pointerEvents: 'none', zIndex: 0, whiteSpace: 'nowrap'
+                  fontSize: '8rem', fontWeight: '900', color: 'rgba(239, 68, 68, 0.08)', pointerEvents: 'none', zIndex: 0, whiteSpace: 'nowrap'
                 }}>
                   VOID / REFUNDED
                 </div>
@@ -1357,97 +1462,86 @@ const AdminBookingDetails = () => {
                   <div style={{ fontSize: '0.85rem', color: '#666' }}>{booking.customer?.email}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Receipt No.</div>
-                  <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>INV-{booking.id.substring(0, 8).toUpperCase()}</div>
-                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(booking.created_at).toLocaleDateString()}</div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>{selectedPayment ? 'Receipt No.' : 'Invoice No.'}</div>
+                  <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>
+                    {selectedPayment ? `RCP-${selectedPayment.id.substring(0, 8).toUpperCase()}` : `INV-${booking.id.substring(0, 8).toUpperCase()}`}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(selectedPayment?.created_at || booking.created_at).toLocaleDateString()}</div>
                 </div>
               </div>
 
               <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '1.5rem 0', margin: '2rem 0' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <tbody>
-                    {(() => {
-                      if (vehicles && vehicles.length > 0) {
-                        return vehicles.map((v) => (
-                          <React.Fragment key={v.id}>
-                            <tr>
-                              <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
-                                {v.brand} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
-                              </td>
-                            </tr>
-                            {(v.services || []).map((s) => (
-                              <tr key={s.id}>
-                                <td style={{ padding: '5px 5px 5px 20px', fontSize: '0.85rem', color: '#333' }}>
-                                  {s.service_name || s.service_name_snapshot}
-                                </td>
-                                <td style={{ padding: '5px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
-                                  {formatCurrency(s.price || s.price_snapshot)}
-                                </td>
-                              </tr>
-                            ))}
-                          </React.Fragment>
-                        ));
-                      } else {
-                        return (
+                    {selectedPayment ? (
+                      <tr>
+                        <td style={{ padding: '15px 5px', fontSize: '0.9rem', fontWeight: '900' }}>
+                          Service Installment / Settlement Payment
+                          <div style={{ fontSize: '0.7rem', color: '#666', fontWeight: 'normal' }}>Partial payment towards booking #{booking.id.substring(0, 8).toUpperCase()}</div>
+                        </td>
+                        <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '1.1rem', fontWeight: '950' }}>
+                          {formatCurrency(selectedPayment.amount)}
+                        </td>
+                      </tr>
+                    ) : (
+                      vehicles.map((v) => (
+                        <React.Fragment key={v.id}>
                           <tr>
-                            <td style={{ padding: '15px 5px', fontSize: '0.85rem', color: '#333' }}>
-                              Premium Detailing Package
-                            </td>
-                            <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
-                              {formatCurrency(booking.total_amount)}
+                            <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
+                              {v.brand} {v.model}
                             </td>
                           </tr>
-                        );
-                      }
-                    })()}
+                          {(v.services || []).map((s) => (
+                            <tr key={s.id}>
+                              <td style={{ padding: '5px 5px 5px 20px', fontSize: '0.85rem', color: '#333' }}>
+                                {s.service_name}
+                              </td>
+                              <td style={{ padding: '5px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
+                                {formatCurrency(s.price || s.price_snapshot)}
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
                 <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>GRAND TOTAL</span>
-                  <span style={{ fontWeight: '900' }}>{formatCurrency(booking.total_amount)}</span>
+                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>{selectedPayment ? 'PAYMENT AMOUNT' : 'GRAND TOTAL'}</span>
+                  <span style={{ fontWeight: '900', fontSize: '1.25rem' }}>{formatCurrency(selectedPayment?.amount || booking.total_amount)}</span>
                 </div>
-                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL AMOUNT PAID</span>
-                  <span style={{ fontWeight: '900' }}>
-                    {formatCurrency(bookingPayments.filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING').reduce((s, p) => s + Number(p.amount), 0))}
-                  </span>
-                </div>
-                {booking.refund_status === 'PROCESSED' && (
-                  <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', color: '#ef4444' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>AMOUNT REVERTED</span>
-                    <span style={{ fontWeight: '900' }}>
-                      {formatCurrency(bookingPayments.filter(p => p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0))}
-                    </span>
-                  </div>
+                {!selectedPayment && (
+                  <>
+                    <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
+                      <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL PAID TO DATE</span>
+                      <span style={{ fontWeight: '900' }}>{formatCurrency(totalPaid)}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
+                      <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>REMAINING BALANCE</span>
+                      <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>{formatCurrency(balance)}</span>
+                    </div>
+                  </>
                 )}
-                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
-                  <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>REMAINING BALANCE</span>
-                  <span style={{ fontWeight: '950', fontSize: '1.25rem', color: '#000' }}>
-                    {formatCurrency(Math.max(0, booking.total_amount - bookingPayments.filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING' || p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0)))}
-                  </span>
-                </div>
               </div>
 
               <div style={{ padding: '1.25rem', background: '#f9f9f9', borderRadius: '12px', border: '1px solid #eee' }}>
                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                     <div>
                       <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
-                      <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{bookingPayments?.[0]?.method || 'Cash / Off-platform'}</div>
+                      <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedPayment?.method || bookingPayments?.[0]?.method || 'Verified Credit'}</div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Transaction Reference</div>
                       <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                        {canAccessReceipt() 
-                          ? (bookingPayments?.[0]?.reference_number || booking.ocr_metadata?.referenceNo || 'VERIFIED')
-                          : 'Awaiting Verification'}
+                        {selectedPayment?.reference_number || 'SYSTEM_VALIDATED'}
                       </div>
                     </div>
                  </div>
                  <div style={{ marginTop: '15px', textAlign: 'center', fontSize: '1rem', fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: '2px' }}>
-                   *** {getReceiptStatusText()} ***
+                   *** {selectedPayment ? 'PAYMENT VERIFIED' : getReceiptStatusText()} ***
                  </div>
               </div>
 

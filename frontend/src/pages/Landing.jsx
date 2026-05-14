@@ -101,6 +101,19 @@ const Landing = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // 🛡️ AUTO-REDIRECT: If user is authenticated and profile is ready, 
+  // skip landing page and go straight to their dashboard
+  useEffect(() => {
+    if (isInitialized && !authLoading && user && profile) {
+      const routes = {
+        ADMIN: '/admin',
+        STAFF: '/staff',
+        CUSTOMER: '/customer'
+      };
+      navigate(routes[profile.role] || '/customer', { replace: true });
+    }
+  }, [isInitialized, authLoading, user, profile, navigate]);
+
   const scrollToSection = (id) => {
     const element = document.getElementById(id);
     if (element) {

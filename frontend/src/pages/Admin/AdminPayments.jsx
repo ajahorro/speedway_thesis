@@ -12,6 +12,7 @@ import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { getAuditCompliantTransactions } from '../../utils/bookingHelpers';
+import { sendPaymentReceiptEmail } from '../../services/notificationService';
 
 const AdminPayments = () => {
   const navigate = useNavigate();
@@ -58,7 +59,7 @@ const AdminPayments = () => {
       const processed = (paymentData || []).map(p => {
         let url = p.receipt_url;
         if (url && !url.startsWith('http')) {
-          const { data: { publicUrl } } = supabase.storage.from('payment-receipts').getPublicUrl(url);
+          const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(url);
           url = publicUrl;
         }
         return {
@@ -120,6 +121,13 @@ const AdminPayments = () => {
       }).eq('id', payment.id);
       
       if (error) throw error;
+      
+      // 📧 DISPATCH RECEIPT EMAIL (REQ-FIN-01)
+      if (payment.method !== 'Cash') {
+        sendPaymentReceiptEmail(payment.booking_id, payment.id).catch(err => {
+          console.warn('Payment receipt email failed:', err.message);
+        });
+      }
       
       toast.success('Payment verified', { id: toastId });
       fetchPayments();

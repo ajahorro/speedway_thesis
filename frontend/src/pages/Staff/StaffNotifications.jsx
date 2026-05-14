@@ -47,8 +47,8 @@ const DeleteConfirmModal = ({ onConfirm, onCancel }) => (
   </div>
 );
 
-const CustomerNotifications = () => {
-  const { user } = useAuth();
+const StaffNotifications = () => {
+  const { profile } = useAuth();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,19 +57,19 @@ const CustomerNotifications = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const fetchNotifications = async () => {
-    if (!user?.id) return;
+    if (!profile?.id) return;
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', profile.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
       setNotifications(data || []);
     } catch (err) {
-      logger.error('Customer Notification Fetch Error', err);
+      logger.error('Staff Notification Fetch Error', err);
       toast.error('Failed to load notifications.');
     } finally {
       setLoading(false);
@@ -78,11 +78,11 @@ const CustomerNotifications = () => {
 
   useEffect(() => {
     fetchNotifications();
-    const channel = supabase.channel(`cust-notifs-${user?.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user?.id}` }, () => fetchNotifications())
+    const channel = supabase.channel(`staff-notifs-${profile?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${profile?.id}` }, () => fetchNotifications())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user?.id]);
+  }, [profile?.id]);
 
   const handleMarkAsRead = async (id) => {
     try {
@@ -97,7 +97,7 @@ const CustomerNotifications = () => {
 
   const handleMarkAllAsRead = async () => {
     try {
-      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
+      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', profile.id).eq('is_read', false);
       if (error) throw error;
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
       toast.success('All notifications acknowledged');
@@ -133,7 +133,7 @@ const CustomerNotifications = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem' }}>
       {confirmDeleteId !== null && <DeleteConfirmModal onConfirm={handleConfirmDelete} onCancel={() => setConfirmDeleteId(null)} />}
 
-      <PageHeader badge="FLEET UPDATES" title="NOTIFICATIONS" subtitle="Stay informed about your vehicle detailing progress and account activity." onRefresh={fetchNotifications}>
+      <PageHeader badge="STAFF SIGNALS" title="NOTIFICATIONS" subtitle="Updates on your assigned tasks and system alerts." onRefresh={fetchNotifications}>
         <button onClick={handleMarkAllAsRead} style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'var(--admin-text-primary)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}>mark all as read</button>
       </PageHeader>
 
@@ -160,7 +160,7 @@ const CustomerNotifications = () => {
                   <Bell size={20} color={notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)'} />
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '0.65rem', fontWeight: '950', color: notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)' }}>{notif.notification_type || 'ACCOUNT'}</span>
+                      <span style={{ fontSize: '0.65rem', fontWeight: '950', color: notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)' }}>{notif.notification_type || 'SYSTEM'}</span>
                       <span style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)' }}>{new Date(notif.created_at).toLocaleString()}</span>
                     </div>
                     <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white' }}>{notif.title || 'Notification Received'}</p>
@@ -188,4 +188,4 @@ const CustomerNotifications = () => {
   );
 };
 
-export default CustomerNotifications;
+export default StaffNotifications;

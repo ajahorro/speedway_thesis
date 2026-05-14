@@ -30,6 +30,8 @@ const model = genAI.getGenerativeModel({
 // 🤖 Model Discovery (Diagnostics)
 (async () => {
   try {
+    const resendKey = process.env.RESEND_API_KEY || '';
+    console.log(`📧 [Email] API KEY MASK: ${resendKey.substring(0, 10)}...`);
     console.log(`🤖 [AI] API KEY MASK: ${geminiKey.substring(0, 8)}...`);
     // Note: listModels might not be available in all SDK versions, 
     // but we'll try to help debug the 404 issue.
@@ -106,6 +108,189 @@ const generateTemplate = (type, data) => {
   }
   return { subject, html };
 };
+
+app.post('/api/emails/booking-confirmation', async (req, res) => {
+  const { bookingId } = req.body;
+  console.log(`📧 [EMAIL SYSTEM] DISPATCHING BOOKING CONFIRMATION: ${bookingId}`);
+
+  try {
+    // 1. Fetch full booking context
+    const { data: booking, error: bError } = await supabaseAdmin
+      .from('bookings')
+      .select('*, booking_vehicles(*, booking_vehicle_services(*))')
+      .eq('id', bookingId)
+      .single();
+
+    if (bError || !booking) throw new Error('Booking not found');
+
+    // Fetch customer separately for reliability
+    const { data: customer, error: cError } = await supabaseAdmin
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', booking.customer_id)
+      .single();
+
+    if (cError || !customer) throw new Error('Customer profile not found');
+    const vehicles = booking.booking_vehicles || [];
+    const dateStr = new Date(booking.start_datetime).toLocaleDateString('en-US', { 
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+    });
+
+    const vehicleHtml = vehicles.map(v => `
+      <div style="margin-bottom: 15px; padding: 10px; border-left: 4px solid #A91B18; background: #f9f9f9;">
+        <strong style="text-transform: uppercase;">${v.year} ${v.brand} ${v.model}</strong> [${v.plate_number}]
+        <ul style="margin: 5px 0; padding-left: 20px; font-size: 13px;">
+          ${(v.booking_vehicle_services || []).map(s => `<li>${s.service_name} - ₱${s.price}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('');
+
+    if (resendClient) {
+      await resendClient.emails.send({
+        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        to: customer.email,
+        subject: `BOOKING CONFIRMED: ${bookingId.substring(0,8).toUpperCase()}`,
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
+            <h2 style="color: #A91B18; margin-top: 0;">SPEEDWAY DETAIL STUDIO</h2>
+            <h3 style="text-transform: uppercase; border-bottom: 2px solid #eee; padding-bottom: 10px;">Booking Confirmation</h3>
+            
+            <p>Hi <strong>${customer.full_name}</strong>,</p>
+            <p>Your booking has been successfully <strong>APPROVED</strong> and scheduled. We are excited to see you!</p>
+            
+            <div style="background: #111; color: #fff; padding: 15px; border-radius: 4px; margin: 20px 0;">
+              <div style="font-size: 12px; opacity: 0.7; text-transform: uppercase;">Scheduled For</div>
+              <div style="font-size: 18px; font-weight: bold;">${dateStr}</div>
+            </div>
+
+            <h4 style="text-transform: uppercase; color: #666; font-size: 12px; margin-bottom: 10px;">Vehicle & Service Details</h4>
+            ${vehicleHtml}
+
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #eee;">
+              <div style="display: flex; justify-content: space-between;">
+                <span>Total Amount:</span>
+                <strong style="font-size: 18px; color: #A91B18;">₱${booking.total_amount}</strong>
+              </div>
+              <div style="font-size: 12px; color: #666; margin-top: 5px;">Payment Status: ${booking.payment_status}</div>
+            </div>
+
+            <p style="margin-top: 30px; font-size: 12px; color: #888;">
+              Please arrive 15 minutes before your scheduled slot. If you need to reschedule, contact us at +1 (555) SPEEDWAY.
+            </p>
+          </div>
+        `
+      });
+      console.log(`✅ Confirmation email sent to ${customer.email}`);
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Confirmation Email Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/emails/payment-receipt', async (req, res) => {
+  const { bookingId, paymentId } = req.body;
+  console.log(`📧 [EMAIL SYSTEM] DISPATCHING PAYMENT RECEIPT: ${paymentId} for Booking ${bookingId}`);
+
+  try {
+    // 1. Fetch booking and specific payment
+    const { data: booking, error: bError } = await supabaseAdmin
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .single();
+
+    const { data: payment, error: pError } = await supabaseAdmin
+      .from('payments')
+      .select('*')
+      .eq('id', paymentId)
+      .single();
+
+    if (bError || pError || !booking || !payment) throw new Error('Booking or Payment records missing');
+
+    // Fetch customer separately
+    const { data: customer, error: cError } = await supabaseAdmin
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', booking.customer_id)
+      .single();
+
+    if (cError || !customer) throw new Error('Customer profile not found');
+    const dateStr = new Date(payment.created_at).toLocaleString();
+
+    let attachments = [];
+    if (payment.evidence_url) {
+      try {
+        // Fetch the file from Supabase storage
+        const pathParts = payment.evidence_url.split('/');
+        const bucket = 'receipts'; // Unified bucket name
+        const filePath = pathParts[pathParts.length - 1];
+        
+        const { data: fileData, error: fileError } = await supabaseAdmin.storage
+          .from(bucket)
+          .download(filePath);
+
+        if (fileData) {
+          const buffer = Buffer.from(await fileData.arrayBuffer());
+          attachments.push({
+            content: buffer,
+            filename: `receipt_${paymentId.substring(0,8)}.png`
+          });
+        }
+      } catch (fErr) {
+        console.warn('Could not attach receipt image:', fErr.message);
+      }
+    }
+
+    if (resendClient) {
+      await resendClient.emails.send({
+        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        to: customer.email,
+        subject: `PAYMENT RECEIPT: ${paymentId.substring(0,8).toUpperCase()}`,
+        attachments,
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
+            <div style="text-align: right; color: #888; font-size: 12px;">Official Receipt</div>
+            <h2 style="color: #A91B18; margin-top: 0;">SPEEDWAY DETAIL STUDIO</h2>
+            
+            <p>Hi <strong>${customer.full_name}</strong>,</p>
+            <p>Your payment has been <strong>VERIFIED</strong>. Thank you for your transaction.</p>
+            
+            <div style="background: #f9f9f9; padding: 20px; border-radius: 4px; margin: 20px 0; border: 1px solid #eee;">
+              <table style="width: 100%; font-size: 14px;">
+                <tr><td style="color: #666;">Transaction ID:</td><td style="text-align: right; font-weight: bold;">${paymentId}</td></tr>
+                <tr><td style="color: #666;">Date:</td><td style="text-align: right;">${dateStr}</td></tr>
+                <tr><td style="color: #666;">Payment Method:</td><td style="text-align: right;">${payment.method}</td></tr>
+                <tr style="font-size: 18px; border-top: 2px solid #eee;">
+                  <td style="padding-top: 10px; font-weight: bold;">Amount Paid:</td>
+                  <td style="padding-top: 10px; text-align: right; font-weight: bold; color: #A91B18;">₱${payment.amount}</td>
+                </tr>
+              </table>
+            </div>
+
+            <p style="font-size: 13px; color: #666;">
+              This payment has been applied to Booking <strong>#${bookingId.substring(0,8).toUpperCase()}</strong>.
+            </p>
+
+            ${attachments.length > 0 ? '<p style="font-size: 11px; color: #10b981;">✔ Your payment evidence has been attached to this email.</p>' : ''}
+
+            <div style="margin-top: 40px; text-align: center; font-size: 11px; color: #aaa;">
+              Speedway Detail Studio | 39 Hunters ROTC, Barangay San Juan, Cainta, 1900 Rizal
+            </div>
+          </div>
+        `
+      });
+      console.log(`✅ Payment receipt email sent to ${customer.email}`);
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Payment Receipt Email Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 app.post('/send-email', async (req, res) => {
   const { to, type, data } = req.body;
@@ -367,7 +552,7 @@ app.post('/customer/register', async (req, res) => {
       throw new Error('RESEND_API_KEY is not configured or Resend is not initialized');
     }
 
-    await resendClient.emails.send({
+    const emailResponse = await resendClient.emails.send({
       from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
       to: email,
       subject: 'WELCOME TO THE FLEET',
@@ -385,7 +570,13 @@ app.post('/customer/register', async (req, res) => {
       `
     });
 
-    console.log(`✅ Customer welcome email delivered to ${email}`);
+    console.log('📧 [Resend] Response:', JSON.stringify(emailResponse, null, 2));
+    
+    if (emailResponse.error) {
+      console.error(`❌ Resend Error: ${emailResponse.error.message}`);
+    } else {
+      console.log(`✅ Customer welcome email delivered to ${email}`);
+    }
     return res.json({ success: true, message: 'Registration email sent' });
 
   } catch (err) {
@@ -1072,12 +1263,21 @@ app.post('/api/bookings/update-status', async (req, res) => {
     const balance = Math.max(0, (masterBooking.total_amount || 0) - totalPaid);
     const isFullySettled = (masterBooking.total_amount || 0) > 0 && balance === 0;
 
+    // 🆕 Status Calculation Logic
+    const anyInProgress = (allUnits || []).some(u => u.status?.toUpperCase() === 'IN_PROGRESS');
+    const allCompleted = (allUnits || []).length > 0 && (allUnits || []).every(u => u.status?.toUpperCase() === 'COMPLETED');
+    const allPending = (allUnits || []).length > 0 && (allUnits || []).every(u => u.status?.toUpperCase() === 'SCHEDULED');
+
     // Determine target master status
     let targetMasterStatus = currentMaster; 
-    if (anyInProgress) targetMasterStatus = 'in_progress';
-    else if (allCompleted && isFullySettled) targetMasterStatus = 'completed';
-    else if (allCompleted && !isFullySettled) targetMasterStatus = 'in_progress'; // Stay in_progress if unpaid
-    else if (allPending) targetMasterStatus = 'scheduled';
+    
+    // 🛡️ REQ-NFR-02: Do not move out of terminal states (completed/cancelled)
+    if (currentMaster.toLowerCase() !== 'completed' && currentMaster.toLowerCase() !== 'cancelled') {
+      if (anyInProgress) targetMasterStatus = 'in_progress';
+      else if (allCompleted && isFullySettled) targetMasterStatus = 'completed';
+      else if (allCompleted && !isFullySettled) targetMasterStatus = 'in_progress'; // Stay in_progress if unpaid
+      else if (allPending) targetMasterStatus = 'scheduled';
+    }
 
     console.log(`[PROPAGATOR] Booking ${bookingId}: Current='${currentMaster}', Target='${targetMasterStatus}', Balance=₱${balance}`);
 
@@ -1090,6 +1290,21 @@ app.post('/api/bookings/update-status', async (req, res) => {
         .eq('id', bookingId);
       
       if (updateError) throw updateError;
+
+      // 🔔 REQ-SYS-05: Insert System Notification for Customer
+      try {
+        await supabaseAdmin.from('notifications').insert({
+          user_id: masterBooking.customer_id,
+          title: `Booking ${targetMasterStatus.toUpperCase()}`,
+          message: targetMasterStatus === 'completed' 
+            ? `Your service for Booking #${bookingId.substring(0,8).toUpperCase()} is now complete. Thank you for choosing Speedway!`
+            : `Your booking status has been updated to ${targetMasterStatus.toUpperCase()}.`,
+          notification_type: targetMasterStatus === 'completed' ? 'VEHICLE_COMPLETED' : 'SYSTEM_ALERT',
+          is_read: false
+        });
+      } catch (notifErr) {
+        console.warn('⚠️ Notification insertion failed:', notifErr.message);
+      }
 
       // 📧 DISPATCH CENTRALIZED EMAIL
       let remarks = '';
@@ -1119,12 +1334,12 @@ app.post('/api/bookings/update-status', async (req, res) => {
       action_type: 'STATUS_PROPAGATION',
       actor_name: actorName || 'System',
       actor_role: actorRole || 'STAFF',
-      details: `Unit ${unitId} updated to ${newStatus}. Master status: ${masterStatusUpdate || 'unchanged'}`
+      details: `Unit ${unitId} updated to ${newStatus}. Master status: ${targetMasterStatus || 'unchanged'}`
     });
 
     return res.json({ 
       success: true, 
-      masterStatus: masterStatusUpdate || currentMaster,
+      masterStatus: targetMasterStatus || currentMaster,
       unitStatus: newStatus.toUpperCase()
     });
 
@@ -1133,6 +1348,8 @@ app.post('/api/bookings/update-status', async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+  
+app.get('/api/debug/user/:email', async (req, res) => {
   const { email } = req.params;
   try {
     const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
@@ -1202,6 +1419,58 @@ app.post('/api/debug/fix-account', async (req, res) => {
     
     return res.json({ success: true, message: `Password for ${email} reset to 'Password123!' and email confirmed.` });
   } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/staff/toggle-shift', async (req, res) => {
+  const { userId, newStatus } = req.body;
+  console.log(`⏱️ [SHIFT SYSTEM] TOGGLING SHIFT: User ${userId} -> ${newStatus ? 'IN' : 'OUT'}`);
+
+  try {
+    if (!supabaseAdmin) throw new Error('Supabase Admin not initialized');
+
+    // 1. Update Profile (Bypass RLS)
+    const { data: profile, error: pError } = await supabaseAdmin
+      .from('profiles')
+      .update({ is_clocked_in: newStatus })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (pError) throw pError;
+
+    // 2. Manage Shift Record
+    if (newStatus) {
+      // Clock In: Create new active shift
+      const { error: sError } = await supabaseAdmin
+        .from('staff_shifts')
+        .insert({ staff_id: userId, status: 'active' });
+      if (sError) console.warn('⚠️ Shift record creation warning:', sError.message);
+    } else {
+      // Clock Out: Close active shifts
+      const { error: sError } = await supabaseAdmin
+        .from('staff_shifts')
+        .update({ 
+          status: 'completed', 
+          clock_out: new Date().toISOString() 
+        })
+        .eq('staff_id', userId)
+        .eq('status', 'active');
+      if (sError) console.warn('⚠️ Shift record update warning:', sError.message);
+    }
+
+    // 3. Log to Audit
+    await supabaseAdmin.from('audit_logs').insert({
+      action_type: newStatus ? 'STAFF_CLOCK_IN' : 'STAFF_CLOCK_OUT',
+      actor_name: profile.full_name || 'Staff',
+      actor_role: 'STAFF',
+      details: `Shift status changed to ${newStatus ? 'ON DUTY' : 'OFF DUTY'}`
+    });
+
+    return res.json({ success: true, profile });
+  } catch (err) {
+    console.error('❌ Shift Toggle Error:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

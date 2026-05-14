@@ -23,6 +23,11 @@ import AdminAcceptInvite from './pages/Admin/AdminAcceptInvite';
 import AdminSlotManagement from './pages/Admin/AdminSlotManagement';
 import StaffLayout from './pages/Staff/StaffLayout';
 import StaffDashboard from './pages/Staff/StaffDashboard';
+import StaffActiveJobs from './pages/Staff/StaffActiveJobs';
+import StaffWorkHistory from './pages/Staff/StaffWorkHistory';
+import StaffJobDetails from './pages/Staff/StaffJobDetails';
+import StaffProfile from './pages/Staff/StaffProfile';
+import StaffNotifications from './pages/Staff/StaffNotifications';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -95,9 +100,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             }
           >
             <Route index element={<StaffDashboard />} />
-            <Route path="tasks" element={<StaffDashboard />} />
-            <Route path="history" element={<div style={{ padding: '2rem' }}>Historical logs coming soon</div>} />
-            <Route path="profile" element={<div style={{ padding: '2rem' }}>Profile management coming soon</div>} />
+            <Route path="tasks" element={<StaffActiveJobs />} />
+            <Route path="history" element={<StaffWorkHistory />} />
+            <Route path="job/:id" element={<StaffJobDetails />} />
+            <Route path="profile" element={<StaffProfile />} />
+            <Route path="notifications" element={<StaffNotifications />} />
           </Route>
 
           {/* Customer Routes */}
@@ -124,17 +131,19 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <Toaster 
-          position="top-center" 
+          position="bottom-center" 
           toastOptions={{
+            duration: 4000,
             style: {
-              background: 'var(--admin-card)',
-              color: 'var(--admin-text-primary)',
-              border: '1px solid var(--admin-border)',
-              borderRadius: 'var(--admin-radius-sm)',
-              fontSize: '0.9rem',
+              background: '#15171A',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
               fontWeight: '600',
               padding: '1rem',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+              maxWidth: '90vw'
             },
             success: {
               iconTheme: {

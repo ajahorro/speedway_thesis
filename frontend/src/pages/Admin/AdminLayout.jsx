@@ -145,10 +145,14 @@ const AdminLayout = () => {
           background: 'rgba(var(--admin-brand-rgb), 0.03)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%', justifyContent: 'space-between' }}>
-            <div style={{ fontWeight: '950', fontSize: '1.25rem', letterSpacing: '-1px', color: 'var(--admin-brand)', lineHeight: 1 }}>SPEEDWAY</div>
+            <h1 style={{ fontSize: '1.25rem', fontWeight: '950', margin: 0, fontStyle: 'italic', letterSpacing: '1px', color: 'var(--admin-text-primary)' }}>
+              SPEEDWAY<span style={{ color: '#E61E2A' }}>ADMIN</span>
+            </h1>
             {isMobile && <button onClick={() => setIsSidebarOpen(false)} style={{ color: 'var(--admin-text-primary)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>}
           </div>
-          <span style={{ fontSize: '0.55rem', fontWeight: '950', color: 'var(--admin-text-secondary)', letterSpacing: '2px', textTransform: 'uppercase' }}>Fleet Staff</span>
+          <p style={{ fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '900', marginTop: '0.4rem', textTransform: 'uppercase', letterSpacing: '2px', opacity: 0.8 }}>
+            Command & Control Center
+          </p>
         </div>
 
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', flex: 1, overflowY: 'auto', padding: '0 0.5rem' }}>

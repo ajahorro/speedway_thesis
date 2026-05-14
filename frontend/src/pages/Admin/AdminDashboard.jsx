@@ -263,10 +263,8 @@ const AdminDashboard = () => {
       
       logger.admin('Operational intelligence synchronized.');
       
-      if (!window.refundGatewayMappedToastFired) {
-        toast.success('Refund Requests Gateway mapped and live counter active.', { id: 'refund-gateway-mapped', duration: 4000 });
-        window.refundGatewayMappedToastFired = true;
-      }
+      // Refund gateway mapped
+      window.refundGatewayMappedToastFired = true;
     } catch (err) {
       logger.error('Dashboard Sync Error', err);
       toast.error('Failed to sync live metrics');

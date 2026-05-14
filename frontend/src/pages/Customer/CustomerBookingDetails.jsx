@@ -4,11 +4,10 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import {
   ArrowLeft, Clock, Car, ShieldCheck, User, CheckCircle, Circle,
-  CreditCard, FileText, MessageCircle, ChevronRight, AlertCircle, Package
+  CreditCard, FileText, MessageCircle, ChevronRight, AlertCircle, Package, Printer, CheckCircle2, X
 } from 'lucide-react';
 import BookingChat from '../../components/BookingChat';
 import toast from 'react-hot-toast';
-import { X } from 'lucide-react';
 import { cancelBooking } from '../../services/bookingService';
 import { getStatusColor, getStatusLabel } from '../../utils/bookingHelpers';
 
@@ -26,6 +25,10 @@ const CustomerBookingDetails = () => {
   const [loading, setLoading] = useState(true);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [receiptModal, setReceiptModal] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+
+  const formatCurrency = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(val);
 
   // --- DATA FETCHING ---
   const fetchAll = async () => {
@@ -194,23 +197,23 @@ const CustomerBookingDetails = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', marginTop: '1.5rem', marginBottom: '0.5rem' }}>
           {/* Track */}
           <div style={{ position: 'absolute', top: '50%', left: '5%', right: '5%', height: '4px', background: 'var(--admin-border)', transform: 'translateY(-50%)', zIndex: 0 }} />
-          <div style={{ position: 'absolute', top: '50%', left: '5%', width: `${Math.max(0, currentStepIndex / (activeSteps.length - 1)) * 90}%`, height: '4px', background: getStatusColor(booking.status), transform: 'translateY(-50%)', zIndex: 1, transition: 'width 0.5s ease' }} />
+          <div style={{ position: 'absolute', top: '50%', left: '5%', width: `${Math.max(0, currentStepIndex / (activeSteps.length - 1)) * 90}%`, height: '4px', background: getStatusColor(derivedStatus), transform: 'translateY(-50%)', zIndex: 1, transition: 'width 0.5s ease' }} />
 
           {activeSteps.map((step, i) => {
-            const isCompleted = i < currentStepIndex;
+            const isStepDone = derivedStatus === 'completed' ? true : i < currentStepIndex;
             const isActive = i === currentStepIndex;
             return (
               <div key={step} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', zIndex: 2, position: 'relative' }}>
                 <div style={{
                   width: '36px', height: '36px', borderRadius: '50%',
-                  background: isCompleted ? getStatusColor(booking.status) : isActive ? 'var(--admin-card)' : 'var(--admin-bg)',
-                  border: `2px solid ${isCompleted || isActive ? getStatusColor(booking.status) : 'var(--admin-border)'}`,
+                  background: isStepDone ? getStatusColor(derivedStatus) : isActive ? 'var(--admin-card)' : 'var(--admin-bg)',
+                  border: `2px solid ${isStepDone || isActive ? getStatusColor(derivedStatus) : 'var(--admin-border)'}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: isCompleted ? '#fff' : isActive ? getStatusColor(booking.status) : 'var(--admin-text-secondary)',
-                  boxShadow: isActive ? `0 0 15px ${getStatusColor(booking.status)}40` : 'none',
+                  color: isStepDone ? '#fff' : isActive ? getStatusColor(derivedStatus) : 'var(--admin-text-secondary)',
+                  boxShadow: isActive ? `0 0 15px ${getStatusColor(derivedStatus)}40` : 'none',
                   transition: 'all 0.3s ease'
                 }}>
-                  {isCompleted ? <CheckCircle size={18} /> : <Circle size={18} />}
+                  {isStepDone ? <CheckCircle size={18} /> : <Circle size={18} />}
                 </div>
                 <div style={{ position: 'absolute', top: '44px', whiteSpace: 'nowrap', fontSize: '0.65rem', fontWeight: isActive ? '950' : '700', color: isActive ? 'var(--admin-text-primary)' : 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>
                   {getStatusLabel(step)}
@@ -420,6 +423,43 @@ const CustomerBookingDetails = () => {
             </div>
           </div>
 
+          {/* ===== B. BILLING & TRANSACTIONS ===== */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>Billing & Transactions</h3>
+              <CreditCard size={18} color="var(--admin-brand)" />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {payments.length === 0 ? (
+                <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontStyle: 'italic' }}>No transactions recorded yet.</div>
+              ) : payments.map(p => (
+                <div key={p.id} style={{ background: 'var(--admin-bg)', padding: '1rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>{p.method || 'Online Payment'}</span>
+                    <span style={{ fontSize: '0.9rem', fontWeight: '950', color: p.status === 'PAID' ? 'var(--admin-success)' : 'var(--admin-warning)' }}>{formatCurrency(p.amount)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.65rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>{new Date(p.created_at).toLocaleDateString()}</span>
+                    {p.status === 'PAID' && (
+                      <button 
+                        onClick={() => { setSelectedPayment(p); setReceiptModal(true); }}
+                        style={{ background: 'transparent', border: '1px solid var(--admin-brand)', color: 'var(--admin-brand)', padding: '0.35rem 0.6rem', borderRadius: '4px', fontSize: '0.6rem', fontWeight: '950', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                      >
+                        <Printer size={12} /> RECEIPT
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px dashed var(--admin-border)', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>BALANCE REMAINING</span>
+              <span style={{ fontSize: '1rem', fontWeight: '950', color: 'var(--admin-warning)' }}>{formatCurrency(Math.max(0, (booking.total_amount || 0) - (booking.totalPaid || 0)))}</span>
+            </div>
+          </div>
+
           {/* ===== ACTIONS ===== */}
           {(['scheduled', 'confirmed'].includes(derivedStatus)) && (
             <div style={{ ...cardStyle, border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.02)' }}>
@@ -509,6 +549,161 @@ const CustomerBookingDetails = () => {
           </div>
         </div>
       </div>
+      {/* 🧾 OFFICIAL RECEIPT EXPLORER */}
+      {receiptModal && (
+        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '2rem' }}>
+          <div className="no-print-bg" style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
+            
+            <div className="no-print" style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <ShieldCheck size={24} color="var(--admin-brand)" />
+                <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>
+                  {selectedPayment ? 'Official Receipt (Verified)' : 'Official Invoice (Consolidated)'}
+                </span>
+              </div>
+              <button onClick={() => { setReceiptModal(false); setSelectedPayment(null); }} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div id="printable-receipt" style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
+              {selectedPayment?.status === 'REFUNDED' && (
+                <div style={{
+                  position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-45deg)',
+                  fontSize: '8rem', fontWeight: '900', color: 'rgba(239, 68, 68, 0.08)', pointerEvents: 'none', zIndex: 0, whiteSpace: 'nowrap'
+                }}>
+                  VOID / REFUNDED
+                </div>
+              )}
+              <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+                <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#000', fontStyle: 'italic' }}>SPEEDWAY</h2>
+                <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#666', textTransform: 'uppercase', letterSpacing: '2px' }}>AutoxMoto Detail Studio</div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <div>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Billed To</div>
+                  <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>{booking.customer_name || user?.user_metadata?.full_name || 'Valued Customer'}</div>
+                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{user?.email}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>{selectedPayment ? 'Receipt No.' : 'Invoice No.'}</div>
+                  <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>
+                    {selectedPayment ? `RCP-${selectedPayment.id.substring(0, 8).toUpperCase()}` : `INV-${booking.id.substring(0, 8).toUpperCase()}`}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(selectedPayment?.created_at || booking.created_at).toLocaleDateString()}</div>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '1.5rem 0', margin: '2rem 0' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>
+                    {selectedPayment ? (
+                      <tr>
+                        <td style={{ padding: '15px 5px', fontSize: '0.9rem', fontWeight: '900' }}>
+                          Service Installment / Settlement
+                          <div style={{ fontSize: '0.7rem', color: '#666', fontWeight: 'normal' }}>Payment for booking #{booking.id.substring(0, 8).toUpperCase()}</div>
+                        </td>
+                        <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '1.1rem', fontWeight: '950' }}>
+                          {formatCurrency(selectedPayment.amount)}
+                        </td>
+                      </tr>
+                    ) : (
+                      vehicles.map((v) => (
+                        <React.Fragment key={v.id}>
+                          <tr>
+                            <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
+                              {v.brand} {v.model}
+                            </td>
+                          </tr>
+                          {(v.services || []).map((s) => (
+                            <tr key={s.id}>
+                              <td style={{ padding: '5px 5px 5px 20px', fontSize: '0.85rem', color: '#333' }}>
+                                {s.service_name || s.service_name_snapshot}
+                              </td>
+                              <td style={{ padding: '5px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
+                                {formatCurrency(s.price || s.price_snapshot)}
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
+                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
+                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>{selectedPayment ? 'PAYMENT RECEIVED' : 'GRAND TOTAL'}</span>
+                  <span style={{ fontWeight: '900', fontSize: '1.25rem' }}>{formatCurrency(selectedPayment?.amount || booking.total_amount)}</span>
+                </div>
+                {!selectedPayment && (
+                  <>
+                    <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
+                      <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL SETTLED</span>
+                      <span style={{ fontWeight: '900' }}>{formatCurrency(booking.totalPaid)}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
+                      <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>OUTSTANDING</span>
+                      <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>{formatCurrency(Math.max(0, (booking.total_amount || 0) - (booking.totalPaid || 0)))}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div style={{ padding: '1.25rem', background: '#f9f9f9', borderRadius: '12px', border: '1px solid #eee' }}>
+                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <div>
+                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
+                      <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedPayment?.method || 'Verified Channel'}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Reference</div>
+                      <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
+                        {selectedPayment?.reference_number || 'VALIDATED'}
+                      </div>
+                    </div>
+                 </div>
+              </div>
+
+              <div style={{ textAlign: 'center', color: '#666', fontSize: '0.65rem', marginTop: '60px', fontWeight: '300' }}>
+                This is a computer-generated document from Speedway AutoXMoto.
+              </div>
+            </div>
+
+            <div className="no-print" style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
+              <button 
+                onClick={() => window.print()}
+                style={{ 
+                  flex: 2, padding: '1rem', background: '#000', 
+                  color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', 
+                  cursor: 'pointer', 
+                  textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' 
+                }}
+              >
+                <Printer size={20} /> Print Receipt
+              </button>
+              <button 
+                onClick={() => { setReceiptModal(false); setSelectedPayment(null); }}
+                style={{ flex: 1, padding: '1rem', background: '#fff', color: '#000', border: '1px solid #ddd', borderRadius: '12px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #printable-receipt, #printable-receipt * { visibility: visible; }
+          #printable-receipt { position: absolute; left: 0; top: 0; width: 100%; }
+          .no-print, .modal-overlay { background: white !important; }
+        }
+      `}</style>
     </div>
   );
 };

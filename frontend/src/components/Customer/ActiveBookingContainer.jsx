@@ -59,6 +59,16 @@ const ActiveBookingContainer = ({ booking, loading }) => {
   }
 
   const vehicles = booking.vehicles || [];
+  
+  // 🚀 DERIVED STATUS LOGIC
+  const vehicleStatuses = vehicles.map(v => v.status?.toUpperCase());
+  const anyUnitStarted = vehicleStatuses.includes('IN_PROGRESS');
+  const allUnitsFinished = vehicleStatuses.length > 0 && vehicleStatuses.every(s => s === 'COMPLETED' || s === 'CANCELLED');
+  
+  let derivedStatus = (booking.status || 'scheduled').toLowerCase();
+  if (anyUnitStarted && derivedStatus === 'scheduled') derivedStatus = 'in_progress';
+  if (allUnitsFinished && derivedStatus !== 'cancelled') derivedStatus = 'completed';
+
   const vehicleCount = vehicles.length;
   const serviceCount = vehicles.reduce((sum, v) => sum + (v.services?.length || 0), 0);
   const scheduleDate = booking.start_datetime ? new Date(booking.start_datetime) : null;
@@ -84,11 +94,11 @@ const ActiveBookingContainer = ({ booking, loading }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.25rem' }}>
             <div style={{
               width: '12px', height: '12px', borderRadius: '50%',
-              background: getStatusColor(booking.status),
-              boxShadow: `0 0 10px ${getStatusColor(booking.status)}`
+              background: getStatusColor(derivedStatus),
+              boxShadow: `0 0 10px ${getStatusColor(derivedStatus)}`
             }} />
             <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>
-              {booking.status?.replace('_', ' ')}
+              {derivedStatus?.replace('_', ' ')}
             </h2>
           </div>
           <div style={{ fontSize: '0.85rem', color: 'var(--admin-text-secondary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

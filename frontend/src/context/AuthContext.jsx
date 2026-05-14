@@ -14,6 +14,12 @@ export const AuthProvider = ({ children }) => {
   
   const activeFetchRef = useRef(0);
   const fetchedForRef = useRef(null);
+  const profileRef = useRef(null);
+
+  // Sync ref with state
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const signOut = async () => {
     try {
@@ -31,10 +37,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const fetchProfile = useCallback(async (userId, source = 'unknown') => {
+  const fetchProfile = useCallback(async (userId, source = 'unknown', force = false) => {
     if (!userId) return;
     
-    if (fetchedForRef.current === userId && profile) return;
+    if (!force && fetchedForRef.current === userId && profileRef.current) return;
 
     const fetchId = ++activeFetchRef.current;
     fetchedForRef.current = userId;
@@ -42,8 +48,6 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       setLoading(true);
-      
-      logger.auth(`Starting sync (ID: ${fetchId}, Source: ${source})`);
       
       const { data, error: supabaseError } = await supabase
         .from('profiles')
@@ -77,7 +81,6 @@ export const AuthProvider = ({ children }) => {
           return;
         }
         setProfile(data);
-        logger.auth(`Sync successful (ID: ${fetchId})`);
       } else {
         logger.warn(`Profile missing for user (ID: ${fetchId})`);
         setProfile(null);
@@ -91,7 +94,7 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
       }
     }
-  }, [profile]);
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -250,10 +253,50 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const toggleShift = async (newStatus) => {
+    if (!profile?.id) return;
+    const toastId = toast.loading(newStatus ? 'Clocking in...' : 'Clocking out...');
+    
+    try {
+      // 🛡️ REQ-AUTH-09: Use secure backend relay for administrative shift toggle
+      // This bypasses RLS restrictions on the profiles table for staff.
+      const response = await fetch('http://localhost:3000/api/staff/toggle-shift', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: profile.id, newStatus })
+      });
+
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Backend shift toggle failed');
+      }
+
+      // Immediately sync local state from the backend's source of truth
+      if (result.profile) {
+        setProfile(result.profile);
+      }
+
+      toast.success(newStatus ? 'Successfully Clocked In!' : 'Successfully Clocked Out!', { id: toastId });
+      
+      // Secondary background re-sync to ensure any other profile fields are fresh
+      setTimeout(async () => {
+        await fetchProfile(profile.id, 'SHIFT_TOGGLE', true);
+      }, 500);
+
+      return { success: true };
+    } catch (err) {
+      logger.error('Shift Toggle Relay Error', err);
+      toast.error('Failed to update shift status. System relay unavailable.', { id: toastId });
+      return { success: false, error: err.message };
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user, profile, loading, isInitialized, signInWithPassword, signOut, resetPassword, 
-      updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount, recoverAccount
+      updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount, recoverAccount, fetchProfile, setProfile,
+      toggleShift
     }}>
       {children}
     </AuthContext.Provider>

@@ -37,6 +37,7 @@ async function run() {
   await checkTable('audit_logs');
   await checkTable('user_vehicles');
   await checkTable('vehicles');
+  await checkTable('profiles');
 }
 
 run();
