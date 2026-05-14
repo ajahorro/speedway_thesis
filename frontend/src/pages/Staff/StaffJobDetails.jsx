@@ -177,16 +177,44 @@ const StaffJobDetails = () => {
           {/* Evidence Preview */}
           <section style={cardStyle}>
             <div style={labelStyle}>Quality Assurance Proof</div>
-            {unit.photo_proof_url ? (
-              <div style={{ borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <img src={unit.photo_proof_url} alt="Service Proof" style={{ width: '100%', display: 'block' }} />
-              </div>
-            ) : (
-              <div style={{ height: '150px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', background: '#0A0B0D', borderRadius: '4px', border: '1px dashed rgba(255,255,255,0.1)' }}>
-                <Info size={24} color="#333" />
-                <div style={{ fontSize: '0.65rem', color: '#444', fontWeight: '950' }}>NO IMAGE UPLOADED</div>
-              </div>
-            )}
+            {(() => {
+              let photos = [];
+              if (unit.photo_proof_url) {
+                try {
+                  const parsed = JSON.parse(unit.photo_proof_url);
+                  photos = Array.isArray(parsed) ? parsed : [unit.photo_proof_url];
+                } catch {
+                  photos = [unit.photo_proof_url];
+                }
+              }
+              if (photos.length === 0) {
+                return (
+                  <div style={{ height: '150px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem', background: '#0A0B0D', borderRadius: '4px', border: '1px dashed rgba(255,255,255,0.1)' }}>
+                    <Info size={24} color="#333" />
+                    <div style={{ fontSize: '0.65rem', color: '#444', fontWeight: '950' }}>NO IMAGES UPLOADED</div>
+                  </div>
+                );
+              }
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: photos.length === 1 ? '1fr' : 'repeat(2, 1fr)', gap: '0.5rem' }}>
+                    {photos.map((url, i) => (
+                      <div key={i} style={{ position: 'relative', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)' }}>
+                        <img
+                          src={url}
+                          alt={`Service Evidence ${i + 1}`}
+                          style={{ width: '100%', display: 'block', objectFit: 'cover', aspectRatio: photos.length === 1 ? '16/9' : '1' }}
+                        />
+                        <div style={{ position: 'absolute', bottom: '4px', right: '4px', background: 'rgba(0,0,0,0.7)', color: 'white', fontSize: '0.5rem', fontWeight: '950', padding: '2px 6px', borderRadius: '2px' }}>#{i + 1}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: '950', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    {photos.length} Photo{photos.length > 1 ? 's' : ''} on Record
+                  </div>
+                </div>
+              );
+            })()}
           </section>
         </div>
 

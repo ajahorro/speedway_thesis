@@ -1,8 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  User, Mail, Phone, Lock, Moon, Sun, 
-  Shield, Trash2, Save, Loader2, Key, BellRing,
-  AlertTriangle, ChevronRight, CheckCircle, Settings
+  Moon, Sun, Settings, Bell, BellOff
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useTheme } from '../../context/ThemeContext';
@@ -11,7 +9,46 @@ import toast from 'react-hot-toast';
 
 const CustomerSettings = () => {
   const { theme, toggleTheme } = useTheme();
-  
+  const { user, profile } = useAuth();
+  const [pushEnabled, setPushEnabled] = useState(true); // default ON
+  const [savingPush, setSavingPush] = useState(false);
+
+  // Load the current preference from the database
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('profiles')
+      .select('push_notifications_enabled')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => {
+        // If the column doesn't exist yet or is null, default to true
+        if (data && data.push_notifications_enabled !== null) {
+          setPushEnabled(data.push_notifications_enabled);
+        }
+      });
+  }, [user?.id]);
+
+  const handleTogglePush = async () => {
+    if (savingPush) return;
+    const newValue = !pushEnabled;
+    setPushEnabled(newValue); // optimistic
+    setSavingPush(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ push_notifications_enabled: newValue })
+        .eq('id', user.id);
+      if (error) throw error;
+      toast.success(newValue ? 'Email notifications enabled' : 'Email notifications disabled');
+    } catch {
+      setPushEnabled(!newValue); // rollback
+      toast.error('Failed to update notification preference');
+    } finally {
+      setSavingPush(false);
+    }
+  };
+
   const sectionStyle = {
     background: 'var(--admin-card)',
     border: '1px solid var(--admin-border)',
@@ -41,6 +78,7 @@ const CustomerSettings = () => {
           <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Interface Preferences</h2>
         </div>
 
+        {/* Theme Toggle */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--admin-border)' }}>
           <div>
             <div style={{ fontWeight: '900', color: 'white', fontSize: '0.95rem' }}>Interface Theme</div>
@@ -54,13 +92,37 @@ const CustomerSettings = () => {
           </button>
         </div>
 
+        {/* Push Notification Toggle */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--admin-border)' }}>
           <div>
-            <div style={{ fontWeight: '900', color: 'white', fontSize: '0.95rem' }}>Push Notifications</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Receive alerts on service status updates.</div>
+            <div style={{ fontWeight: '900', color: 'white', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {pushEnabled ? <Bell size={16} color="var(--admin-brand)" /> : <BellOff size={16} color="#8E9196" />}
+              Email Notifications
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600', marginTop: '0.25rem' }}>
+              {pushEnabled 
+                ? 'You will receive email alerts on service status updates.' 
+                : 'Email alerts are off. You will still see in-app notifications.'}
+            </div>
           </div>
-          <div style={{ position: 'relative', width: '50px', height: '26px', background: 'var(--admin-brand)', borderRadius: '25px', cursor: 'pointer', padding: '4px' }}>
-            <div style={{ width: '18px', height: '18px', background: 'white', borderRadius: '50%', position: 'absolute', right: '4px' }} />
+          {/* Toggle Switch */}
+          <div
+            onClick={handleTogglePush}
+            style={{
+              position: 'relative', width: '50px', height: '26px',
+              background: pushEnabled ? 'var(--admin-brand)' : 'rgba(255,255,255,0.1)',
+              borderRadius: '25px', cursor: savingPush ? 'default' : 'pointer',
+              padding: '4px', transition: 'background 0.3s ease',
+              opacity: savingPush ? 0.6 : 1
+            }}
+          >
+            <div style={{
+              width: '18px', height: '18px', background: 'white', borderRadius: '50%',
+              position: 'absolute', top: '4px',
+              left: pushEnabled ? 'calc(100% - 22px)' : '4px',
+              transition: 'left 0.3s ease',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+            }} />
           </div>
         </div>
       </section>
@@ -76,3 +138,5 @@ const CustomerSettings = () => {
   );
 };
 export default CustomerSettings;
+
+

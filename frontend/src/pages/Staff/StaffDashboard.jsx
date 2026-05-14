@@ -131,7 +131,7 @@ const StaffDashboard = () => {
     }
   };
 
-  const handleUploadPhoto = async (taskId, file) => {
+  const handleUploadPhoto = async (taskId, file, currentProofUrl) => {
     if (!file) return;
     const toastId = toast.loading('Uploading evidence...');
     try {
@@ -141,9 +141,25 @@ const StaffDashboard = () => {
       const { error: uploadError } = await supabase.storage.from('receipts').upload(filePath, file);
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(filePath);
-      const { error: dbError } = await supabase.from('booking_vehicles').update({ photo_proof_url: publicUrl }).eq('id', taskId);
+      
+      // Parse existing photos array (supports old string format for backward compat)
+      let existingPhotos = [];
+      if (currentProofUrl) {
+        try {
+          const parsed = JSON.parse(currentProofUrl);
+          existingPhotos = Array.isArray(parsed) ? parsed : [currentProofUrl];
+        } catch {
+          existingPhotos = [currentProofUrl]; // legacy single URL string
+        }
+      }
+      const updatedPhotos = [...existingPhotos, publicUrl];
+      
+      const { error: dbError } = await supabase
+        .from('booking_vehicles')
+        .update({ photo_proof_url: JSON.stringify(updatedPhotos) })
+        .eq('id', taskId);
       if (dbError) throw dbError;
-      toast.success('Evidence uploaded successfully!', { id: toastId });
+      toast.success(`Evidence uploaded! (${updatedPhotos.length} photo${updatedPhotos.length > 1 ? 's' : ''})`, { id: toastId });
       fetchAssignedTasks();
     } catch (err) {
       toast.error('Upload failed.', { id: toastId });
@@ -273,22 +289,40 @@ const StaffDashboard = () => {
 
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                         <div style={{ fontSize: '0.6rem', fontWeight: '950', color: '#444', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Service Evidence</div>
-                        <div style={{ flex: 1, background: '#0A0B0D', border: '1px dashed rgba(255, 255, 255, 0.1)', borderRadius: '4px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', position: 'relative', overflow: 'hidden' }}>
-                          {task.photo_proof_url ? (
-                            <>
-                              <img src={task.photo_proof_url} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.4 }} />
-                              <CheckCircle2 size={24} color="#10b981" style={{ position: 'relative', zIndex: 1 }} />
-                              <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'white', position: 'relative', zIndex: 1 }}>EVIDENCE CAPTURED</span>
-                            </>
-                          ) : (
-                            <>
-                              <UploadCloud size={24} color="#444" />
-                              <span style={{ fontSize: '0.65rem', fontWeight: '950', color: '#444' }}>UPLOAD COMPLETION PHOTO</span>
-                            </>
-                          )}
-                          <input type="file" hidden id={`upload-${task.id}`} accept="image/*" disabled={!profile?.is_clocked_in || task.status?.toUpperCase() === 'COMPLETED'} onChange={(e) => handleUploadPhoto(task.id, e.target.files[0])} />
-                          <label htmlFor={`upload-${task.id}`} style={{ position: 'absolute', inset: 0, cursor: 'pointer', zIndex: 2 }} />
-                        </div>
+                        {(() => {
+                          // Parse photo array (supports legacy string URL)
+                          let photos = [];
+                          if (task.photo_proof_url) {
+                            try { photos = JSON.parse(task.photo_proof_url); if (!Array.isArray(photos)) photos = [task.photo_proof_url]; }
+                            catch { photos = [task.photo_proof_url]; }
+                          }
+                          return (
+                            <div style={{ flex: 1, background: '#0A0B0D', border: '1px dashed rgba(255, 255, 255, 0.1)', borderRadius: '4px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', minHeight: '100px' }}>
+                              {photos.length > 0 ? (
+                                <>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                                    {photos.map((url, i) => (
+                                      <img key={i} src={url} alt={`Evidence ${i + 1}`} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: '2px', border: '1px solid rgba(255,255,255,0.1)' }} />
+                                    ))}
+                                  </div>
+                                  <div style={{ fontSize: '0.55rem', color: '#10b981', fontWeight: '950', textAlign: 'center' }}>{photos.length} PHOTO{photos.length > 1 ? 'S' : ''} CAPTURED</div>
+                                </>
+                              ) : (
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                                  <UploadCloud size={20} color="#444" />
+                                  <span style={{ fontSize: '0.6rem', fontWeight: '950', color: '#444' }}>NO PHOTOS YET</span>
+                                </div>
+                              )}
+                              {/* Always show upload input when clocked in and not completed */}
+                              {profile?.is_clocked_in && task.status?.toUpperCase() !== 'COMPLETED' && (
+                                <label htmlFor={`upload-${task.id}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', padding: '0.4rem', background: 'rgba(230,30,42,0.1)', border: '1px solid rgba(230,30,42,0.2)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.6rem', fontWeight: '950', color: '#E61E2A' }}>
+                                  <UploadCloud size={12} /> ADD PHOTO
+                                </label>
+                              )}
+                              <input type="file" hidden id={`upload-${task.id}`} accept="image/*" disabled={!profile?.is_clocked_in || task.status?.toUpperCase() === 'COMPLETED'} onChange={(e) => handleUploadPhoto(task.id, e.target.files[0], task.photo_proof_url)} />
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}

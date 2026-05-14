@@ -13,7 +13,9 @@ export const SHOP_CONFIG = {
   CLOSING_HOUR: 21,                     // 9 PM
   FULL_DAY_THRESHOLD_MINUTES: 720,      // 12 hours
   LONG_TERM_THRESHOLD_MINUTES: 480,     // 8 hours (for occupancy logic)
+  BOOKING_CLEANUP_BUFFER_MINUTES: 60,   // 1-hour bay cleanup/handover buffer added to every booking end_datetime
 };
+
 
 // ─── OPERATIONAL THRESHOLDS ──────────────────────────────────────
 export const THRESHOLDS = {

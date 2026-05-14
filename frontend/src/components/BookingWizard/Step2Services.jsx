@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Circle, Info, Warehouse } from 'lucide-react';
+import { CheckCircle2, Circle, Info, Warehouse, AlertTriangle } from 'lucide-react';
 import { SERVICES_DATA } from '../../data/servicesCatalog';
 import { fetchUserGarage } from '../../services/garageService';
+import { calculateEstimatedEnd } from '../../services/bookingService';
+import { SHOP_CONFIG } from '../../config/constants';
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
 
@@ -91,11 +93,31 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
   const toggleService = (service) => {
     const price = getPrice(service);
     const exists = currentServices.find(s => s.id === service.id);
-    
-    // Non-mutating state update: Map through vehicles and create a new object for the active index
+
+    // Pre-check closing-hour cap before adding
+    if (!exists) {
+      const projected = calculateEstimatedEnd(
+        bookingData.date,
+        bookingData.time || bookingData.startTime,
+        bookingData.vehicles.map((v, i) =>
+          i === activeVehicleIndex
+            ? { ...v, services: [...(v.services || []), { ...service, price }] }
+            : v
+        )
+      );
+      const projEnd = new Date(projected);
+      if (projEnd.getHours() >= SHOP_CONFIG.CLOSING_HOUR) {
+        toast.error(
+          `Adding "${service.name}" would push your booking past our ${SHOP_CONFIG.CLOSING_HOUR > 12 ? SHOP_CONFIG.CLOSING_HOUR - 12 : SHOP_CONFIG.CLOSING_HOUR}:00 PM closing time. Please choose fewer services or book another day.`,
+          { duration: 4000 }
+        );
+        return;
+      }
+    }
+
     const updatedVehicles = bookingData.vehicles.map((v, i) => {
       if (i === activeVehicleIndex) {
-        const newServices = exists 
+        const newServices = exists
           ? currentServices.filter(s => s.id !== service.id)
           : [...currentServices, { ...service, price }];
         return { ...v, services: newServices };
@@ -279,39 +301,61 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             {SERVICES_DATA[activeCategory].map(service => {
               const isSelected = currentServices.some(s => s.id === service.id);
               const price = getPrice(service);
-              
-              if (price === 0) return null; // Hide if no price mapping for this vehicle type
+              if (price === 0) return null;
+
+              // Project end time if this service were added
+              const projectedEnd = calculateEstimatedEnd(
+                bookingData.date,
+                bookingData.time || bookingData.startTime,
+                bookingData.vehicles.map((v, i) =>
+                  i === activeVehicleIndex
+                    ? { ...v, services: [...(v.services || []), { ...service, price, durationMinutes: service.durationMinutes }] }
+                    : v
+                )
+              );
+              const wouldExceedClose = !isSelected && new Date(projectedEnd).getHours() >= SHOP_CONFIG.CLOSING_HOUR;
 
               return (
-                <div 
+                <div
                   key={service.id}
-                  onClick={() => toggleService(service)}
-                  className="admin-card-hover"
+                  onClick={() => !wouldExceedClose && toggleService(service)}
+                  className={wouldExceedClose ? '' : 'admin-card-hover'}
                   style={{
                     padding: '1.5rem',
-                    background: isSelected ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
-                    border: `2px solid ${isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
+                    background: wouldExceedClose
+                      ? 'rgba(245, 158, 11, 0.04)'
+                      : isSelected ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
+                    border: `2px solid ${
+                      wouldExceedClose ? 'rgba(245,158,11,0.35)'
+                      : isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'
+                    }`,
                     borderRadius: 'var(--admin-radius-md)',
-                    cursor: 'pointer',
+                    cursor: wouldExceedClose ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'flex-start',
-                    transition: 'all 0.2s ease'
+                    transition: 'all 0.2s ease',
+                    opacity: wouldExceedClose ? 0.75 : 1,
                   }}
                 >
                   <div style={{ display: 'flex', gap: '1rem' }}>
                     <div style={{ marginTop: '0.2rem' }}>
-                      {isSelected ? <CheckCircle2 size={24} color="var(--admin-brand)" /> : <Circle size={24} color="var(--admin-text-secondary)" />}
+                      {wouldExceedClose
+                        ? <AlertTriangle size={24} color="#f59e0b" />
+                        : isSelected ? <CheckCircle2 size={24} color="var(--admin-brand)" /> : <Circle size={24} color="var(--admin-text-secondary)" />
+                      }
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <div style={{ fontSize: '1.1rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{service.name}</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: '900', color: wouldExceedClose ? '#f59e0b' : 'var(--admin-text-primary)' }}>{service.name}</div>
                       <div style={{ fontSize: '0.85rem', color: 'var(--admin-text-secondary)', lineHeight: 1.5, maxWidth: '400px' }}>{service.desc}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content' }}>
-                        <Info size={12} /> Est. Time: {service.estTime}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: '800', color: wouldExceedClose ? '#f59e0b' : 'var(--admin-brand)', background: wouldExceedClose ? 'rgba(245,158,11,0.1)' : 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content' }}>
+                        {wouldExceedClose
+                          ? <><AlertTriangle size={12} /> Exceeds 9 PM closing time</>                          
+                          : <><Info size={12} /> Est. Time: {service.estTime}</>}
                       </div>
                     </div>
                   </div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: '950', color: wouldExceedClose ? '#f59e0b' : 'var(--admin-text-primary)' }}>
                     ₱{price.toLocaleString()}
                   </div>
                 </div>

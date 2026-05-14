@@ -83,7 +83,8 @@ const AdminSchedule = () => {
         .select('id, start_datetime, end_datetime, status')
         .lte('start_datetime', lastDay)
         .gte('end_datetime', firstDay)
-        .not('status', 'ilike', 'cancelled');
+        .not('status', 'ilike', 'cancelled')
+        .not('status', 'ilike', 'completed');
 
       if (error) throw error;
       setAllMonthBookings(data || []);
@@ -112,7 +113,8 @@ const AdminSchedule = () => {
         `)
         .lte('start_datetime', fetchEnd)
         .gte('end_datetime', fetchStart)
-        .not('status', 'ilike', 'cancelled');
+        .not('status', 'ilike', 'cancelled')
+        .not('status', 'ilike', 'completed');
 
       if (bookingsError) throw bookingsError;
 
@@ -199,8 +201,13 @@ const AdminSchedule = () => {
         icon={Info}
         confirmLabel="Lift Block"
         variant="brand"
+        centered={true}
         onConfirm={async () => {
           toast.dismiss(t.id);
+          // 1. Snapshot current state for rollback
+          const snapshot = blockedSlots;
+          // 2. Optimistic remove immediately
+          setBlockedSlots(prev => prev.filter(b => b.id !== id));
           try {
             const { error } = await supabase
               .from('blocked_slots')
@@ -208,19 +215,14 @@ const AdminSchedule = () => {
               .eq('id', id);
 
             if (error) throw error;
-            
-            // ── OPTIMISTIC UPDATE (CRITICAL) ──
-            // We remove it from local state immediately and skip the immediate re-fetch
-            // to prevent the DB race condition from bringing it back.
-            setBlockedSlots(prev => prev.filter(b => b.id !== id));
             toast.success('Restriction lifted');
-            
-            // Re-sync quietly in the background after a delay
-            setTimeout(() => fetchDailyContext(), 1000);
+            // 3. Delayed re-sync to prevent DB race condition
+            setTimeout(() => fetchDailyContext(), 800);
           } catch (err) {
             logger.error('Delete Block Error', err);
+            // 4. Rollback optimistic update on failure
+            setBlockedSlots(snapshot);
             toast.error('Failed to lift restriction');
-            fetchDailyContext(); // Re-sync on error
           }
         }}
         onCancel={() => toast.dismiss(t.id)}
@@ -258,11 +260,11 @@ const AdminSchedule = () => {
         onRefresh={fetchDailyContext}
       >
         <button 
-          onClick={() => { fetchDailyContext(); fetchMonthData(); toast.success('Syncing pipeline...'); }}
-          style={{ background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-secondary)', padding: '0.6rem 1rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+          onClick={() => { fetchDailyContext(); fetchMonthData(); }}
+          title="Refresh schedule data"
+          style={{ background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-secondary)', padding: '0.6rem', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <RotateCw size={14} className={loading ? 'animate-spin' : ''} />
-          EMERGENCY SYNC
+          <RotateCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
       </PageHeader>
 

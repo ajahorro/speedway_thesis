@@ -114,6 +114,8 @@ export const AuthProvider = ({ children }) => {
       } catch (err) {
         logger.error('Bootstrap Error', err);
         setIsInitialized(true);
+      } finally {
+        setLoading(false);
       }
     };
 

@@ -111,14 +111,20 @@ export const useAuthFlow = () => {
   const recoverPassword = async (email) => {
     setIsLoading(true);
     try {
-      const { error } = await resetPassword(email);
-      if (error) throw error;
+      // Route through backend relay for branded Resend delivery
+      const res = await fetch('http://localhost:3001/api/auth/recover-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const result = await res.json();
+      if (!result.success) throw new Error(result.error || 'Recovery request failed');
       
       setVerificationEmail(email);
       toast.success('Recovery link sent to your email!', {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', backdropFilter: 'blur(12px)' }
       });
-      setMode('LOGIN'); // Or a custom recovery await view
+      setMode('LOGIN');
     } catch (error) {
       toast.error(error.message, {
         style: { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', backdropFilter: 'blur(12px)' }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
 import { 
   ClipboardList, CheckCircle2, User, LogOut, 
@@ -17,6 +17,33 @@ const StaffLayout = () => {
   const location = useLocation();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(!isMobile);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+
+  const fetchUnreadCount = useCallback(async () => {
+    if (!profile?.id) return;
+    try {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', profile.id)
+        .eq('is_read', false);
+      setUnreadCount(count || 0);
+    } catch {
+      setUnreadCount(0);
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    fetchUnreadCount();
+    const channel = supabase
+      .channel(`staff-notif-badge-${profile?.id}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'notifications',
+        filter: `user_id=eq.${profile?.id}`
+      }, () => fetchUnreadCount())
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [profile?.id, fetchUnreadCount]);
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Task Hub', path: '/staff' },
@@ -196,9 +223,21 @@ const StaffLayout = () => {
               </span>
             </div>
 
-            <button style={{ background: '#15171A', border: '1px solid rgba(255, 255, 255, 0.05)', color: '#8E9196', padding: '0.5rem', borderRadius: '4px', cursor: 'pointer', position: 'relative' }}>
+            <button 
+              onClick={() => navigate('/staff/notifications')}
+              style={{ background: '#15171A', border: '1px solid rgba(255, 255, 255, 0.05)', color: '#8E9196', padding: '0.5rem', borderRadius: '4px', cursor: 'pointer', position: 'relative' }}
+            >
               <Bell size={18} />
-              <span style={{ position: 'absolute', top: '-2px', right: '-2px', width: '8px', height: '8px', background: '#E61E2A', borderRadius: '50%', border: '2px solid #15171A' }}></span>
+              {unreadCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: '-4px', right: '-4px',
+                  background: '#E61E2A', color: 'white',
+                  fontSize: '0.5rem', fontWeight: '950',
+                  minWidth: '16px', height: '16px', padding: '0 3px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: '2px', border: '1.5px solid #15171A'
+                }}>{unreadCount > 99 ? '99+' : unreadCount}</span>
+              )}
             </button>
           </div>
         </header>

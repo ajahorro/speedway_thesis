@@ -376,7 +376,7 @@ const AdminDashboard = () => {
           />
           <AttentionCard 
             count={state.stats.overdueServices}
-            label="Overdue Services"
+            label="No-Show Flagged"
             icon={AlertCircle}
             color="#E61E2A"
             bg="rgba(230, 30, 42, 0.1)"

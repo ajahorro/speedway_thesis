@@ -726,6 +726,63 @@ app.post('/api/auth/verify-password', async (req, res) => {
 });
 
 /**
+ * 📧 REQ-CST-13: Backend-Relayed Password Recovery
+ * Generates a secure Supabase recovery link and delivers it via Resend
+ * with a branded email template — bypasses unreliable Supabase SMTP.
+ */
+app.post('/api/auth/recover-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+  console.log(`🔑 [AUTH] PASSWORD RECOVERY INITIATED: ${email}`);
+
+  try {
+    // Generate secure OTP recovery link via Supabase Admin
+    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+    });
+
+    if (linkError) throw linkError;
+
+    const recoveryUrl = linkData?.properties?.action_link;
+    if (!recoveryUrl) throw new Error('Failed to generate recovery link');
+
+    if (resendClient) {
+      await resendClient.emails.send({
+        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        to: email,
+        subject: 'Reset Your Speedway Password',
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 30px; color: #333;">
+            <h2 style="color: #A91B18; margin-top: 0; font-size: 1.5rem; letter-spacing: 1px;">SPEEDWAY DETAIL STUDIO</h2>
+            <h3 style="text-transform: uppercase; border-bottom: 2px solid #eee; padding-bottom: 10px; font-size: 1rem;">Password Reset Request</h3>
+            <p>We received a request to reset the password for your account.</p>
+            <p>Click the button below to set a new password. This link is valid for <strong>1 hour</strong>.</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${recoveryUrl}" style="background-color: #A91B18; color: white; padding: 14px 28px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block; letter-spacing: 1px; text-transform: uppercase;">
+                RESET PASSWORD
+              </a>
+            </div>
+            <p style="font-size: 12px; color: #888;">If you did not request this, you can safely ignore this email. Your password will remain unchanged.</p>
+            <div style="margin-top: 40px; text-align: center; font-size: 11px; color: #aaa;">
+              Speedway Detail Studio | 39 Hunters ROTC, Barangay San Juan, Cainta, 1900 Rizal
+            </div>
+          </div>`
+      });
+      console.log(`✅ [AUTH] Recovery email sent to ${email} via Resend`);
+    } else {
+      console.log(`🔗 [DEV] Recovery link for ${email}: ${recoveryUrl}`);
+    }
+
+    return res.json({ success: true, message: 'Recovery email sent' });
+  } catch (err) {
+    console.error('❌ Password Recovery Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+/**
  * 🛡️ REQ-CST-12: Double-Step Email Change
  * Sends verification token to OLD email address before authorizing change
  */
@@ -1051,10 +1108,15 @@ const checkOverdueBookings = async () => {
           console.log(`💰 [REFUND] Booking ${booking.id} auto-flagged for refund (paid booking)`);
         }
         
-        await supabaseAdmin
+        const { error: updateError } = await supabaseAdmin
           .from('bookings')
           .update(updatePayload)
           .eq('id', booking.id);
+          
+        if (updateError) {
+          console.error(`❌ [FLAGGED_NOSHOW] Update failed for ${booking.id}:`, updateError.message);
+          continue; // Skip email if we couldn't update the status
+        }
           
         await supabaseAdmin.from('audit_logs').insert({
           booking_id: booking.id,
@@ -1121,9 +1183,9 @@ const checkOverdueBookings = async () => {
   }
 };
 
-// Run audit every 5 minutes + immediately on startup
-setInterval(checkOverdueBookings, 5 * 60000);
-checkOverdueBookings(); // Run immediately on boot
+// 🛡️ EMERGENCY DISABLE: Temporarily stopping the audit loop to prevent email spam
+// setInterval(checkOverdueBookings, 5 * 60000);
+// checkOverdueBookings(); 
 
 /**
  * 🧹 CLEAN SLATE: Purge all booking-related data

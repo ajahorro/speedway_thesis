@@ -111,7 +111,21 @@ const AdminNotifications = () => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setNotifications(data || []);
+
+      // Deduplicate ANNOUNCEMENT notifications:
+      // Admin sees only 1 entry per unique broadcast message (the most recent one),
+      // not one copy per user profile that was sent to.
+      const seen = new Set();
+      const deduplicated = (data || []).filter(n => {
+        if (n.notification_type === 'ANNOUNCEMENT') {
+          const key = n.message?.trim();
+          if (seen.has(key)) return false;
+          seen.add(key);
+        }
+        return true;
+      });
+
+      setNotifications(deduplicated);
       logger.admin('Signal spectrum synchronized.');
     } catch (err) {
       logger.error('Notification Fetch Error', err);

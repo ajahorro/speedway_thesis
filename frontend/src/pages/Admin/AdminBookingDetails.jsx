@@ -421,28 +421,35 @@ const AdminBookingDetails = () => {
       const price = service.prices[vehicleType] || 0;
       const extraMinutes = service.durationMinutes || 60;
 
-      // 1. DURATION UPDATE GUARD: Check if extending the end_datetime causes overbooking
-      const newEndDatetime = new Date(new Date(booking.end_datetime).getTime() + extraMinutes * 60000).toISOString();
-      
+      // 1. CLOSING HOUR GUARD: Prevent services that push past shop closing time
+      const newEndDatetime = new Date(new Date(booking.end_datetime).getTime() + extraMinutes * 60000);
+      const sameDay = new Date(booking.end_datetime);
+      sameDay.setHours(SHOP_CONFIG.CLOSING_HOUR, 0, 0, 0);
+      if (newEndDatetime > sameDay) {
+        throw new Error(`Adding "${service.name}" would extend this booking past closing time (${SHOP_CONFIG.CLOSING_HOUR > 12 ? SHOP_CONFIG.CLOSING_HOUR - 12 : SHOP_CONFIG.CLOSING_HOUR}:00 ${SHOP_CONFIG.CLOSING_HOUR >= 12 ? 'PM' : 'AM'}). Please schedule a separate booking for the remaining services.`);
+      }
+
+      // 2. OVERBOOKING GUARD: Check if extended end_datetime causes bay conflict
+      // Fix: use .not() to catch both 'cancelled' and 'CANCELLED' case variants
       const { data: overlapping } = await supabase
         .from('bookings')
         .select('id, start_datetime, end_datetime, status, vehicles:booking_vehicles(id, status)')
         .neq('id', id)
-        .neq('status', 'cancelled')
-        .lte('start_datetime', newEndDatetime)
+        .not('status', 'in', '("cancelled","CANCELLED")')
+        .lte('start_datetime', newEndDatetime.toISOString())
         .gte('end_datetime', booking.start_datetime);
 
       const { data: blocks } = await supabase.from('blocked_slots').select('*').eq('block_date', booking.start_datetime.split('T')[0]);
 
-      // Check each hour from now until the new end time
-      const startH = new Date(booking.start_datetime).getHours();
-      const newEndH = new Date(newEndDatetime).getHours();
+      // Check each hour from current end until the new end time
+      const startH = new Date(booking.end_datetime).getHours();
+      const newEndH = newEndDatetime.getHours();
       const activeBookings = filterActiveBookings(overlapping || []);
 
       for (let h = startH; h <= newEndH; h++) {
         const occ = calculateOccupancy(h, booking.start_datetime.split('T')[0], activeBookings, blocks || []);
         if (occ >= SHOP_CONFIG.MAX_BAYS) {
-          throw new Error(`CRITICAL OVERBOOKING: Bay capacity exceeded at ${h}:00. Cannot extend duration.`);
+          throw new Error(`Cannot extend: All bays are fully occupied at ${h}:00. Another booking is using this slot. Please reschedule.`);
         }
       }
 

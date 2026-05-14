@@ -62,25 +62,42 @@ export const segregateBookings = (bookings = [], config = SHOP_CONFIG) => {
 };
 
 /**
- * Calculates how many resources are occupied at a specific hour on a specific date.
+ * Returns the bay weight for a given vehicle type.
+ * Motorcycles and big bikes = 0.5 bays (2 of them share 1 bay).
+ * All other vehicle types = 1.0 bay.
+ */
+export const getVehicleWeight = (vehicleType = '') => {
+  const type = (vehicleType || '').toUpperCase();
+  if (type === 'MOTORCYCLE' || type === 'BIG_BIKE' || type === 'MOTORBIKE') return 0.5;
+  return 1.0;
+};
+
+/**
+ * Calculates how many bay-units are occupied at a specific hour on a specific date.
+ * Uses weighted occupancy: motorcycles = 0.5, all others = 1.0.
  */
 export const calculateOccupancy = (hour, dateStr, activeBookings = [], blocks = [], config = SHOP_CONFIG) => {
   let count = 0;
   const checkTime = new Date(`${dateStr}T${String(hour).padStart(2, '0')}:00:00`);
   
-  // Check Bookings (Granular Vehicle Occupancy)
+  // Check Bookings (Weighted Vehicle Occupancy)
   activeBookings.forEach(b => {
     const start = new Date(b.start_datetime.substring(0, 19));
     const end = new Date(b.end_datetime.substring(0, 19));
     
     if (checkTime >= start && checkTime < end) {
-      // RELEASE LOGIC: Only count vehicles that are NOT completed
-      const activeVehicleCount = (b.vehicles || []).filter(v => 
+      const activeVehicles = (b.vehicles || []).filter(v => 
         v.status !== 'COMPLETED' && v.status !== 'completed'
-      ).length;
+      );
       
-      // Fallback to 1 if vehicles are missing (legacy or single-unit bookings without relation)
-      count += activeVehicleCount || 1;
+      if (activeVehicles.length > 0) {
+        // Sum weighted occupancy per vehicle type
+        const weightedCount = activeVehicles.reduce((sum, v) => sum + getVehicleWeight(v.vehicle_type || v.type), 0);
+        count += weightedCount;
+      } else {
+        // Fallback: legacy bookings without vehicle relation
+        count += 1;
+      }
     }
   });
 

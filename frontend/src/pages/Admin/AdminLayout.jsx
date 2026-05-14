@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
@@ -42,25 +42,45 @@ const AdminLayout = () => {
     };
   }, [showNotifPopover]);
 
+  const fetchUnreadCount = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('is_read', false);
+      setUnreadCount(count || 0);
+    } catch {
+      setUnreadCount(0);
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     fetchUnreadCount();
 
     const handleNotificationsRead = () => fetchUnreadCount();
     window.addEventListener('notificationsRead', handleNotificationsRead);
 
+    // Real-time subscription for instant badge updates
+    const channel = supabase
+      .channel(`admin-notif-badge-${user?.id}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'notifications',
+        filter: `user_id=eq.${user?.id}`
+      }, () => fetchUnreadCount())
+      .subscribe();
+
     return () => {
       window.removeEventListener('notificationsRead', handleNotificationsRead);
+      supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user?.id, fetchUnreadCount]);
 
   // Close sidebar on navigation (mobile)
   useEffect(() => {
     if (isMobile) setIsSidebarOpen(false);
   }, [location, isMobile]);
-
-  const fetchUnreadCount = async () => {
-    setUnreadCount(0);
-  };
   const handleLogout = async () => {
     confirmLogout(async () => {
       await signOut();

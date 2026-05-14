@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { emitEvent, EVENTS } from './eventEngine';
+import { SHOP_CONFIG } from '../config/constants';
 
 /**
  * bookingService.js
@@ -247,26 +248,34 @@ function combineDateAndTime(dateStr, timeStr) {
   }
 }
 
-function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
+export function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
   try {
     const startIso = combineDateAndTime(dateStr, timeStr);
     const date = new Date(startIso);
-    
-    // Calculate total duration across all vehicles and their services
+
+    // Calculate total service duration across all vehicles
     let totalMinutes = 0;
     vehicles.forEach(v => {
       (v.services || []).forEach(s => {
-        totalMinutes += (s.durationMinutes || 60); // Default to 60 if missing
+        totalMinutes += (s.durationMinutes || 60);
       });
     });
 
     // Minimum duration of 1 hour if no services selected yet
     if (totalMinutes === 0) totalMinutes = 60;
 
+    // Add the 1-hour cleanup/handover buffer (REQ-SYS-BUFFER)
+    totalMinutes += SHOP_CONFIG.BOOKING_CLEANUP_BUFFER_MINUTES;
+
     date.setMinutes(date.getMinutes() + totalMinutes);
-    
-    if (isNaN(date.getTime())) return new Date().toISOString();
-    return date.toISOString();
+
+    // Cap at CLOSING_HOUR — never let a booking extend past shop close
+    const closingDate = new Date(date);
+    closingDate.setHours(SHOP_CONFIG.CLOSING_HOUR, 0, 0, 0);
+    const capped = date > closingDate ? closingDate : date;
+
+    if (isNaN(capped.getTime())) return new Date().toISOString();
+    return capped.toISOString();
   } catch (e) {
     return new Date().toISOString();
   }

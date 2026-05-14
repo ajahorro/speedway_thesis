@@ -2,13 +2,54 @@ import React from 'react';
 import { Car, Trash2, Copy, Plus, ChevronRight, Info, Lock, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Step2Services from './Step2Services';
+import { supabase } from '../../lib/supabase';
+import { getVehicleWeight } from '../../utils/schedulingUtils';
+import { SHOP_CONFIG } from '../../config/constants';
 
 const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, setActiveVehicleIndex, setCurrentStep, onNext, onBack, isSubTaskActive, setIsSubTaskActive }) => {
   const vehicles = bookingData.vehicles || [];
 
   const [draftVehicle, setDraftVehicle] = React.useState(null);
 
-  const handleAddVehicle = () => {
+  const handleAddVehicle = async () => {
+    // ── CAPACITY CHECK ────────────────────────────────────────────────────────
+    // Fetch max bays from business_config
+    const { data: config } = await supabase.from('business_config').select('slots_per_hour').maybeSingle();
+    const maxBays = config?.slots_per_hour || SHOP_CONFIG.MAX_BAYS;
+
+    // Calculate the weighted occupancy of the current fleet in this booking
+    const currentFleetWeight = vehicles.reduce((sum, v) => sum + getVehicleWeight(v.type || v.vehicleType), 0);
+
+    // Fetch existing bookings that overlap with the selected date/time
+    if (bookingData.date && bookingData.startTime) {
+      const dateStr = bookingData.date;
+      const { data: existingBookings } = await supabase
+        .from('bookings')
+        .select('id, start_datetime, end_datetime, vehicles:booking_vehicles(id, status, vehicle_type)')
+        .eq(dateStr, dateStr.substring(0, 10))
+        .neq('status', 'CANCELLED');
+
+      // Sum occupancy from other bookings on the same slot
+      let externalOccupancy = 0;
+      if (existingBookings) {
+        existingBookings.forEach(b => {
+          (b.vehicles || []).forEach(v => {
+            if (v.status !== 'COMPLETED') externalOccupancy += getVehicleWeight(v.vehicle_type);
+          });
+        });
+      }
+
+      const totalIfAdded = currentFleetWeight + externalOccupancy + 1.0; // +1 for a standard new vehicle
+      if (totalIfAdded > maxBays) {
+        toast.error(
+          'The maximum limit of our available bays for your chosen schedule has been reached. If you would like to add more vehicles to your fleet, please choose another date instead.',
+          { duration: 5000, style: { maxWidth: '480px' } }
+        );
+        return;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const newDraft = {
       id: crypto.randomUUID(),
       type: '',
