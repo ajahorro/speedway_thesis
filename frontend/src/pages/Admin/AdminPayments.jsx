@@ -356,7 +356,7 @@ const AdminPayments = () => {
                   <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.75rem', letterSpacing: '0.5px' }}>CONTEXT: FLEET ({state.selectedItem.booking?.vehicles?.length || 0} UNITS)</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {state.selectedItem.booking?.vehicles?.map(v => (
-                      <div key={v.id} style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'uppercase' }}><Car size={14} /> {v.make} {v.model}</div>
+                      <div key={v.id} style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'uppercase' }}><Car size={14} /> {v.brand} {v.model}</div>
                     ))}
                   </div>
                 </div>
@@ -526,7 +526,7 @@ const AdminPayments = () => {
                           <React.Fragment key={v.id}>
                             <tr>
                               <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
-                                {v.make} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
+                                {v.brand} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
                               </td>
                             </tr>
                             {(v.services || []).map((s) => (

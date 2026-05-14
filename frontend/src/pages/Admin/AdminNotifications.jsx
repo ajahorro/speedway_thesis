@@ -143,6 +143,12 @@ const AdminNotifications = () => {
         
       if (profileError) throw profileError;
       
+      if (!profiles || profiles.length === 0) {
+        toast.error('No profiles found to broadcast to.');
+        setBroadcasting(false);
+        return;
+      }
+      
       // Step 3: Insert one notification row per profile
       const broadcastNotifications = profiles.map(p => ({
         user_id: p.id,

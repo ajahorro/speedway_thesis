@@ -72,11 +72,6 @@ const AdminProfile = () => {
         setIsEditing(false);
         toast.success('Professional identity updated', { id: toastId });
       } else if (pendingAction === 'password') {
-        const isVerified = await verifyPassword(formData.currentPassword);
-        if (!isVerified.success) {
-          toast.error('Identity verification failed. Incorrect current password.', { id: toastId });
-          return;
-        }
         const { error } = await supabase.auth.updateUser({ password: formData.newPassword });
         if (error) throw error;
         toast.success('Security credentials rotated', { id: toastId });

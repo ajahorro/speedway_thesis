@@ -21,6 +21,8 @@ import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { logger } from '../../utils/logger';
 
+import { sendStatusEmail } from '../../services/notificationService';
+
 const AdminBookingDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -271,13 +273,18 @@ const AdminBookingDetails = () => {
       
       await notifyUser(booking.customer_id, 'Payment Verified! 💰', `Your payment of ₱${p.amount.toLocaleString()} has been approved. Thank you!`, 'PAYMENT_APPROVED', `/my-bookings/${id}`);
       
-      // LOG AUDIT
-      await supabase.from('audit_logs').insert({
-        booking_id: id,
-        action_type: 'PAYMENT_VERIFIED',
-        actor_name: verifier?.email || 'Admin',
-        actor_role: 'ADMIN',
-        details: `Verified payment of ₱${p.amount.toLocaleString()} via ${p.method}.`
+      // 🚀 AUTOMATIC LIFECYCLE SYNC via Backend Propagator
+      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      await fetch(`${BACKEND_URL}/api/bookings/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: id,
+          unitId: vehicles[0]?.id, // Just trigger with the first unit to force a sync
+          newStatus: vehicles[0]?.status, 
+          actorName: verifier?.email || 'Admin',
+          actorRole: 'ADMIN'
+        })
       });
 
       toast.success('Payment Approved & Ledger Synced', { id: toastId });
@@ -300,12 +307,23 @@ const AdminBookingDetails = () => {
   };
 
   const updateBookingStatus = async (status) => {
-    const toastId = toast.loading(`Marking session as ${status}...`);
+    const toastId = toast.loading(`Marking session as ${status.toUpperCase()}...`);
     try {
+      const timestamp = new Date().toISOString();
       const { error } = await supabase.from('bookings').update({ status }).eq('id', id);
       if (error) throw error;
       
+      // 🚀 CASCADE STATUS: If booking is finished, all vehicles must be finished
+      if (status === 'completed' || status === 'cancelled') {
+        const vUpdate = { status: status.toUpperCase() };
+        if (status === 'completed') vUpdate.completed_at = timestamp;
+        await supabase.from('booking_vehicles').update(vUpdate).eq('booking_id', id);
+      }
+
       await notifyUser(booking.customer_id, 'Booking Status Update ℹ️', `Your session has been marked as ${status.toUpperCase()}.`, 'STATUS_UPDATE', `/my-bookings/${id}`);
+      
+      // DISPATCH PROFESSIONAL EMAIL VIA RESEND (REQ-SYS-02)
+      await sendStatusEmail(id, status);
       
       toast.success(`Booking ${status.toUpperCase()}`, { id: toastId });
       fetchBookingDetails();
@@ -463,36 +481,39 @@ const AdminBookingDetails = () => {
   };
 
   const updateVehicleStatus = async (vehicleId, status) => {
+    // 🛡️ LOCK GUARD: Prevent changes to finished bookings
+    if (isLocked) {
+      return toast.error('Booking is finalized. No further changes allowed.');
+    }
+
+    const v = vehicles.find(item => item.id === vehicleId);
+    const toastId = toast.loading(`Updating ${v?.brand || 'unit'} status...`);
+    
     try {
-      const timestamp = new Date().toISOString();
-      const statusUpper = status.toUpperCase();
-      const updateData = { status: statusUpper };
-      
-      if (statusUpper === 'IN_PROGRESS') updateData.started_at = timestamp;
-      if (statusUpper === 'COMPLETED') updateData.completed_at = timestamp;
-
-      const { error } = await supabase.from('booking_vehicles').update(updateData).eq('id', vehicleId);
-      if (error) throw error;
-      
-      if (status === 'completed') {
-        const v = vehicles.find(item => item.id === vehicleId);
-        await notifyUser(booking.customer_id, 'Unit Completed! ✨', `Your ${v.make} ${v.model} is now ready for pickup.`, 'VEHICLE_COMPLETED', `/my-bookings/${id}?vehicle=${vehicleId}`);
-      }
-
-      // LOG AUDIT
-      const vehicle = vehicles.find(item => item.id === vehicleId);
-      const { data: { user: actor } } = await supabase.auth.getUser();
-      await supabase.from('audit_logs').insert({
-        booking_id: id,
-        action_type: 'VEHICLE_STATUS_UPDATE',
-        actor_name: actor?.email || 'Admin',
-        actor_role: 'ADMIN',
-        details: `Updated ${vehicle?.make} ${vehicle?.model} to: ${status.toUpperCase()}`
+      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      const response = await fetch(`${BACKEND_URL}/api/bookings/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: id,
+          unitId: vehicleId,
+          newStatus: status,
+          notes: v?.service_notes,
+          actorName: 'Admin',
+          actorRole: 'ADMIN'
+        })
       });
 
-      toast.success(`Vehicle ${status}`);
-      fetchBookingDetails(); fetchAuditLogs();
-    } catch (err) { toast.error('Vehicle update failed'); }
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error);
+
+      toast.success(`Unit marked as ${status.toUpperCase()}`, { id: toastId });
+      fetchBookingDetails();
+      fetchAuditLogs();
+    } catch (err) { 
+      console.error(err);
+      toast.error(err.message || 'Vehicle update failed', { id: toastId }); 
+    }
   };
 
   const fetchCustomerHistory = async () => {
@@ -592,7 +613,7 @@ const AdminBookingDetails = () => {
   const totalPaid = bookingPayments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
   const balance = Math.max(0, (booking.total_amount || 0) - totalPaid);
   const surplus = Math.max(0, totalPaid - (booking.total_amount || 0));
-  const isLocked = booking.status?.toUpperCase() === 'CANCELLED';
+  const isLocked = ['CANCELLED', 'COMPLETED'].includes(booking.status?.toUpperCase());
 
   return (
     <div style={{ 
@@ -793,7 +814,7 @@ const AdminBookingDetails = () => {
                           <Car size={20} color="var(--admin-brand)" />
                         </div>
                         <div>
-                          <div style={{ fontWeight: '950', fontSize: '1rem' }}>{v.make} {v.model}</div>
+                          <div style={{ fontWeight: '950', fontSize: '1rem' }}>{v.brand} {v.model}</div>
                           <div style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)' }}>{v.plate_number} • {v.vehicle_type}</div>
                         </div>
                       </div>
@@ -1351,7 +1372,7 @@ const AdminBookingDetails = () => {
                           <React.Fragment key={v.id}>
                             <tr>
                               <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
-                                {v.make} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
+                                {v.brand} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
                               </td>
                             </tr>
                             {(v.services || []).map((s) => (

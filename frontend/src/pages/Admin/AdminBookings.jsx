@@ -108,7 +108,7 @@ const AdminBookings = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.4rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', overflowX: 'auto' }}>
-            {['all', 'unassigned', 'FLAGGED_NOSHOW', 'scheduled', 'ongoing', 'completed', 'cancelled'].map(f => (
+            {['all', 'unassigned', 'FLAGGED_NOSHOW', 'scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled'].map(f => (
               <button 
                 key={f}
                 onClick={() => setState(prev => ({ ...prev, filterStatus: f }))}

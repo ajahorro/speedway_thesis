@@ -33,7 +33,7 @@ export const createBooking = async (customerId, bookingData) => {
       customer_name: bookingData.customerName, // Added this field
       start_datetime: combineDateAndTime(bookingData.date, bookingData.time),
       end_datetime: calculateEstimatedEnd(bookingData.date, bookingData.time, vehicles), 
-      status: 'scheduled',
+      status: bookingData.payment?.method === 'Cash' ? 'confirmed' : 'scheduled',
       total_amount: totalAmount,
       notes: bookingData.notes || '',
       contact_number: bookingData.contactNumber,

@@ -101,7 +101,9 @@ export const AuthProvider = ({ children }) => {
         
         if (session?.user) {
           setUser(session.user);
-          fetchProfile(session.user.id, 'BOOTSTRAP');
+          // 🛡️ CRITICAL: Wait for profile before marking as initialized
+          // to prevent landing page race conditions
+          await fetchProfile(session.user.id, 'BOOTSTRAP');
         }
 
         setIsInitialized(true);

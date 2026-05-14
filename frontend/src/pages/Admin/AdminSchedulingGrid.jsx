@@ -65,7 +65,7 @@ const AdminSchedulingGrid = ({ onBack }) => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'scheduled': return 'var(--admin-brand)';
-      case 'ongoing': return '#a855f7';
+      case 'in_progress': return '#a855f7';
       case 'completed': return '#10b981';
       case 'cancelled': return '#ef4444';
       default: return 'var(--admin-text-secondary)';

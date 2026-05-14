@@ -1019,7 +1019,120 @@ app.post('/api/bookings/admin-cancel', async (req, res) => {
   }
 });
 
-app.get('/api/debug/check-user/:email', async (req, res) => {
+// ─── MASTER STATUS PROPAGATOR & NOTIFICATION CONTROLLER ──────────────────
+// REQ-SYS-02: Transactional Integrity for Booking Lifecycle
+app.post('/api/bookings/update-status', async (req, res) => {
+  const { bookingId, unitId, newStatus, notes, actorName, actorRole } = req.body;
+  
+  if (!supabaseAdmin) return res.status(500).json({ success: false, error: 'Supabase Admin not initialized' });
+
+  try {
+    const timestamp = new Date().toISOString();
+
+    // 0. Fetch Master Booking first for context
+    const { data: masterBooking, error: masterFetchError } = await supabaseAdmin
+      .from('bookings')
+      .select('status, customer_id, total_amount')
+      .eq('id', bookingId)
+      .single();
+
+    if (masterFetchError) throw masterFetchError;
+    const currentMaster = masterBooking.status?.toLowerCase();
+
+    // 1. Update the specific vehicle unit
+    const { error: unitError } = await supabaseAdmin
+      .from('booking_vehicles')
+      .update({ 
+        status: newStatus.toUpperCase(),
+        service_notes: notes || undefined,
+        started_at: newStatus.toUpperCase() === 'IN_PROGRESS' ? timestamp : undefined,
+        completed_at: newStatus.toUpperCase() === 'COMPLETED' ? timestamp : undefined
+      })
+      .eq('id', unitId);
+
+    if (unitError) throw unitError;
+
+    // 2. Fetch all units for this booking to determine the master state
+    const { data: allUnits, error: fetchError } = await supabaseAdmin
+      .from('booking_vehicles')
+      .select('status, brand, model, service_notes')
+      .eq('booking_id', bookingId);
+
+    if (fetchError) throw fetchError;
+
+    // 🔍 Calculate Financial Balance
+    const { data: payments, error: pError } = await supabaseAdmin
+      .from('payments')
+      .select('amount, status')
+      .eq('booking_id', bookingId);
+    
+    const totalPaid = (payments || [])
+      .filter(p => p.status === 'PAID')
+      .reduce((sum, p) => sum + p.amount, 0);
+    const balance = Math.max(0, (masterBooking.total_amount || 0) - totalPaid);
+    const isFullySettled = (masterBooking.total_amount || 0) > 0 && balance === 0;
+
+    // Determine target master status
+    let targetMasterStatus = currentMaster; 
+    if (anyInProgress) targetMasterStatus = 'in_progress';
+    else if (allCompleted && isFullySettled) targetMasterStatus = 'completed';
+    else if (allCompleted && !isFullySettled) targetMasterStatus = 'in_progress'; // Stay in_progress if unpaid
+    else if (allPending) targetMasterStatus = 'scheduled';
+
+    console.log(`[PROPAGATOR] Booking ${bookingId}: Current='${currentMaster}', Target='${targetMasterStatus}', Balance=₱${balance}`);
+
+    // 4. Update Master Booking if needed (Case-insensitive check)
+    if (masterBooking.status?.toLowerCase() !== targetMasterStatus.toLowerCase()) {
+      console.log(`[PROPAGATOR] Updating Master Booking ${bookingId} to '${targetMasterStatus}'`);
+      const { error: updateError } = await supabaseAdmin
+        .from('bookings')
+        .update({ status: targetMasterStatus })
+        .eq('id', bookingId);
+      
+      if (updateError) throw updateError;
+
+      // 📧 DISPATCH CENTRALIZED EMAIL
+      let remarks = '';
+      if (targetMasterStatus === 'completed') {
+        remarks = (allUnits || [])
+          .filter(u => u.service_notes)
+          .map(u => `${u.brand} ${u.model}: ${u.service_notes}`)
+          .join('\n');
+      }
+
+      try {
+        const project_url = process.env.SUPABASE_URL;
+        const service_key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        await fetch(`${project_url}/functions/v1/send-status-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${service_key}` },
+          body: JSON.stringify({ bookingId, newStatus: targetMasterStatus, remarks })
+        });
+      } catch (emailErr) {
+        console.warn('Backend Email Trigger Warning:', emailErr.message);
+      }
+    }
+
+    // 5. Audit Log
+    await supabaseAdmin.from('audit_logs').insert({
+      booking_id: bookingId,
+      action_type: 'STATUS_PROPAGATION',
+      actor_name: actorName || 'System',
+      actor_role: actorRole || 'STAFF',
+      details: `Unit ${unitId} updated to ${newStatus}. Master status: ${masterStatusUpdate || 'unchanged'}`
+    });
+
+    return res.json({ 
+      success: true, 
+      masterStatus: masterStatusUpdate || currentMaster,
+      unitStatus: newStatus.toUpperCase()
+    });
+
+  } catch (err) {
+    console.error('Propagation Error:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
   const { email } = req.params;
   try {
     const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();

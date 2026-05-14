@@ -50,12 +50,10 @@ export const STATUS_COLORS = {
   scheduled: '#E61E2A',                 // Brand red
   confirmed: '#3b82f6',                 // Info blue
   in_progress: '#a855f7',              // Purple
-  ongoing: '#a855f7',                  // Alias
   completed: '#10b981',                // Green
   cancelled: '#ef4444',                // Red
-  FLAGGED_NOSHOW: '#ef4444',           // Red (urgent)
-  OVERDUE: '#ef4444',                  // Legacy alias
-  QUEUED: '#f59e0b',                   // Amber
+  flagged_noshow: '#ef4444',           // Red (urgent)
+  queued: '#f59e0b',                   // Amber
   pending: '#f59e0b',                  // Amber
   default: '#6b7280',                  // Muted gray
 };

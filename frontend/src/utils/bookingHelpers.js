@@ -13,7 +13,7 @@ import { STATUS_COLORS, BOOKING_STATUSES, SHOP_CONFIG, THRESHOLDS } from '../con
  * Single source — replaces inline getStatusColor() in 4+ components.
  */
 export const getStatusColor = (status) => {
-  return STATUS_COLORS[status] || STATUS_COLORS.default;
+  return STATUS_COLORS[status?.toLowerCase()] || STATUS_COLORS.default;
 };
 
 // ─── STATUS LABEL ────────────────────────────────────────────────
@@ -25,15 +25,13 @@ export const getStatusLabel = (status) => {
     scheduled: 'Scheduled',
     confirmed: 'Confirmed',
     in_progress: 'In Progress',
-    ongoing: 'In Progress',
     completed: 'Completed',
     cancelled: 'Cancelled',
-    FLAGGED_NOSHOW: 'No-Show',
-    OVERDUE: 'Overdue',
-    QUEUED: 'Queued',
+    flagged_noshow: 'No-Show',
+    queued: 'Queued',
     pending: 'Pending',
   };
-  return labels[status] || status?.toUpperCase() || 'Unknown';
+  return labels[status?.toLowerCase()] || status?.toUpperCase() || 'Unknown';
 };
 
 // ─── STATUS TRANSITIONS ─────────────────────────────────────────

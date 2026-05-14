@@ -67,17 +67,26 @@ const Landing = () => {
   const [openFaq, setOpenFaq] = useState(null);
   const [openService, setOpenService] = useState(null);
   const [scrolled, setScrolled] = useState(false);
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, isInitialized, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
   const handleAuthAction = () => {
-    if (user && profile) {
-      const routes = {
-        ADMIN: '/admin',
-        STAFF: '/staff',
-        CUSTOMER: '/customer'
-      };
-      navigate(routes[profile.role] || '/customer');
+    // 🛡️ SECURITY GUARD: Never trigger auth actions while system is still synchronizing
+    if (!isInitialized || authLoading) return;
+
+    if (user) {
+      if (profile) {
+        const routes = {
+          ADMIN: '/admin',
+          STAFF: '/staff',
+          CUSTOMER: '/customer'
+        };
+        navigate(routes[profile.role] || '/customer');
+      } else {
+        // If user exists but profile is missing, they are technically "in" but roleless
+        // We redirect them to customer as a safe default or wait for sync
+        navigate('/customer');
+      }
     } else {
       setShowLoginModal(true);
     }
@@ -187,7 +196,7 @@ const Landing = () => {
             onMouseEnter={e => e.target.style.transform = 'scale(1.05)'}
             onMouseLeave={e => e.target.style.transform = 'scale(1)'}
           >
-            {user ? 'DASHBOARD' : 'LOGIN'}
+            {!isInitialized || authLoading ? 'SYNCING...' : (user ? 'DASHBOARD' : 'LOGIN')}
           </button>
         </div>
       </header>
@@ -216,7 +225,7 @@ const Landing = () => {
             of your vehicle. Our expert team uses cutting-edge techniques to deliver stunning results.
           </p>
           <button onClick={handleAuthAction} style={{ padding: '1.25rem 3.5rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '2px', cursor: 'pointer', boxShadow: '0 10px 30px rgba(230, 30, 42, 0.3)' }}>
-            {user ? 'DASHBOARD' : 'BOOK NOW'}
+            {!isInitialized || authLoading ? 'SYNCING...' : (user ? 'DASHBOARD' : 'BOOK NOW')}
           </button>
         </div>
       </section>

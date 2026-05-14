@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../../hooks/useAuth';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
+import { sendStatusEmail } from '../../services/notificationService';
 
 const StaffDashboard = () => {
   const { profile } = useAuth();
@@ -74,46 +75,29 @@ const StaffDashboard = () => {
   };
 
   const handleUpdateStatus = async (task, newStatus) => {
+    // 🛡️ LOCK GUARD: Prevent changes to finished bookings
+    if (task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled') {
+      return toast.error('Booking is finalized. No further changes allowed.');
+    }
+
     const toastId = toast.loading(`Updating unit status...`);
     try {
-      // 1. Update the specific vehicle status
-      const { error: vError } = await supabase
-        .from('booking_vehicles')
-        .update({ 
-          status: newStatus,
-          // REQ-STF-04: Timestamping lifecycle milestones
-          started_at: newStatus === 'IN_PROGRESS' ? new Date().toISOString() : undefined,
-          completed_at: newStatus === 'COMPLETED' ? new Date().toISOString() : undefined
+      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      const response = await fetch(`${BACKEND_URL}/api/bookings/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: task.booking_id,
+          unitId: task.id,
+          newStatus: newStatus,
+          notes: localNotes[task.id],
+          actorName: profile?.full_name || 'Staff',
+          actorRole: 'STAFF'
         })
-        .eq('id', task.id);
+      });
 
-      if (vError) throw vError;
-
-      // 2. Synchronize Parent Booking Status (REQ-SYS-05)
-      if (newStatus === 'IN_PROGRESS') {
-        // If any vehicle starts, the whole booking is 'ongoing'
-        await supabase
-          .from('bookings')
-          .update({ status: 'ongoing' })
-          .eq('id', task.booking_id);
-      } else if (newStatus === 'COMPLETED') {
-        // Check if all other vehicles in this booking are also completed
-        const { data: siblingVehicles } = await supabase
-          .from('booking_vehicles')
-          .select('status')
-          .eq('booking_id', task.booking_id)
-          .neq('id', task.id);
-
-        const allFinished = (siblingVehicles || []).every(v => v.status?.toUpperCase() === 'COMPLETED');
-        
-        if (allFinished) {
-          await supabase
-            .from('bookings')
-            .update({ status: 'completed' })
-            .eq('id', task.booking_id);
-          toast.success('Whole booking marked as COMPLETED!', { id: toastId });
-        }
-      }
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error);
 
       toast.success(`Unit marked as ${newStatus.toUpperCase()}`, { id: toastId });
       fetchAssignedTasks();
@@ -267,7 +251,7 @@ const StaffDashboard = () => {
                     <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#8E9196', textTransform: 'uppercase', letterSpacing: '1px' }}>
                       SW-UNIT-{task.id.slice(0, 4).toUpperCase()}
                     </div>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase' }}>{task.make} {task.model}</h3>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase' }}>{task.brand} {task.model}</h3>
                   </div>
                 </div>
                 <span style={badgeStyle(task.status)}>{task.status?.toUpperCase()}</span>
@@ -291,13 +275,13 @@ const StaffDashboard = () => {
 
                 {/* Service Notes & Photos */}
                 {task.status?.toUpperCase() !== 'PENDING' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', opacity: (task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled') ? 0.6 : 1 }}>
                     <div style={{ position: 'relative' }}>
                       <textarea 
                         placeholder="ENTER DETAILING NOTES OR SERVICE OBSERVATIONS..."
                         value={localNotes[task.id] || ''}
                         onChange={(e) => setLocalNotes({ ...localNotes, [task.id]: e.target.value })}
-                        disabled={!profile?.is_clocked_in}
+                        disabled={!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled'}
                         style={{ 
                           width: '100%', minHeight: '80px', background: '#0A0B0D', border: '1px solid rgba(255, 255, 255, 0.05)',
                           borderRadius: '4px', padding: '1rem', color: 'white', fontSize: '0.85rem',
@@ -307,12 +291,12 @@ const StaffDashboard = () => {
                       />
                       <button 
                         onClick={() => handleSaveNotes(task.id)}
-                        disabled={!profile?.is_clocked_in}
+                        disabled={!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled'}
                         style={{ 
                           position: 'absolute', bottom: '1rem', right: '1rem', 
                           background: '#E61E2A', color: 'white', border: 'none', 
                           borderRadius: '2px', padding: '0.4rem', cursor: 'pointer',
-                          opacity: !profile?.is_clocked_in ? 0.5 : 1
+                          opacity: (!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled') ? 0.5 : 1
                         }}
                       >
                         <Save size={16} />
@@ -335,16 +319,16 @@ const StaffDashboard = () => {
                           <div style={{ fontSize: '0.6rem', fontWeight: '900', color: '#444', textTransform: 'uppercase' }}>{task.photo_proof_url ? 'EVIDENCE CAPTURED' : 'PENDING UPLOAD'}</div>
                         </div>
                         <label style={{ 
-                          cursor: profile?.is_clocked_in ? 'pointer' : 'not-allowed', 
+                          cursor: (profile?.is_clocked_in && task.booking_status?.toLowerCase() !== 'completed' && task.booking_status?.toLowerCase() !== 'cancelled') ? 'pointer' : 'not-allowed', 
                           padding: '0.5rem', background: '#15171A', borderRadius: '2px', 
-                          border: '1px solid rgba(255, 255, 255, 0.05)', opacity: !profile?.is_clocked_in ? 0.5 : 1 
+                          border: '1px solid rgba(255, 255, 255, 0.05)', opacity: (!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled') ? 0.5 : 1 
                         }}>
                           <UploadCloud size={16} color="#E61E2A" />
                           <input 
                             type="file" 
                             hidden 
                             accept="image/*" 
-                            disabled={!profile?.is_clocked_in}
+                            disabled={!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled'}
                             onChange={(e) => handleUploadPhoto(task.id, e.target.files[0])} 
                           />
                         </label>
@@ -357,13 +341,13 @@ const StaffDashboard = () => {
                   {task.status?.toUpperCase() === 'PENDING' && (
                     <button 
                       onClick={() => handleUpdateStatus(task, 'IN_PROGRESS')}
-                      disabled={!profile?.is_clocked_in}
+                      disabled={!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled'}
                       style={{ 
                         flex: 1, padding: '1rem', background: '#E61E2A', 
                         color: 'white', border: 'none', borderRadius: '4px', 
                         fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', 
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem',
-                        opacity: !profile?.is_clocked_in ? 0.5 : 1, textTransform: 'uppercase', letterSpacing: '1px'
+                        opacity: (!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled') ? 0.5 : 1, textTransform: 'uppercase', letterSpacing: '1px'
                       }}
                     >
                       <Play size={18} /> START SERVICE
@@ -372,13 +356,13 @@ const StaffDashboard = () => {
                   {task.status?.toUpperCase() === 'IN_PROGRESS' && (
                     <button 
                       onClick={() => handleUpdateStatus(task, 'COMPLETED')}
-                      disabled={!profile?.is_clocked_in}
+                      disabled={!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled'}
                       style={{ 
                         flex: 1, padding: '1rem', background: '#10b981', 
                         color: 'white', border: 'none', borderRadius: '4px', 
                         fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', 
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem',
-                        opacity: !profile?.is_clocked_in ? 0.5 : 1, textTransform: 'uppercase', letterSpacing: '1px'
+                        opacity: (!profile?.is_clocked_in || task.booking_status?.toLowerCase() === 'completed' || task.booking_status?.toLowerCase() === 'cancelled') ? 0.5 : 1, textTransform: 'uppercase', letterSpacing: '1px'
                       }}
                     >
                       <CheckCircle2 size={18} /> MARK COMPLETED

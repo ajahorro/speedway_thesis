@@ -124,7 +124,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <Toaster 
-          position="top-right" 
+          position="top-center" 
           toastOptions={{
             style: {
               background: 'var(--admin-card)',

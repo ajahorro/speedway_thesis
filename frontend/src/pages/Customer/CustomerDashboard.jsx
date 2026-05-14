@@ -16,7 +16,7 @@ const CustomerDashboard = () => {
   
   // REQ-CST-01: Count queued vehicles across all active bookings
   const queuedVehicles = (allBookings || []).reduce((count, b) => {
-    if (['ongoing', 'in_progress'].includes(b.status)) {
+    if (['in_progress'].includes(b.status?.toLowerCase())) {
       return count + (b.vehicles || []).filter(v => v.status === 'QUEUED').length;
     }
     return count;

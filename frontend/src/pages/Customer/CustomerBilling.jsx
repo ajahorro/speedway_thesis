@@ -42,7 +42,7 @@ const CustomerBilling = () => {
   }, 0);
 
   const outstandingBalance = bookings.reduce((sum, b) => {
-    if (['confirmed', 'scheduled', 'ongoing', 'in_progress'].includes(b.status)) {
+    if (['confirmed', 'scheduled', 'in_progress'].includes(b.status?.toLowerCase())) {
       const totalPaid = (b.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
       return sum + Math.max(0, (b.total_amount || 0) - totalPaid);
     }
@@ -97,7 +97,7 @@ const CustomerBilling = () => {
         <React.Fragment key={v.id}>
           <tr>
             <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
-              {v.make} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
+              {v.brand} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
             </td>
           </tr>
           {(v.services || []).map((s) => (

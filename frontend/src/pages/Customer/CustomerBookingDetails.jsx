@@ -12,8 +12,8 @@ import { X } from 'lucide-react';
 import { cancelBooking } from '../../services/bookingService';
 import { getStatusColor, getStatusLabel } from '../../utils/bookingHelpers';
 
-const STATUS_STEPS = ['scheduled', 'confirmed', 'ongoing', 'completed'];
-const STATUS_STEPS_WITH_NOSHOW = ['scheduled', 'confirmed', 'FLAGGED_NOSHOW'];
+const STATUS_STEPS = ['scheduled', 'confirmed', 'in_progress', 'completed'];
+const STATUS_STEPS_WITH_NOSHOW = ['scheduled', 'confirmed', 'flagged_noshow'];
 
 const CustomerBookingDetails = () => {
   const { id } = useParams();
@@ -125,10 +125,24 @@ const CustomerBookingDetails = () => {
   const balance = Math.max(0, (booking.total_amount || 0) - (booking.totalPaid || 0));
   const staffName = booking.assigned_staff ? `${booking.assigned_staff.first_name} ${booking.assigned_staff.last_name}` : 'Pending Assignment';
   
-  // Use appropriate lifecycle steps based on booking status
-  const isNoShow = booking.status === 'FLAGGED_NOSHOW';
+  // 🚀 DERIVED STATE: Ensure UI reflects reality even if master status lags
+  const vehicleStatuses = (vehicles || []).map(v => v.status?.toUpperCase());
+  const anyUnitStarted = vehicleStatuses.includes('IN_PROGRESS');
+  const allUnitsFinished = vehicleStatuses.length > 0 && vehicleStatuses.every(s => s === 'COMPLETED' || s === 'CANCELLED');
+  const isFullySettled = (booking.total_amount || 0) > 0 && balance === 0;
+  
+  // Real-time derived status for UI responsiveness
+  let derivedStatus = (booking.status || 'scheduled').toLowerCase();
+  
+  // Auto-advance logic for UI
+  if (anyUnitStarted && derivedStatus === 'scheduled') derivedStatus = 'in_progress';
+  
+  // Hard completion: All units done AND payment settled
+  if (allUnitsFinished && isFullySettled && derivedStatus !== 'cancelled') derivedStatus = 'completed';
+
+  const isNoShow = derivedStatus === 'flagged_noshow';
   const activeSteps = isNoShow ? STATUS_STEPS_WITH_NOSHOW : STATUS_STEPS;
-  const currentStepIndex = activeSteps.indexOf(isNoShow ? 'FLAGGED_NOSHOW' : booking.status);
+  const currentStepIndex = activeSteps.indexOf(derivedStatus);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '3rem' }}>
@@ -221,7 +235,7 @@ const CustomerBookingDetails = () => {
                     <Car size={22} color="var(--admin-brand)" />
                   </div>
                   <div>
-                    <h4 style={{ margin: 0, fontWeight: '950', fontSize: '1.1rem', color: 'var(--admin-text-primary)' }}>{v.brand || v.make} {v.model}</h4>
+                    <h4 style={{ margin: 0, fontWeight: '950', fontSize: '1.1rem', color: 'var(--admin-text-primary)' }}>{v.brand} {v.model}</h4>
                     <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>{v.plate_number} · {v.vehicle_type}</span>
                   </div>
                 </div>
@@ -377,7 +391,7 @@ const CustomerBookingDetails = () => {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ ...labelStyle, marginBottom: 0 }}>Status</span>
-                <span style={{ ...valStyle, color: getStatusColor(booking.status), textTransform: 'uppercase' }}>{booking.status}</span>
+                <span style={{ ...valStyle, color: getStatusColor(derivedStatus), textTransform: 'uppercase' }}>{derivedStatus}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ ...labelStyle, marginBottom: 0 }}>Vehicles</span>
@@ -400,25 +414,36 @@ const CustomerBookingDetails = () => {
               <div>
                 <div style={{ fontSize: '1.05rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{staffName}</div>
                 <div style={{ fontSize: '0.75rem', fontWeight: '700', color: booking.staff_id ? 'var(--admin-brand)' : 'var(--admin-text-secondary)' }}>
-                  {booking.staff_id ? 'Active Lead Technician' : (['cancelled', 'completed', 'FLAGGED_NOSHOW'].includes(booking.status) ? 'No Personnel Linked' : 'Awaiting Admin Assignment')}
+                  {booking.staff_id ? 'Active Lead Technician' : (['cancelled', 'completed', 'flagged_noshow'].includes(booking.status?.toLowerCase()) ? 'No Personnel Linked' : 'Awaiting Admin Assignment')}
                 </div>
               </div>
             </div>
           </div>
 
           {/* ===== ACTIONS ===== */}
-          {(['scheduled', 'confirmed'].includes(booking.status)) && (
+          {(['scheduled', 'confirmed'].includes(derivedStatus)) && (
             <div style={{ ...cardStyle, border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.02)' }}>
               <div style={{ ...labelStyle, color: '#ef4444' }}>Danger Zone</div>
               <p style={{ margin: '0.5rem 0 1rem 0', fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>
-                Need to cancel? You can cancel your appointment now. 
-                {booking.totalPaid > 0 && " Since a payment was detected, a refund request will be automatically filed."}
+                {derivedStatus === 'scheduled' 
+                  ? "Need to cancel? You can cancel your appointment now." 
+                  : "This appointment is currently locked for service. Cancellations are no longer permitted."}
+                {booking.totalPaid > 0 && derivedStatus === 'scheduled' && " Since a payment was detected, a refund request will be automatically filed."}
               </p>
               <button 
+                disabled={derivedStatus !== 'scheduled'}
                 onClick={() => setShowCancelModal(true)}
-                style={{ width: '100%', padding: '0.85rem', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer', textTransform: 'uppercase' }}
+                style={{ 
+                  width: '100%', padding: '0.85rem', 
+                  background: derivedStatus === 'scheduled' ? 'transparent' : 'rgba(255,255,255,0.05)', 
+                  border: `1px solid ${derivedStatus === 'scheduled' ? '#ef4444' : 'var(--admin-border)'}`, 
+                  color: derivedStatus === 'scheduled' ? '#ef4444' : 'var(--admin-text-secondary)', 
+                  borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.75rem', 
+                  cursor: derivedStatus === 'scheduled' ? 'pointer' : 'not-allowed', 
+                  textTransform: 'uppercase' 
+                }}
               >
-                Cancel Appointment
+                {derivedStatus === 'scheduled' ? 'Cancel Appointment' : 'Service Ongoing / Locked'}
               </button>
             </div>
           )}
