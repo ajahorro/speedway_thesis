@@ -11,7 +11,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState(null);
-  
+
   const activeFetchRef = useRef(0);
   const fetchedForRef = useRef(null);
   const profileRef = useRef(null);
@@ -39,7 +39,7 @@ export const AuthProvider = ({ children }) => {
 
   const fetchProfile = useCallback(async (userId, source = 'unknown', force = false) => {
     if (!userId) return;
-    
+
     if (!force && fetchedForRef.current === userId && profileRef.current) return;
 
     const fetchId = ++activeFetchRef.current;
@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       setLoading(true);
-      
+
       const { data, error: supabaseError } = await supabase
         .from('profiles')
         .select('id, role, email, is_active, deactivated_at, first_name, last_name, full_name, phone_number, is_clocked_in')
@@ -67,7 +67,7 @@ export const AuthProvider = ({ children }) => {
           const deactDate = new Date(data.deactivated_at);
           const now = new Date();
           const diffDays = Math.ceil((now - deactDate) / (1000 * 60 * 60 * 24));
-          
+
           if (diffDays <= 15) {
             const shouldRecover = window.confirm(`This account is DEACTIVATED (Day ${diffDays}/15). Would you like to RECOVER and reactivate it?`);
             if (shouldRecover) {
@@ -101,7 +101,7 @@ export const AuthProvider = ({ children }) => {
       try {
         logger.auth('Bootstrap initialization starting...');
         const { data: { session } } = await supabase.auth.getSession();
-        
+
         if (session?.user) {
           setUser(session.user);
           // 🛡️ CRITICAL: Wait for profile before marking as initialized
@@ -125,7 +125,7 @@ export const AuthProvider = ({ children }) => {
       if (event === 'INITIAL_SESSION') return;
 
       logger.auth(`Event: ${event}`);
-      
+
       if (session?.user) {
         setUser(session.user);
         if (event === 'SIGNED_IN' && fetchedForRef.current !== session.user.id) {
@@ -258,7 +258,7 @@ export const AuthProvider = ({ children }) => {
   const toggleShift = async (newStatus) => {
     if (!profile?.id) return;
     const toastId = toast.loading(newStatus ? 'Clocking in...' : 'Clocking out...');
-    
+
     try {
       // 🛡️ REQ-AUTH-09: Use secure backend relay for administrative shift toggle
       // This bypasses RLS restrictions on the profiles table for staff.
@@ -269,7 +269,7 @@ export const AuthProvider = ({ children }) => {
       });
 
       const result = await response.json();
-      
+
       if (!result.success) {
         throw new Error(result.error || 'Backend shift toggle failed');
       }
@@ -280,7 +280,7 @@ export const AuthProvider = ({ children }) => {
       }
 
       toast.success(newStatus ? 'Successfully Clocked In!' : 'Successfully Clocked Out!', { id: toastId });
-      
+
       // Secondary background re-sync to ensure any other profile fields are fresh
       setTimeout(async () => {
         await fetchProfile(profile.id, 'SHIFT_TOGGLE', true);
@@ -295,8 +295,8 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, profile, loading, isInitialized, signInWithPassword, signOut, resetPassword, 
+    <AuthContext.Provider value={{
+      user, profile, loading, isInitialized, signInWithPassword, signOut, resetPassword,
       updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount, recoverAccount, fetchProfile, setProfile,
       toggleShift
     }}>

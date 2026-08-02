@@ -17,7 +17,7 @@ app.use(bodyParser.json());
 const geminiKey = process.env.GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(geminiKey);
 // Configuration: Using gemini-1.5-flash with safety overrides for financial auditing
-const model = genAI.getGenerativeModel({ 
+const model = genAI.getGenerativeModel({
   model: "gemini-1.5-flash",
   safetySettings: [
     { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
@@ -132,8 +132,8 @@ app.post('/api/emails/booking-confirmation', async (req, res) => {
 
     if (cError || !customer) throw new Error('Customer profile not found');
     const vehicles = booking.booking_vehicles || [];
-    const dateStr = new Date(booking.start_datetime).toLocaleDateString('en-US', { 
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+    const dateStr = new Date(booking.start_datetime).toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
 
     const vehicleHtml = vehicles.map(v => `
@@ -149,7 +149,7 @@ app.post('/api/emails/booking-confirmation', async (req, res) => {
       await resendClient.emails.send({
         from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
         to: customer.email,
-        subject: `BOOKING CONFIRMED: ${bookingId.substring(0,8).toUpperCase()}`,
+        subject: `BOOKING CONFIRMED: ${bookingId.substring(0, 8).toUpperCase()}`,
         html: `
           <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
             <h2 style="color: #A91B18; margin-top: 0;">SPEEDWAY DETAIL STUDIO</h2>
@@ -227,7 +227,7 @@ app.post('/api/emails/payment-receipt', async (req, res) => {
         const pathParts = payment.evidence_url.split('/');
         const bucket = 'receipts'; // Unified bucket name
         const filePath = pathParts[pathParts.length - 1];
-        
+
         const { data: fileData, error: fileError } = await supabaseAdmin.storage
           .from(bucket)
           .download(filePath);
@@ -236,7 +236,7 @@ app.post('/api/emails/payment-receipt', async (req, res) => {
           const buffer = Buffer.from(await fileData.arrayBuffer());
           attachments.push({
             content: buffer,
-            filename: `receipt_${paymentId.substring(0,8)}.png`
+            filename: `receipt_${paymentId.substring(0, 8)}.png`
           });
         }
       } catch (fErr) {
@@ -248,7 +248,7 @@ app.post('/api/emails/payment-receipt', async (req, res) => {
       await resendClient.emails.send({
         from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
         to: customer.email,
-        subject: `PAYMENT RECEIPT: ${paymentId.substring(0,8).toUpperCase()}`,
+        subject: `PAYMENT RECEIPT: ${paymentId.substring(0, 8).toUpperCase()}`,
         attachments,
         html: `
           <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
@@ -271,7 +271,7 @@ app.post('/api/emails/payment-receipt', async (req, res) => {
             </div>
 
             <p style="font-size: 13px; color: #666;">
-              This payment has been applied to Booking <strong>#${bookingId.substring(0,8).toUpperCase()}</strong>.
+              This payment has been applied to Booking <strong>#${bookingId.substring(0, 8).toUpperCase()}</strong>.
             </p>
 
             ${attachments.length > 0 ? '<p style="font-size: 11px; color: #10b981;">✔ Your payment evidence has been attached to this email.</p>' : ''}
@@ -332,7 +332,7 @@ const crypto = require('crypto');
 // 1. GENERATE INVITE
 app.post('/admin/generate-invite', async (req, res) => {
   const { email, role } = req.body;
-  
+
   if (!email || !['ADMIN', 'STAFF'].includes(role)) {
     console.error(`❌ [INVITE SYSTEM] REJECTED: Invalid email (${email}) or role (${role})`);
     return res.status(400).json({ success: false, error: 'Invalid invitation parameters' });
@@ -420,7 +420,7 @@ app.get('/invite/validate', async (req, res) => {
 // 3. ACCEPT INVITE (Create Account)
 app.post('/invite/accept', async (req, res) => {
   const { token, password, first_name, last_name } = req.body;
-  
+
   console.log(`\n🎟️ [INVITE SYSTEM] ACTIVATING ACCOUNT FOR TOKEN: ${token.substring(0, 8)}...`);
 
   try {
@@ -474,7 +474,7 @@ app.post('/invite/accept', async (req, res) => {
     const fName = first_name?.trim() || 'Staff';
     const lName = last_name?.trim() || 'Member';
     const fullName = `${fName} ${lName}`.trim();
-    
+
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .upsert({
@@ -571,7 +571,7 @@ app.post('/customer/register', async (req, res) => {
     });
 
     console.log('📧 [Resend] Response:', JSON.stringify(emailResponse, null, 2));
-    
+
     if (emailResponse.error) {
       console.error(`❌ Resend Error: ${emailResponse.error.message}`);
     } else {
@@ -631,7 +631,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     const result = await model.generateContent([prompt, imagePart]);
     const response = await result.response;
     const text = response.text();
-    
+
     // 🧹 Clean JSON (sometimes AI adds markdown blocks)
     const cleanedJson = text.replace(/```json|```/g, '').trim();
     const extractedData = JSON.parse(cleanedJson);
@@ -642,10 +642,10 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     const extractedAmount = parseFloat(extractedData.amount);
     const requiredAmount = parseFloat(req.body.requiredAmount);
     const bookingId = req.body.bookingId;
-    
+
     // Check for mismatch (handling minor precision differences)
     const isMatch = Math.abs(extractedAmount - requiredAmount) < 1.0;
-    
+
     // THESIS FLOW: Mismatches are 'Flagged for Review', Matches are 'Confirmed'
     const finalStatus = isMatch ? 'Confirmed' : 'Flagged for Review';
 
@@ -656,7 +656,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     if (bookingId && bookingId !== 'PENDING') {
       const { error: updateError } = await supabaseAdmin
         .from('bookings')
-        .update({ 
+        .update({
           payment_status: finalStatus,
           ocr_metadata: {
             ...extractedData,
@@ -695,9 +695,9 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
   } catch (error) {
     // Masking raw error for professional UI as per Technical Directive
     console.warn('⚠️ [AI OCR] Service unavailable, masked error returned to client.');
-    res.status(500).json({ 
-      success: false, 
-      error: "AI analysis service is temporarily offline for maintenance. Our system will transition to manual verification to ensure your booking proceeds. Please continue." 
+    res.status(500).json({
+      success: false,
+      error: "AI analysis service is temporarily offline for maintenance. Our system will transition to manual verification to ensure your booking proceeds. Please continue."
     });
   }
 });
@@ -794,11 +794,11 @@ app.post('/api/auth/request-email-change', async (req, res) => {
 
   try {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
+
     // Store OTP in profiles metadata temporarily (In a real system, use a dedicated table)
     const { error: dbError } = await supabaseAdmin
       .from('profiles')
-      .update({ 
+      .update({
         email_change_temp: { newEmail, otp, expires: new Date(Date.now() + 15 * 60000).toISOString() }
       })
       .eq('id', userId);
@@ -833,7 +833,7 @@ app.post('/api/auth/request-email-change', async (req, res) => {
 
 app.post('/api/auth/confirm-email-change', async (req, res) => {
   const { userId, otp } = req.body;
-  
+
   try {
     const { data: profile, error: fetchError } = await supabaseAdmin
       .from('profiles')
@@ -885,9 +885,9 @@ app.post('/api/auth/deactivate-account', async (req, res) => {
     const deactivatedAt = new Date().toISOString();
     const { error } = await supabaseAdmin
       .from('profiles')
-      .update({ 
-        is_active: false, 
-        deactivated_at: deactivatedAt 
+      .update({
+        is_active: false,
+        deactivated_at: deactivatedAt
       })
       .eq('id', userId);
 
@@ -919,7 +919,7 @@ app.post('/api/bookings/cancel', async (req, res) => {
     // 1. Update Booking Status
     const { error: bookingError } = await supabaseAdmin
       .from('bookings')
-      .update({ 
+      .update({
         status: 'CANCELLED',
         cancellation_reason: reason,
         updated_at: new Date().toISOString()
@@ -962,7 +962,7 @@ app.post('/admin/verify-payment-ocr', async (req, res) => {
   await new Promise(resolve => setTimeout(resolve, 2000));
 
   const mockRef = Math.random().toString().slice(2, 11);
-  
+
   res.json({
     success: true,
     data: {
@@ -999,8 +999,8 @@ app.get('/api/bookings/:id/receipt', async (req, res) => {
 
     if (!isVerified) {
       console.warn(`🛑 [SECURITY] BLOCKED: Provisional receipt request for unpaid booking ${id}`);
-      return res.status(403).json({ 
-        success: false, 
+      return res.status(403).json({
+        success: false,
         error: 'ACCESS DENIED: Official receipt is locked until payment is verified by Admin.',
         provisional: true
       });
@@ -1025,7 +1025,7 @@ app.post('/api/garage/sync', async (req, res) => {
 
   try {
     const plate = (vehicle.plateNumber || '').toUpperCase();
-    
+
     // 1. Check if vehicle exists in garage
     const { data: existing } = await supabaseAdmin
       .from('vehicles')
@@ -1073,7 +1073,7 @@ const URGENT_REMINDER_MINUTES = 15;
 
 const checkOverdueBookings = async () => {
   if (!supabaseAdmin) return;
-  
+
   const now = new Date();
   const overdueThreshold = new Date(now.getTime() - NOSHOW_GRACE_MINUTES * 60000);
   const reminderThreshold = new Date(now.getTime() - URGENT_REMINDER_MINUTES * 60000);
@@ -1091,35 +1091,35 @@ const checkOverdueBookings = async () => {
 
     for (const booking of (bookings || [])) {
       const startTime = new Date(booking.start_datetime);
-      
+
       // A. NO-SHOW FLAG (30 MINS) → FLAGGED_NOSHOW
       if (startTime < overdueThreshold) {
         console.log(`⚠️ [FLAGGED_NOSHOW] Booking ${booking.id} flagged (30m+ No-Show)`);
-        
+
         // Check if booking has verified payments for refund auto-flag
         const hasPaidPayments = (booking.payments || []).some(p => p.status === 'PAID');
-        
-        const updatePayload = { 
-          status: 'FLAGGED_NOSHOW', 
-          needs_attention: true 
+
+        const updatePayload = {
+          status: 'FLAGGED_NOSHOW',
+          needs_attention: true
         };
-        
+
         // REQ-CST-11: Auto-flag for refund if payment exists
         if (hasPaidPayments) {
           updatePayload.refund_status = 'PENDING';
           console.log(`💰 [REFUND] Booking ${booking.id} auto-flagged for refund (paid booking)`);
         }
-        
+
         const { error: updateError } = await supabaseAdmin
           .from('bookings')
           .update(updatePayload)
           .eq('id', booking.id);
-          
+
         if (updateError) {
           console.error(`❌ [FLAGGED_NOSHOW] Update failed for ${booking.id}:`, updateError.message);
           continue; // Skip email if we couldn't update the status
         }
-          
+
         await supabaseAdmin.from('audit_logs').insert({
           booking_id: booking.id,
           action_type: 'SYSTEM_FLAG_NOSHOW',
@@ -1149,11 +1149,11 @@ const checkOverdueBookings = async () => {
           }
         }
       }
-      
+
       // B. URGENT REMINDER (15 MINS) - REQ-SYS-02
       else if (startTime < reminderThreshold && !booking.reminder_sent) {
         console.log(`📧 [REMINDER] Triggering urgent reminder for ${booking.customer?.email}`);
-        
+
         if (resendClient && booking.customer?.email) {
           try {
             await resendClient.emails.send({
@@ -1172,7 +1172,7 @@ const checkOverdueBookings = async () => {
           } catch (emailErr) {
             console.warn('📧 Reminder email failed:', emailErr.message);
           }
-          
+
           await supabaseAdmin
             .from('bookings')
             .update({ reminder_sent: true })
@@ -1202,7 +1202,7 @@ app.post('/api/admin/purge-bookings', async (req, res) => {
     return res.status(403).json({ success: false, error: 'Forbidden: invalid secret' });
   }
   console.log('🧹 [ADMIN] PURGING ALL BOOKING DATA...');
-  
+
   try {
     // 1. booking_vehicle_services (grandchild)
     const { error: e1 } = await supabaseAdmin.from('booking_vehicle_services').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -1254,7 +1254,7 @@ app.post('/api/bookings/admin-cancel', async (req, res) => {
   try {
     const { error: bookingError } = await supabaseAdmin
       .from('bookings')
-      .update({ 
+      .update({
         status: 'CANCELLED',
         cancellation_reason: reason,
         cancellation_type: reason === 'No-Show' ? 'NO_SHOW' : 'ADMIN_MANUAL',
@@ -1284,7 +1284,7 @@ app.post('/api/bookings/admin-cancel', async (req, res) => {
 // REQ-SYS-02: Transactional Integrity for Booking Lifecycle
 app.post('/api/bookings/update-status', async (req, res) => {
   const { bookingId, unitId, newStatus, notes, actorName, actorRole } = req.body;
-  
+
   if (!supabaseAdmin) return res.status(500).json({ success: false, error: 'Supabase Admin not initialized' });
 
   try {
@@ -1303,7 +1303,7 @@ app.post('/api/bookings/update-status', async (req, res) => {
     // 1. Update the specific vehicle unit
     const { error: unitError } = await supabaseAdmin
       .from('booking_vehicles')
-      .update({ 
+      .update({
         status: newStatus.toUpperCase(),
         service_notes: notes || undefined,
         started_at: newStatus.toUpperCase() === 'IN_PROGRESS' ? timestamp : undefined,
@@ -1326,7 +1326,7 @@ app.post('/api/bookings/update-status', async (req, res) => {
       .from('payments')
       .select('amount, status')
       .eq('booking_id', bookingId);
-    
+
     const totalPaid = (payments || [])
       .filter(p => p.status === 'PAID')
       .reduce((sum, p) => sum + p.amount, 0);
@@ -1339,8 +1339,8 @@ app.post('/api/bookings/update-status', async (req, res) => {
     const allPending = (allUnits || []).length > 0 && (allUnits || []).every(u => u.status?.toUpperCase() === 'SCHEDULED');
 
     // Determine target master status
-    let targetMasterStatus = currentMaster; 
-    
+    let targetMasterStatus = currentMaster;
+
     // 🛡️ REQ-NFR-02: Do not move out of terminal states (completed/cancelled)
     if (currentMaster.toLowerCase() !== 'completed' && currentMaster.toLowerCase() !== 'cancelled') {
       if (anyInProgress) targetMasterStatus = 'in_progress';
@@ -1358,7 +1358,7 @@ app.post('/api/bookings/update-status', async (req, res) => {
         .from('bookings')
         .update({ status: targetMasterStatus })
         .eq('id', bookingId);
-      
+
       if (updateError) throw updateError;
 
       // 🔔 REQ-SYS-05: Insert System Notification for Customer
@@ -1366,8 +1366,8 @@ app.post('/api/bookings/update-status', async (req, res) => {
         await supabaseAdmin.from('notifications').insert({
           user_id: masterBooking.customer_id,
           title: `Booking ${targetMasterStatus.toUpperCase()}`,
-          message: targetMasterStatus === 'completed' 
-            ? `Your service for Booking #${bookingId.substring(0,8).toUpperCase()} is now complete. Thank you for choosing Speedway!`
+          message: targetMasterStatus === 'completed'
+            ? `Your service for Booking #${bookingId.substring(0, 8).toUpperCase()} is now complete. Thank you for choosing Speedway!`
             : `Your booking status has been updated to ${targetMasterStatus.toUpperCase()}.`,
           notification_type: targetMasterStatus === 'completed' ? 'VEHICLE_COMPLETED' : 'SYSTEM_ALERT',
           is_read: false
@@ -1407,8 +1407,8 @@ app.post('/api/bookings/update-status', async (req, res) => {
       details: `Unit ${unitId} updated to ${newStatus}. Master status: ${targetMasterStatus || 'unchanged'}`
     });
 
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       masterStatus: targetMasterStatus || currentMaster,
       unitStatus: newStatus.toUpperCase()
     });
@@ -1418,20 +1418,20 @@ app.post('/api/bookings/update-status', async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
-  
+
 app.get('/api/debug/user/:email', async (req, res) => {
   const { email } = req.params;
   try {
     const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
     if (error) throw error;
-    
+
     const user = users.find(u => u.email === email);
     if (!user) {
       return res.json({ success: false, message: 'User not found in Auth' });
     }
-    
-    return res.json({ 
-      success: true, 
+
+    return res.json({
+      success: true,
       user: {
         id: user.id,
         email: user.email,
@@ -1451,7 +1451,7 @@ app.get('/api/debug/list-users', async (req, res) => {
   try {
     const { data: { users }, error } = await supabaseAdmin.auth.admin.listUsers();
     if (error) throw error;
-    
+
     // Return last 10 users
     const lastUsers = users
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
@@ -1463,7 +1463,7 @@ app.get('/api/debug/list-users', async (req, res) => {
         confirmed_at: u.confirmed_at,
         role: u.user_metadata?.role
       }));
-    
+
     return res.json({ success: true, users: lastUsers });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -1481,19 +1481,19 @@ app.post('/api/debug/fix-account', async (req, res) => {
   try {
     const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
     if (listError) throw listError;
-    
+
     const user = users.find(u => u.email === email);
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
-    
+
     const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
       password: 'Password123!',
       email_confirm: true
     });
-    
+
     if (updateError) throw updateError;
-    
+
     return res.json({ success: true, message: `Password for ${email} reset to 'Password123!' and email confirmed.` });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -1528,9 +1528,9 @@ app.post('/api/staff/toggle-shift', async (req, res) => {
       // Clock Out: Close active shifts
       const { error: sError } = await supabaseAdmin
         .from('staff_shifts')
-        .update({ 
-          status: 'completed', 
-          clock_out: new Date().toISOString() 
+        .update({
+          status: 'completed',
+          clock_out: new Date().toISOString()
         })
         .eq('staff_id', userId)
         .eq('status', 'active');
