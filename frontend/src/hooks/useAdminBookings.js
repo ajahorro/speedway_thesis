@@ -26,8 +26,8 @@ export const useAdminBookings = () => {
         .select(`
           *,
           customer:profiles!bookings_customer_id_fkey(full_name, email),
-          vehicles:booking_vehicles(*),
-          payments:payments(*)
+          vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*),
+          payments:payments!payments_booking_id_fkey(*)
         `)
         .order('created_at', { ascending: false });
 

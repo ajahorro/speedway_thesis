@@ -213,13 +213,14 @@ const AdminProfile = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <form onSubmit={(e) => { e.preventDefault(); executeVerifiedAction(); }} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div>
               <label style={labelStyle}>Current Password</label>
               <div style={{ position: 'relative' }}>
                 <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
                   type="password"
+                  autoComplete="current-password"
                   style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text', paddingLeft: '3.25rem' }} 
                   placeholder="Verify identity"
                   value={formData.currentPassword}
@@ -234,6 +235,7 @@ const AdminProfile = () => {
                 <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
                   type="password"
+                  autoComplete="new-password"
                   style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text', paddingLeft: '3.25rem' }} 
                   placeholder="Enter new password"
                   value={formData.newPassword}
@@ -248,6 +250,7 @@ const AdminProfile = () => {
                 <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
                   type="password"
+                  autoComplete="new-password"
                   style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text', paddingLeft: '3.25rem' }} 
                   placeholder="Confirm new password"
                   value={formData.confirmPassword}
@@ -257,7 +260,7 @@ const AdminProfile = () => {
             </div>
 
             <button 
-              onClick={() => executeVerifiedAction()}
+              type="submit"
               disabled={loading || !formData.newPassword || !formData.currentPassword}
               style={{ 
                 marginTop: '1rem',
@@ -299,7 +302,7 @@ const AdminProfile = () => {
                 Forgot Password?
               </button>
             </div>
-          </div>
+          </form>
         </div>
 
       </div>
@@ -307,7 +310,7 @@ const AdminProfile = () => {
       {/* Verification Modal */}
       {showVerifyModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}>
-          <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', padding: '2.5rem', borderRadius: 'var(--admin-radius)', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
+          <form onSubmit={(e) => { e.preventDefault(); executeVerifiedAction(); }} style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', padding: '2.5rem', borderRadius: 'var(--admin-radius)', maxWidth: '400px', width: '90%', textAlign: 'center' }}>
             <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem auto', color: 'var(--admin-brand)' }}>
               <Shield size={32} />
             </div>
@@ -316,6 +319,7 @@ const AdminProfile = () => {
             
             <input 
               type="password"
+              autoComplete="current-password"
               placeholder="Current Password"
               value={formData.currentPassword}
               onChange={e => setFormData({...formData, currentPassword: e.target.value})}
@@ -323,10 +327,10 @@ const AdminProfile = () => {
             />
 
             <div style={{ display: 'flex', gap: '1rem' }}>
-              <button onClick={() => setShowVerifyModal(false)} style={{ flex: 1, padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={executeVerifiedAction} style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', border: 'none', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Verify & Proceed</button>
+              <button type="button" onClick={() => setShowVerifyModal(false)} style={{ flex: 1, padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Cancel</button>
+              <button type="submit" style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', border: 'none', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Verify & Proceed</button>
             </div>
-          </div>
+          </form>
         </div>
       )}
     </div>

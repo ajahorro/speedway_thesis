@@ -108,8 +108,8 @@ const AdminSchedule = () => {
         .from('bookings')
         .select(`
           *,
-          staff:profiles!bookings_staff_id_fkey(full_name),
-          vehicles:booking_vehicles(*, services:booking_vehicle_services(service_name))
+          customer:profiles!bookings_customer_id_fkey(full_name, email),
+          vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*, services:booking_vehicle_services(service_name))
         `)
         .lte('start_datetime', fetchEnd)
         .gte('end_datetime', fetchStart)

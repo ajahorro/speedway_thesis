@@ -49,10 +49,10 @@ const AdminSalesReport = () => {
         .from('payments')
         .select(`
           *,
-          booking:bookings(
+          booking:bookings!payments_booking_id_fkey(
             id, 
             customer_id,
-            vehicles:booking_vehicles(
+            vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(
               *,
               services:booking_vehicle_services(*)
             )

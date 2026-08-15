@@ -41,11 +41,11 @@ const AdminPayments = () => {
         .from('payments')
         .select(`
           *,
-          booking:bookings (
+          booking:bookings!payments_booking_id_fkey (
             *,
             customer:profiles!bookings_customer_id_fkey (full_name, email),
-            payments (*),
-            vehicles:booking_vehicles (
+            payments:payments!payments_booking_id_fkey (*),
+            vehicles:booking_vehicles!booking_vehicles_booking_id_fkey (
               *,
               services:booking_vehicle_services (*)
             )

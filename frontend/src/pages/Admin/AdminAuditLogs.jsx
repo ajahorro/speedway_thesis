@@ -31,10 +31,7 @@ const AdminAuditLogs = () => {
       logger.admin('Fetching live system audit trail...');
       const { data, error } = await supabase
         .from('audit_logs')
-        .select(`
-          *,
-          profiles:profiles!audit_logs_actor_id_fkey(full_name, role)
-        `)
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(100);
 

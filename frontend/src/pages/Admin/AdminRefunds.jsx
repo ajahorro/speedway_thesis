@@ -38,8 +38,8 @@ const AdminRefunds = () => {
         .select(`
           *,
           customer:profiles!bookings_customer_id_fkey(full_name, email, phone_number),
-          vehicles:booking_vehicles(*),
-          payments:payments(*)
+          vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*),
+          payments:payments!payments_booking_id_fkey(*)
         `)
         .in('status', ['cancelled', 'FLAGGED_NOSHOW'])
         .order('updated_at', { ascending: false });
