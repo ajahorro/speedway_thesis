@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 const CustomerProfile = () => {
-  const { user, profile, updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount } = useAuth();
+  const { user, profile, updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount, resetPassword } = useAuth();
   
   // States
   const [isEditing, setIsEditing] = useState(false);
@@ -17,6 +17,25 @@ const CustomerProfile = () => {
   const [showPassModal, setShowPassModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+
+  const handleForgotPassword = async () => {
+    const email = profile?.email || user?.email;
+    if (!email) return toast.error('No email address associated with this account');
+    const toastId = toast.loading('Sending password reset instructions...');
+    try {
+      await resetPassword(email);
+      toast.success('Password reset email sent. Check your inbox!', { id: toastId });
+    } catch (err) {
+      if (err.message === 'SMTP_UNAVAILABLE') {
+        toast.error(
+          'Password reset email service is currently unavailable. Please contact an Administrator to reset your password.',
+          { id: toastId, duration: 7000 }
+        );
+      } else {
+        toast.error(err.message || 'Failed to send reset email', { id: toastId });
+      }
+    }
+  };
   
   // Form Data
   const [formData, setFormData] = useState({
@@ -50,7 +69,15 @@ const CustomerProfile = () => {
     }
   }, [profile, user]);
 
-  // --- Handlers ---
+  // Password form is valid only when:
+  // 1. Current password is filled
+  // 2. New password is more than 4 characters
+  // 3. Confirm password matches new password
+  const isPasswordFormValid =
+    passwordData.currentPassword.trim().length > 0 &&
+    passwordData.newPassword.length > 4 &&
+    passwordData.confirmPassword.length > 0 &&
+    passwordData.newPassword === passwordData.confirmPassword;
 
   const handleSaveProfileClick = (e) => {
     e.preventDefault();
@@ -64,8 +91,8 @@ const CustomerProfile = () => {
     if (passwordData.newPassword !== passwordData.confirmPassword) {
       return toast.error('New passwords do not match');
     }
-    if (passwordData.newPassword.length < 6) {
-      return toast.error('New password must be at least 6 characters');
+    if (passwordData.newPassword.length <= 4) {
+      return toast.error('New password must be more than 4 characters');
     }
 
     const toastId = toast.loading('Verifying identity & rotating keys...');
@@ -263,7 +290,7 @@ const CustomerProfile = () => {
                 <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
                   <button 
                     type="button" 
-                    onClick={() => { setIsEditing(false); setFormData({ firstName: profile.first_name, lastName: profile.last_name, phone: profile.phone_number }); }}
+                    onClick={() => { setIsEditing(false); setFormData({ firstName: profile?.first_name || '', lastName: profile?.last_name || '', phone: profile?.phone_number || '' }); }}
                     style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}
                   >
                     Cancel
@@ -314,8 +341,26 @@ const CustomerProfile = () => {
             </div>
 
             <form onSubmit={handleUpdatePasswordClick} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <input 
+                type="text" 
+                name="username" 
+                autoComplete="username" 
+                defaultValue={profile?.email || user?.email || ''}
+                style={{ display: 'none' }} 
+                tabIndex={-1} 
+                aria-hidden="true" 
+              />
               <div>
-                <label style={labelStyle}>Current Password</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <label style={{ ...labelStyle, marginBottom: 0 }}>Current Password</label>
+                  <button 
+                    type="button" 
+                    onClick={handleForgotPassword}
+                    style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', padding: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
                 <input 
                   type="password" 
                   autoComplete="current-password"
@@ -323,6 +368,7 @@ const CustomerProfile = () => {
                   value={passwordData.currentPassword}
                   onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
                   style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text' }} 
+                  required
                 />
               </div>
               <div>
@@ -347,26 +393,28 @@ const CustomerProfile = () => {
                   style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text' }} 
                 />
               </div>
+              {/* Inline validation hints */}
+              {passwordData.newPassword.length > 0 && passwordData.newPassword.length <= 4 && (
+                <div style={{ fontSize: '0.72rem', color: '#f59e0b', fontWeight: '700', marginTop: '-0.5rem' }}>
+                  ⚠ Password must be more than 4 characters
+                </div>
+              )}
+              {passwordData.confirmPassword.length > 0 && passwordData.newPassword !== passwordData.confirmPassword && (
+                <div style={{ fontSize: '0.72rem', color: '#ef4444', fontWeight: '700', marginTop: '-0.5rem' }}>
+                  ✕ Passwords do not match
+                </div>
+              )}
               <button 
                 type="submit" 
-                disabled={!passwordData.newPassword || !passwordData.currentPassword}
-                style={{ width: '100%', padding: '1rem', background: 'var(--admin-brand)', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', opacity: (!passwordData.newPassword || !passwordData.currentPassword) ? 0.4 : 1 }}
+                disabled={!isPasswordFormValid}
+                style={{ width: '100%', padding: '1rem', background: isPasswordFormValid ? 'var(--admin-brand)' : 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '8px', color: isPasswordFormValid ? 'white' : 'rgba(255,255,255,0.3)', fontWeight: '950', cursor: isPasswordFormValid ? 'pointer' : 'not-allowed', textTransform: 'uppercase', transition: 'all 0.2s ease', opacity: isPasswordFormValid ? 1 : 0.5 }}
               >
                 Rotate Password
               </button>
               <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
                 <button 
                   type="button"
-                  onClick={() => {
-                    const email = user?.email;
-                    if (email) {
-                      toast.promise(supabase.auth.resetPasswordForEmail(email), {
-                        loading: 'Sending reset link...',
-                        success: 'Reset link sent to your email!',
-                        error: 'Failed to send reset link.'
-                      });
-                    }
-                  }}
+                  onClick={handleForgotPassword}
                   style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
                 >
                   Forgot Password?

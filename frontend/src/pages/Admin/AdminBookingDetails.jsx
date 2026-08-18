@@ -22,6 +22,8 @@ import LoadingState from '../../components/LoadingState';
 import { logger } from '../../utils/logger';
 
 import { sendStatusEmail, sendBookingConfirmationEmail, sendPaymentReceiptEmail } from '../../services/notificationService';
+import { sendStaffAssignmentNotification } from '../../services/EmailService';
+import { BACKEND_URL } from '../../config/api';
 
 const AdminBookingDetails = () => {
   const { id } = useParams();
@@ -169,21 +171,46 @@ const AdminBookingDetails = () => {
 
   const fetchStaffList = async () => {
     try {
-      const { data: allStaff } = await supabase.from('profiles').select('*').eq('role', 'STAFF');
+      const { data: allStaff } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'STAFF');
+
       if (!allStaff) return;
 
-      // REQ-NFR-01: Dynamic staff availability — occupied if assigned to ANY in_progress booking
+      // Find staff assigned to ANY booking or vehicle unit currently IN_PROGRESS
       const { data: activeBookings } = await supabase
         .from('bookings')
         .select('staff_id, status')
-        .not('staff_id', 'is', null);
+        .not('staff_id', 'is', null)
+        .in('status', ['in_progress', 'ongoing', 'IN_PROGRESS']);
 
-      const filteredStaff = allStaff.map(s => ({
-        ...s,
-        isBusy: (activeBookings || []).some(b => b.staff_id === s.id && b.status?.toLowerCase() === 'ongoing')
-      }));
+      const { data: activeVehicles } = await supabase
+        .from('booking_vehicles')
+        .select('booking_id, status, bookings!inner(staff_id)')
+        .eq('status', 'IN_PROGRESS');
 
-      setStaffList(filteredStaff);
+      const busyStaffIds = new Set();
+      (activeBookings || []).forEach(b => {
+        if (b.staff_id) busyStaffIds.add(b.staff_id);
+      });
+      (activeVehicles || []).forEach(v => {
+        if (v.bookings?.staff_id) busyStaffIds.add(v.bookings.staff_id);
+      });
+
+      const processedStaff = allStaff.map(s => {
+        const isClockedIn = Boolean(s.is_clocked_in);
+        const hasActiveJob = busyStaffIds.has(s.id);
+        const isAvailable = isClockedIn && !hasActiveJob;
+        return {
+          ...s,
+          isClockedIn,
+          hasActiveJob,
+          isAvailable
+        };
+      });
+
+      setStaffList(processedStaff);
     } catch (err) {
       logger.error('Staff Fetch Error', err);
     }
@@ -215,9 +242,14 @@ const AdminBookingDetails = () => {
   };
 
   const notifyUser = async (userId, title, message, type, url) => {
-    await supabase.from('notifications').insert({
-      user_id: userId, title, message, notification_type: type, action_url: url
-    });
+    try {
+      const { error } = await supabase.from('notifications').insert({
+        user_id: userId, title, message, notification_type: type, action_url: url
+      });
+      if (error) logger.error('[notifyUser] Error inserting notification:', error);
+    } catch (err) {
+      logger.error('[notifyUser] Exception:', err);
+    }
   };
 
   const handleAssignStaff = async (staffId) => {
@@ -228,12 +260,13 @@ const AdminBookingDetails = () => {
       
       // REQ-ADM-04: Determine if this is a post-service assignment
       const isPostService = booking.status === 'completed';
+      const customerName = booking.customer?.full_name || booking.customer_name || 'Customer';
       
       const updatePayload = { 
         staff_id: staffId, 
         assigned_by: admin?.id, 
         assigned_at: new Date().toISOString(),
-        customer_name: booking.customer_name || booking.customer?.full_name,
+        customer_name: customerName,
         contact_number: booking.contact_number || booking.customer?.phone_number
       };
 
@@ -241,11 +274,30 @@ const AdminBookingDetails = () => {
       
       if (error) throw error;
       
-      // Notify Staff
-      await notifyUser(staffId, 'New Fleet Assigned! 🔧', `You have been assigned to lead the detailing session for ${booking.customer?.full_name}.`, 'TASK_ASSIGNED', `/staff/tasks`);
+      const staffMember = staffList.find(s => s.id === staffId);
+      const staffName = staffMember?.full_name || 'Staff';
+
+      // 1. Notify Staff in-app
+      await notifyUser(
+        staffId, 
+        'New Fleet Assigned! 🔧', 
+        `You have been assigned to lead the detailing session for ${customerName}.`, 
+        'TASK_ASSIGNED', 
+        `/staff/tasks`
+      );
       
+      // 2. Dual Delivery — Dispatch direct 1-to-1 email alert to technician asynchronously
+      if (staffMember?.email) {
+        sendStaffAssignmentNotification(staffMember.email, {
+          date: booking.start_datetime ? new Date(booking.start_datetime).toLocaleDateString() : 'Scheduled Date',
+          time: booking.start_datetime ? new Date(booking.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Scheduled Time',
+          vehicle: vehicles?.[0]?.make_model || vehicles?.[0]?.model || 'Assigned Vehicle',
+          plate: vehicles?.[0]?.plate_number || 'N/A',
+          services: vehicles?.[0]?.services?.map(s => s.service_name || s.name).join(', ') || 'Detailing Services'
+        }).catch(err => logger.error('Staff assignment email failed:', err));
+      }
+
       // LOG AUDIT — differentiate post-service vs normal assignment
-      const staffName = staffList.find(s => s.id === staffId)?.full_name || 'Staff';
       await supabase.from('audit_logs').insert({
         booking_id: id,
         action_type: isPostService ? 'POST_SERVICE_ASSIGNMENT' : 'STAFF_ASSIGNED',
@@ -1226,17 +1278,26 @@ const AdminBookingDetails = () => {
                 )}
               </div>
             ) : (
-              <select 
-                onChange={(e) => handleAssignStaff(e.target.value)} 
-                style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '900', outline: 'none', fontSize: '0.8rem' }}
-              >
-                <option value="">SELECT STAFF...</option>
-                {staffList.map(s => (
-                  <option key={s.id} value={s.id} disabled={s.isBusy}>
-                    {s.full_name} {s.isBusy ? '(OCCUPIED)' : ''}
-                  </option>
-                ))}
-              </select>
+              <div>
+                {staffList.filter(s => s.isAvailable).length > 0 ? (
+                  <select 
+                    onChange={(e) => handleAssignStaff(e.target.value)} 
+                    defaultValue=""
+                    style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '900', outline: 'none', fontSize: '0.8rem' }}
+                  >
+                    <option value="" disabled>SELECT AVAILABLE TECHNICIAN...</option>
+                    {staffList.filter(s => s.isAvailable).map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.full_name} (ON DUTY)
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div style={{ padding: '0.85rem', background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '4px', color: '#ef4444', fontSize: '0.75rem', fontWeight: '800', textAlign: 'center' }}>
+                    No available staff on duty.
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

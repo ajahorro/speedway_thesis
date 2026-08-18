@@ -12,51 +12,64 @@ import { confirmLogout } from '../../utils/logoutConfirm';
 import ConfirmationToast from '../../components/ConfirmationToast';
 
 const StaffLayout = () => {
-  const { profile, signOut, fetchProfile, setProfile, toggleShift } = useAuth();
+  const { user, profile, signOut, fetchProfile, setProfile, toggleShift } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(!isMobile);
   const [unreadCount, setUnreadCount] = React.useState(0);
 
+  const userId = user?.id || profile?.id;
+
   const fetchUnreadCount = useCallback(async () => {
-    if (!profile?.id) return;
+    if (!userId) return;
     try {
       const { count } = await supabase
         .from('notifications')
         .select('*', { count: 'exact', head: true })
-        .eq('user_id', profile.id)
+        .eq('user_id', userId)
         .eq('is_read', false);
       setUnreadCount(count || 0);
     } catch {
       setUnreadCount(0);
     }
-  }, [profile?.id]);
+  }, [userId]);
 
   useEffect(() => {
     fetchUnreadCount();
+    if (!userId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchUnreadCount();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+
     const channel = supabase
-      .channel(`staff-notif-badge-${profile?.id}`)
+      .channel(`staff-notif-badge-${userId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'notifications',
-        filter: `user_id=eq.${profile?.id}`
+        filter: `user_id=eq.${userId}`
       }, () => fetchUnreadCount())
       .subscribe();
-    return () => supabase.removeChannel(channel);
-  }, [profile?.id, fetchUnreadCount]);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      supabase.removeChannel(channel);
+    };
+  }, [userId, fetchUnreadCount]);
 
   const menuItems = [
-    { icon: LayoutDashboard, label: 'Task Hub', path: '/staff' },
-    { icon: ClipboardList, label: 'Active Jobs', path: '/staff/tasks' },
+    { icon: ClipboardList, label: 'My Jobs', path: '/staff' },
     { icon: History, label: 'Work History', path: '/staff/history' },
-    { icon: Settings, label: 'My Profile', path: '/staff/profile' },
-    { icon: Bell, label: 'Notifications', path: '/staff/notifications' },
+    { icon: User, label: 'My Profile', path: '/staff/profile' },
   ];
 
   const handleToggleShift = async () => {
     if (!profile?.id) return;
     const isClockingOut = profile.is_clocked_in;
-    const newStatus = !isClockingOut;
 
     if (isClockingOut) {
       toast.custom((t) => (
@@ -88,21 +101,24 @@ const StaffLayout = () => {
     });
   };
 
-  const navItemStyle = (path) => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.75rem',
-    padding: '0.85rem 1.25rem',
-    borderRadius: '4px',
-    color: location.pathname === path ? 'white' : '#8E9196',
-    background: location.pathname === path ? '#E61E2A' : 'transparent',
-    textDecoration: 'none',
-    fontWeight: '800',
-    fontSize: '0.85rem',
-    transition: 'all 0.2s ease',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px'
-  });
+  const navItemStyle = (path) => {
+    const isActive = location.pathname === path || (path === '/staff' && (location.pathname === '/staff' || location.pathname === '/staff/tasks'));
+    return {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem',
+      padding: '0.85rem 1.25rem',
+      borderRadius: '4px',
+      color: isActive ? 'white' : '#8E9196',
+      background: isActive ? '#E61E2A' : 'transparent',
+      textDecoration: 'none',
+      fontWeight: '800',
+      fontSize: '0.85rem',
+      transition: 'all 0.2s ease',
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px'
+    };
+  };
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#0A0B0D', color: 'white', fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -147,7 +163,7 @@ const StaffLayout = () => {
         </nav>
 
         <div style={{ padding: '1.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
-          {/* 🕹️ Shift Lifecycle Controller */}
+          {/* 🕹️ Primary Footer Action: Shift Lifecycle Controller */}
           <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <button 
               onClick={handleToggleShift}
@@ -174,6 +190,24 @@ const StaffLayout = () => {
               <div style={{ fontSize: '0.65rem', color: '#8E9196', fontWeight: '900', textTransform: 'uppercase' }}>Technician</div>
             </div>
           </div>
+
+          <Link 
+            to="/staff/settings"
+            onClick={() => isMobile && setIsSidebarOpen(false)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem',
+              padding: '0.85rem 1rem', borderRadius: '4px',
+              background: location.pathname === '/staff/settings' ? '#E61E2A' : 'transparent',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              color: location.pathname === '/staff/settings' ? 'white' : '#8E9196',
+              fontWeight: '800', fontSize: '0.85rem', textDecoration: 'none',
+              textTransform: 'uppercase', letterSpacing: '0.5px',
+              marginBottom: '0.5rem', transition: 'all 0.2s'
+            }}
+          >
+            <Settings size={18} /> SETTINGS
+          </Link>
+
           <button 
             onClick={handleLogout}
             style={{ 

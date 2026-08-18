@@ -13,6 +13,7 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { showConfirmation } from '../../utils/logoutConfirm';
 import { logger } from '../../utils/logger';
 import { useAuth } from '../../hooks/useAuth';
+import { BACKEND_URL } from '../../config/api';
 
 const AdminAccountsManagement = () => {
   const isMobile = useMediaQuery('(max-width: 1024px)');
@@ -37,7 +38,7 @@ const AdminAccountsManagement = () => {
     setLoading(true);
     try {
       logger.admin('Synchronizing account directory...');
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/admin/profiles`);
+      const response = await fetch(`${BACKEND_URL}/api/admin/profiles`);
       const result = await response.json();
       if (!result.success) throw new Error(result.error);
       // Store the default admin ID from the backend (single source of truth)
@@ -71,7 +72,7 @@ const AdminAccountsManagement = () => {
     try {
       logger.admin(`Generating ${activeTab} invitation for: ${inviteForm.email}`);
       
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/admin/generate-invite`, {
+      const response = await fetch(`${BACKEND_URL}/admin/generate-invite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -114,7 +115,7 @@ const AdminAccountsManagement = () => {
       onConfirm: async () => {
         setIsSubmitting(true);
         try {
-          const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/admin/revoke-access`, {
+          const response = await fetch(`${BACKEND_URL}/api/admin/revoke-access`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ memberId: member.id })

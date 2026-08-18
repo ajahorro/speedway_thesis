@@ -160,8 +160,8 @@ export const fetchCustomerBookings = async (customerId) => {
     .from('bookings')
     .select(`
       *,
-      vehicles:booking_vehicles(*, services:booking_vehicle_services!booking_vehicle_id(*)),
-      payments:payments(*),
+      vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*, services:booking_vehicle_services!booking_vehicle_id(*)),
+      payments:payments!payments_booking_id_fkey(*),
       assigned_staff:profiles!bookings_staff_id_fkey(first_name, last_name, email)
     `)
     .eq('customer_id', customerId)
@@ -179,8 +179,8 @@ export const fetchBookingById = async (bookingId) => {
     .from('bookings')
     .select(`
       *,
-      vehicles:booking_vehicles(*, services:booking_vehicle_services!booking_vehicle_id(*)),
-      payments:payments(*),
+      vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*, services:booking_vehicle_services!booking_vehicle_id(*)),
+      payments:payments!payments_booking_id_fkey(*),
       assigned_staff:profiles!bookings_staff_id_fkey(first_name, last_name, email)
     `)
     .eq('id', bookingId)

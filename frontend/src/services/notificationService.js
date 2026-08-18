@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { BACKEND_URL } from '../config/api';
 
 /**
  * notificationService.js
@@ -66,7 +67,6 @@ export const subscribeToNotifications = (userId, callback) => {
 };
 
 export const sendBookingConfirmationEmail = async (bookingId) => {
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
   try {
     const response = await fetch(`${BACKEND_URL}/api/emails/booking-confirmation`, {
       method: 'POST',
@@ -81,7 +81,6 @@ export const sendBookingConfirmationEmail = async (bookingId) => {
 };
 
 export const sendPaymentReceiptEmail = async (bookingId, paymentId) => {
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
   try {
     const response = await fetch(`${BACKEND_URL}/api/emails/payment-receipt`, {
       method: 'POST',

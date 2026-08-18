@@ -12,6 +12,7 @@ import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { sendStatusEmail } from '../../services/notificationService';
 import ConfirmationToast from '../../components/ConfirmationToast';
+import { BACKEND_URL } from '../../config/api';
 const StaffDashboard = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
@@ -19,8 +20,32 @@ const StaffDashboard = () => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ pending: 0, active: 0, completed: 0 });
-  const [updatingTask, setUpdatingTask] = useState(null);
   const [localNotes, setLocalNotes] = useState({});
+  const [broadcasts, setBroadcasts] = useState([]);
+  const [shiftTimer, setShiftTimer] = useState('OFF DUTY');
+
+  useEffect(() => {
+    if (!profile?.is_clocked_in) {
+      setShiftTimer('OFF DUTY');
+      return;
+    }
+
+    const rawClockIn = profile.clock_in_timestamp || profile.updated_at;
+    const startTime = rawClockIn ? new Date(rawClockIn).getTime() : Date.now();
+
+    const updateTimer = () => {
+      const now = Date.now();
+      const diffSecs = Math.max(0, Math.floor((now - startTime) / 1000));
+      const hrs = String(Math.floor(diffSecs / 3600)).padStart(2, '0');
+      const mins = String(Math.floor((diffSecs % 3600) / 60)).padStart(2, '0');
+      const secs = String(diffSecs % 60).padStart(2, '0');
+      setShiftTimer(`${hrs}:${mins}:${secs}`);
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [profile?.is_clocked_in, profile?.clock_in_timestamp, profile?.updated_at]);
 
   useEffect(() => {
     fetchAssignedTasks();
@@ -33,6 +58,14 @@ const StaffDashboard = () => {
         schema: 'public', 
         table: 'bookings',
         filter: `staff_id=eq.${profile?.id}`
+      }, () => {
+        fetchAssignedTasks();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${profile?.id}`
       }, () => {
         fetchAssignedTasks();
       })
@@ -77,6 +110,16 @@ const StaffDashboard = () => {
       const active = allVehicleTasks.filter(t => t.status?.toUpperCase() === 'IN_PROGRESS').length;
       const completed = allVehicleTasks.filter(t => t.status?.toUpperCase() === 'COMPLETED').length;
       setStats({ pending, active, completed });
+
+      // Fetch System Broadcasts & Announcements
+      const { data: notifData } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', profile.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      setBroadcasts(notifData || []);
     } catch (err) {
       console.error('Task Fetch Error:', err);
       toast.error('Failed to load tasks');
@@ -91,7 +134,6 @@ const StaffDashboard = () => {
     }
     const toastId = toast.loading(`Updating unit status...`);
     try {
-      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
       const response = await fetch(`${BACKEND_URL}/api/bookings/update-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,11 +208,6 @@ const StaffDashboard = () => {
     }
   };
 
-  const broadcasts = [
-    { id: 1, title: 'Real-time Messaging', content: 'This part will be available for capstone 2.', date: 'Upcoming' },
-    { id: 2, title: 'Performance Analytics', content: 'This part will be available for capstone 2.', date: 'Upcoming' }
-  ];
-
   if (loading) return <LoadingState message="Synchronizing your daily task hub..." />;
 
   const badgeStyle = (status) => {
@@ -188,6 +225,9 @@ const StaffDashboard = () => {
     };
   };
 
+  const totalAssigned = stats.completed + stats.active + stats.pending;
+  const completionRate = totalAssigned > 0 ? Math.round((stats.completed / totalAssigned) * 100) : 0;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '2rem' }}>
@@ -197,7 +237,7 @@ const StaffDashboard = () => {
           subtitle={`Ready for duty, ${profile?.full_name?.split(' ')[0]}. Manage your assigned vehicle jobs below.`}
         />
         
-        <div style={{ background: '#15171A', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', minWidth: '300px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ background: '#15171A', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', minWidth: '320px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#8E9196', textTransform: 'uppercase', letterSpacing: '1.5px', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <TrendingUp size={14} color="#10b981" /> SHIFT ACTIVITY SNAPSHOT
@@ -205,18 +245,17 @@ const StaffDashboard = () => {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ textAlign: 'center', flex: 1 }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: '950', color: '#10b981' }}>{stats.completed}</div>
-              <div style={{ fontSize: '0.55rem', color: '#444', fontWeight: '950', textTransform: 'uppercase' }}>COMPLETED</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: '950', color: stats.active > 0 ? '#f59e0b' : '#8E9196', textTransform: 'uppercase' }}>
+                {stats.active > 0 ? `${stats.active} IN PROGRESS` : 'NO ACTIVE JOB'}
+              </div>
+              <div style={{ fontSize: '0.55rem', color: '#8E9196', fontWeight: '950', textTransform: 'uppercase', marginTop: '0.25rem' }}>ACTIVE JOB</div>
             </div>
             <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.05)' }}></div>
             <div style={{ textAlign: 'center', flex: 1 }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: '950', color: '#f59e0b' }}>{stats.active + stats.pending}</div>
-              <div style={{ fontSize: '0.55rem', color: '#444', fontWeight: '950', textTransform: 'uppercase' }}>OUTSTANDING</div>
-            </div>
-            <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.05)' }}></div>
-            <div style={{ textAlign: 'center', flex: 1 }}>
-              <div style={{ fontSize: '1.5rem', fontWeight: '950', color: 'white' }}>{Math.round((stats.completed / Math.max(1, stats.completed + stats.active + stats.pending)) * 100)}%</div>
-              <div style={{ fontSize: '0.55rem', color: '#444', fontWeight: '950', textTransform: 'uppercase' }}>YIELD</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: '950', color: profile?.is_clocked_in ? '#10b981' : '#E61E2A', textTransform: 'uppercase' }}>
+                {shiftTimer}
+              </div>
+              <div style={{ fontSize: '0.55rem', color: '#8E9196', fontWeight: '950', textTransform: 'uppercase', marginTop: '0.25rem' }}>ACTIVE SHIFT</div>
             </div>
           </div>
         </div>
@@ -372,35 +411,33 @@ const StaffDashboard = () => {
           )}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', position: 'sticky', top: '100px' }}>
-          <div style={{ background: '#E61E2A', borderRadius: '8px', padding: '1.5rem', color: 'white', boxShadow: '0 10px 20px rgba(230, 30, 42, 0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: '4px', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <User size={24} />
-              </div>
-              <div style={{ fontSize: '0.6rem', fontWeight: '950', background: 'rgba(0,0,0,0.2)', padding: '0.2rem 0.5rem', borderRadius: '2px', letterSpacing: '1px' }}>OFFICIAL STAFF ID</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '1.2rem', fontWeight: '950', textTransform: 'uppercase', marginBottom: '0.25rem' }}>{profile?.full_name}</div>
-              <div style={{ fontSize: '0.65rem', fontWeight: '800', opacity: 0.8, textTransform: 'uppercase', letterSpacing: '1px' }}>ID: SW-{profile?.id?.slice(0, 8).toUpperCase()}</div>
-            </div>
-          </div>
-
+        <div style={{ width: isMobile ? '100%' : '320px', display: 'flex', flexDirection: 'column', gap: '2rem', position: 'sticky', top: '100px' }}>
+          {/* System Broadcasts & Announcements */}
           <div style={{ background: '#15171A', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', overflow: 'hidden' }}>
             <div style={{ padding: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Bell size={18} color="#E61E2A" />
-              <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '1px' }}>System Broadcasts</h3>
+              <h3 style={{ margin: 0, fontSize: '0.75rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                System Broadcasts & Announcements
+              </h3>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {broadcasts.map(b => (
-                <div key={b.id} style={{ padding: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'white' }}>{b.title}</div>
-                    <div style={{ fontSize: '0.55rem', fontWeight: '900', color: '#444' }}>{b.date}</div>
+              {broadcasts.length > 0 ? (
+                broadcasts.map(b => (
+                  <div key={b.id} style={{ padding: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', alignItems: 'center' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'white' }}>{b.title || 'Announcement'}</div>
+                      <div style={{ fontSize: '0.55rem', fontWeight: '900', color: '#8E9196' }}>
+                        {b.created_at ? new Date(b.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#8E9196', fontWeight: '600', lineHeight: 1.4 }}>{b.message}</div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: '#8E9196', fontWeight: '600', lineHeight: 1.4 }}>{b.content}</div>
+                ))
+              ) : (
+                <div style={{ padding: '2rem 1.25rem', textAlign: 'center', color: '#8E9196', fontSize: '0.75rem', fontWeight: '600' }}>
+                  No active shop announcements
                 </div>
-              ))}
+              )}
             </div>
           </div>
 

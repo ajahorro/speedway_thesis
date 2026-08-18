@@ -73,6 +73,24 @@ if (supabaseUrl && supabaseKey) {
 }
 
 // 🛡️ DEFAULT ADMIN — Single source of truth.
+/**
+ * Backend Data Normalization Helper
+ * Guarantees customer_name and customer.full_name are non-null strings across all client payloads.
+ */
+function normalizeBookingData(booking) {
+  if (!booking) return booking;
+  const customerName = booking.customer_name || booking.customer?.full_name || 'Customer';
+  const customerObj = booking.customer || {};
+  
+  return {
+    ...booking,
+    customer_name: customerName,
+    customer: {
+      ...customerObj,
+      full_name: customerObj.full_name || customerName
+    }
+  };
+}
 // Only this specific account is protected from deactivation and always shows the DEFAULT ADMIN badge.
 // To change the default admin, update this ID to the new account's user ID.
 const DEFAULT_ADMIN_ID = '3057c70b-7eec-4445-9a1b-68118f9c6bd0'; // testadmin961@gmail.com
@@ -962,18 +980,19 @@ app.post('/api/admin/broadcast', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Message cannot be empty.' });
     }
 
-    // Step 1: Fetch all profiles (bypasses RLS)
+    // Step 1: Fetch active profiles (bypasses RLS)
     const { data: profiles, error: profileError } = await supabaseAdmin
       .from('profiles')
-      .select('id');
+      .select('id, email, full_name')
+      .eq('is_active', true);
 
     if (profileError) throw profileError;
 
     if (!profiles || profiles.length === 0) {
-      return res.status(404).json({ success: false, error: 'No profiles found to broadcast to.' });
+      return res.status(404).json({ success: false, error: 'No active profiles found to broadcast to.' });
     }
 
-    // Step 2: Prepare and insert notification for each profile
+    // Step 2: Prepare and insert in-app notification for each active profile
     const notifications = profiles.map(p => ({
       user_id: p.id,
       title: 'System Announcement 📣',
@@ -1001,8 +1020,132 @@ app.post('/api/admin/broadcast', async (req, res) => {
 
     if (auditError) console.error('Audit Log Error (broadcast):', auditError);
 
+    // Step 4: NON-BLOCKING ASYNC EMAIL BATCH DISPATCH (Resend API)
+    // Runs in setImmediate queue so HTTP response returns under 500ms without blocking UI execution
+    if (resendClient) {
+      setImmediate(async () => {
+        for (const p of profiles) {
+          if (p.email) {
+            try {
+              await resendClient.emails.send({
+                from: 'Speedway <notifications@speedway-autoxmoto.com>',
+                to: [p.email],
+                subject: 'System Announcement 📣',
+                html: `<div style="font-family: sans-serif; padding: 20px; background: #0A0B0D; color: #ffffff;">
+                  <h2 style="color: #E61E2A;">Speedway System Announcement</h2>
+                  <p style="font-size: 16px; color: #e5e7eb;">${message.trim()}</p>
+                  <hr style="border: none; border-top: 1px solid #374151; margin: 20px 0;" />
+                  <p style="font-size: 12px; color: #9ca3af;">This is an automated operational signal from Speedway Admin Command Center.</p>
+                </div>`
+              });
+              await new Promise(r => setTimeout(r, 100)); // rate limiting buffer
+            } catch (emailErr) {
+              console.error(`[BROADCAST ASYNC EMAIL ERROR] ${p.email}:`, emailErr.message);
+            }
+          }
+        }
+      });
+    }
+
     return res.json({ success: true, receiversCount: profiles.length });
   } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * ⏱️ Staff Shift Toggle Endpoint
+ * Updates staff attendance availability and clock-in timestamp in database (bypasses RLS).
+ * Does NOT send emails or notifications; simply updates staff status.
+ */
+app.post('/api/staff/toggle-shift', async (req, res) => {
+  const { userId, newStatus } = req.body;
+  console.log(`⏱️ [STAFF] Shift toggle request: userId=${userId}, newStatus=${newStatus}`);
+
+  try {
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID is required.' });
+    }
+
+    const timestamp = newStatus ? new Date().toISOString() : null;
+
+    // First attempt: update both is_clocked_in and clock_in_timestamp
+    let { data: updatedProfile, error: updateError } = await supabaseAdmin
+      .from('profiles')
+      .update({
+        is_clocked_in: Boolean(newStatus),
+        clock_in_timestamp: timestamp
+      })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    // Fallback if clock_in_timestamp column is not yet in schema cache
+    if (updateError && (updateError.code === 'PGRST204' || updateError.message?.includes('clock_in_timestamp'))) {
+      console.warn('⚠️ clock_in_timestamp column missing, falling back to is_clocked_in update');
+      const fallbackResult = await supabaseAdmin
+        .from('profiles')
+        .update({
+          is_clocked_in: Boolean(newStatus)
+        })
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (fallbackResult.error) throw fallbackResult.error;
+      updatedProfile = fallbackResult.data;
+    } else if (updateError) {
+      throw updateError;
+    }
+
+    // Record shift event in Audit Log
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_name: updatedProfile?.email || updatedProfile?.full_name || 'Staff',
+      actor_role: 'STAFF',
+      details: `Technician ${updatedProfile?.full_name || userId} ${newStatus ? 'CLOCKED IN (ON DUTY)' : 'CLOCKED OUT (OFF DUTY)'}.`,
+      created_at: new Date().toISOString()
+    });
+
+    return res.json({ success: true, profile: updatedProfile });
+  } catch (err) {
+    console.error('Shift Toggle Backend Error:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * ⚙️ Staff Preferences Relay Endpoint
+ * Safely updates user notification preferences on profiles table.
+ * Gracefully handles missing database columns without throwing 400 Bad Request errors.
+ */
+app.post('/api/staff/update-preferences', async (req, res) => {
+  const { userId, push_notifications_enabled } = req.body;
+  console.log(`⚙️ [STAFF] Preference update request: userId=${userId}, pushEnabled=${push_notifications_enabled}`);
+
+  try {
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID is required.' });
+    }
+
+    const { data: updatedProfile, error: updateError } = await supabaseAdmin
+      .from('profiles')
+      .update({
+        push_notifications_enabled: Boolean(push_notifications_enabled)
+      })
+      .eq('id', userId)
+      .select()
+      .maybeSingle();
+
+    if (updateError && (updateError.code === 'PGRST204' || updateError.code === '42703' || updateError.message?.includes('does not exist'))) {
+      console.warn('⚠️ push_notifications_enabled column missing from DB schema. Preference toggle completed in soft mode.');
+      return res.json({ success: true, warning: 'Column missing from schema cache' });
+    } else if (updateError) {
+      throw updateError;
+    }
+
+    return res.json({ success: true, profile: updatedProfile });
+  } catch (err) {
+    console.error('Preference Update Error:', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

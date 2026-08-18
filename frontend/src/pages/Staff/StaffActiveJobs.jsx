@@ -7,6 +7,7 @@ import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import toast from 'react-hot-toast';
 import { sendStatusEmail } from '../../services/notificationService';
+import { BACKEND_URL } from '../../config/api';
 
 const StaffActiveJobs = () => {
   const { profile } = useAuth();
@@ -60,7 +61,6 @@ const StaffActiveJobs = () => {
   const handleUpdateStatus = async (task, newStatus) => {
     const toastId = toast.loading(`Updating ${task.plate_number}...`);
     try {
-      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
       const response = await fetch(`${BACKEND_URL}/api/bookings/update-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

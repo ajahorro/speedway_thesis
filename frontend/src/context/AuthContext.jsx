@@ -51,7 +51,7 @@ export const AuthProvider = ({ children }) => {
 
       const { data, error: supabaseError } = await supabase
         .from('profiles')
-        .select('id, role, email, is_active, deactivated_at, first_name, last_name, full_name, phone_number, is_clocked_in')
+        .select('*')
         .eq('id', userId)
         .maybeSingle();
 
@@ -155,10 +155,19 @@ export const AuthProvider = ({ children }) => {
   };
 
   const resetPassword = async (email) => {
-    logger.auth('Requesting password reset...');
-    return await supabase.auth.resetPasswordForEmail(email, {
+    logger.auth('Requesting password reset for:', email);
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/login?reset=true`,
     });
+    if (error) {
+      // Supabase 500 errors typically mean SMTP is misconfigured on the server
+      const isServerError = error.status >= 500 || error.message?.toLowerCase().includes('internal');
+      if (isServerError) {
+        throw new Error('SMTP_UNAVAILABLE');
+      }
+      throw new Error(error.message || 'Failed to send reset email');
+    }
+    return data;
   };
 
   const updateProfile = async (updates) => {

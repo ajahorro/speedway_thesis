@@ -48,7 +48,8 @@ const DeleteConfirmModal = ({ onConfirm, onCancel }) => (
 );
 
 const StaffNotifications = () => {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
+  const userId = user?.id || profile?.id;
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,13 +58,16 @@ const StaffNotifications = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const fetchNotifications = async () => {
-    if (!profile?.id) return;
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('user_id', profile.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -78,11 +82,25 @@ const StaffNotifications = () => {
 
   useEffect(() => {
     fetchNotifications();
-    const channel = supabase.channel(`staff-notifs-${profile?.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${profile?.id}` }, () => fetchNotifications())
+    if (!userId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const channel = supabase.channel(`staff-notifs-${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` }, () => fetchNotifications())
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [profile?.id]);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
 
   const handleMarkAsRead = async (id) => {
     try {
@@ -96,8 +114,9 @@ const StaffNotifications = () => {
   };
 
   const handleMarkAllAsRead = async () => {
+    if (!userId) return;
     try {
-      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', profile.id).eq('is_read', false);
+      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', userId).eq('is_read', false);
       if (error) throw error;
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
       toast.success('All notifications acknowledged');

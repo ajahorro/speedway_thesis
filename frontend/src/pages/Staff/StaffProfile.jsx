@@ -6,26 +6,58 @@ import toast from 'react-hot-toast';
 import PageHeader from '../../components/PageHeader';
 
 const StaffProfile = () => {
-  const { profile, user } = useAuth();
+  const { profile, user, verifyPassword, resetPassword } = useAuth();
   const [loading, setLoading] = useState(false);
   const [passLoading, setPassLoading] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  const isFormValid = currentPassword.trim().length > 0 && newPassword.length > 4 && confirmPassword === newPassword;
+
+  const handleForgotPassword = async () => {
+    const email = profile?.email || user?.email;
+    if (!email) return toast.error('No email address associated with this account');
+    const toastId = toast.loading('Sending password reset instructions...');
+    try {
+      await resetPassword(email);
+      toast.success('Password reset email sent. Check your inbox!', { id: toastId });
+    } catch (err) {
+      if (err.message === 'SMTP_UNAVAILABLE') {
+        toast.error(
+          'Password reset email service is currently unavailable. Please contact an Administrator to reset your password.',
+          { id: toastId, duration: 7000 }
+        );
+      } else {
+        toast.error(err.message || 'Failed to send reset email', { id: toastId });
+      }
+    }
+  };
+
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
-    if (newPassword !== confirmPassword) return toast.error('Passwords do not match');
-    if (newPassword.length < 6) return toast.error('Password must be at least 6 characters');
+    if (!isFormValid) return;
+    if (!currentPassword) return toast.error('Please enter your current password');
+    if (newPassword.length <= 4) return toast.error('New password must be more than 4 characters');
+    if (newPassword !== confirmPassword) return toast.error('New passwords do not match');
 
     setPassLoading(true);
     try {
+      // 🛡️ Verify Current Password first
+      const verification = await verifyPassword(currentPassword);
+      if (!verification.success) {
+        throw new Error('Identity verification failed. Incorrect current password.');
+      }
+
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
-      toast.success('Password updated successfully');
+
+      toast.success('Security credentials rotated successfully');
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
-      toast.error(err.message);
+      toast.error(err.message || 'Failed to update credentials');
     } finally {
       setPassLoading(false);
     }
@@ -122,6 +154,37 @@ const StaffProfile = () => {
           </div>
 
           <form onSubmit={handleUpdatePassword} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <input 
+              type="text" 
+              name="username" 
+              autoComplete="username" 
+              defaultValue={profile?.email || user?.email || ''}
+              style={{ display: 'none' }} 
+              tabIndex={-1} 
+              aria-hidden="true" 
+            />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <div style={labelStyle}>Current Password</div>
+                <button 
+                  type="button" 
+                  onClick={handleForgotPassword}
+                  style={{ background: 'none', border: 'none', color: '#E61E2A', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', padding: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+              <input 
+                type="password" 
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Verify identity"
+                style={inputStyle}
+                autoComplete="current-password"
+                required
+              />
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
               <div>
                 <div style={labelStyle}>New Password</div>
@@ -129,8 +192,9 @@ const StaffProfile = () => {
                   type="password" 
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Min. 5 characters"
                   style={inputStyle}
+                  autoComplete="new-password"
                   required
                 />
               </div>
@@ -140,23 +204,40 @@ const StaffProfile = () => {
                   type="password" 
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Repeat new password"
                   style={inputStyle}
+                  autoComplete="new-password"
                   required
                 />
               </div>
             </div>
-            
+
+            {/* Inline validation hints */}
+            {newPassword.length > 0 && newPassword.length <= 4 && (
+              <div style={{ fontSize: '0.72rem', color: '#f59e0b', fontWeight: '700', marginTop: '-0.5rem' }}>
+                ⚠ Password must be more than 4 characters
+              </div>
+            )}
+            {confirmPassword.length > 0 && newPassword !== confirmPassword && (
+              <div style={{ fontSize: '0.72rem', color: '#ef4444', fontWeight: '700', marginTop: '-0.5rem' }}>
+                ✕ Passwords do not match
+              </div>
+            )}
             <button 
               type="submit"
-              disabled={passLoading}
+              disabled={passLoading || !isFormValid}
               style={{ 
                 alignSelf: 'flex-start',
-                padding: '0.85rem 2rem', background: '#E61E2A', 
-                color: 'white', border: 'none', borderRadius: '4px', 
-                fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer',
+                padding: '0.85rem 2rem', 
+                background: (!isFormValid || passLoading) ? 'rgba(230, 30, 42, 0.35)' : '#E61E2A', 
+                color: (!isFormValid || passLoading) ? 'rgba(255, 255, 255, 0.4)' : 'white', 
+                border: 'none', borderRadius: '4px', 
+                fontWeight: '950', fontSize: '0.8rem', 
+                cursor: (!isFormValid || passLoading) ? 'not-allowed' : 'pointer',
                 display: 'flex', alignItems: 'center', gap: '0.75rem',
-                textTransform: 'uppercase', letterSpacing: '1px'
+                textTransform: 'uppercase', letterSpacing: '1px',
+                transition: 'all 0.2s ease',
+                opacity: (!isFormValid || passLoading) ? 0.6 : 1
               }}
             >
               {passLoading ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}

@@ -28,6 +28,7 @@ import StaffWorkHistory from './pages/Staff/StaffWorkHistory';
 import StaffJobDetails from './pages/Staff/StaffJobDetails';
 import StaffProfile from './pages/Staff/StaffProfile';
 import StaffNotifications from './pages/Staff/StaffNotifications';
+import StaffSettings from './pages/Staff/StaffSettings';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -105,6 +106,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="job/:id" element={<StaffJobDetails />} />
             <Route path="profile" element={<StaffProfile />} />
             <Route path="notifications" element={<StaffNotifications />} />
+            <Route path="settings" element={<StaffSettings />} />
           </Route>
 
           {/* Customer Routes */}

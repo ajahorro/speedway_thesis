@@ -5,6 +5,7 @@ import { Bell, CheckCircle, Clock, Trash2, Filter, Search, AlertTriangle, X } fr
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
+import { BACKEND_URL } from '../../config/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE CONFIRMATION MODAL (REQ #5)
@@ -146,7 +147,7 @@ const AdminNotifications = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No authenticated user found');
 
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/admin/broadcast`, {
+      const response = await fetch(`${BACKEND_URL}/api/admin/broadcast`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

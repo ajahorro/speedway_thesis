@@ -2,28 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { CreditCard, FileText, Download, Clock, X, ShieldCheck, Printer } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../hooks/useAuth';
 
 const CustomerBilling = () => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [bookings, setBookings] = useState([]);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [selectedPayment, setSelectedPayment] = useState(null);
-  const [user, setUser] = useState(null);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (user?.id) fetchData();
+  }, [user?.id]);
 
   const fetchData = async () => {
+    if (!user?.id) return;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      setUser(session.user);
-
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, payments(*), vehicles:booking_vehicles(*, services:booking_vehicle_services(*))')
-        .eq('customer_id', session.user.id)
+        .select('*, payments:payments!payments_booking_id_fkey(*), vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*, services:booking_vehicle_services!booking_vehicle_id(*))')
+        .eq('customer_id', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;

@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase';
 
 const AdminProfile = () => {
   const navigate = useNavigate();
-  const { user, profile, updateProfile, verifyPassword } = useAuth();
+  const { user, profile, updateProfile, verifyPassword, resetPassword } = useAuth();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   
   // States
@@ -17,6 +17,25 @@ const AdminProfile = () => {
   const [loading, setLoading] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // 'profile' or 'password'
+
+  const handleForgotPassword = async () => {
+    const email = profile?.email || user?.email;
+    if (!email) return toast.error('No email address associated with this account');
+    const toastId = toast.loading('Sending password reset instructions...');
+    try {
+      await resetPassword(email);
+      toast.success('Password reset email sent. Check your inbox!', { id: toastId });
+    } catch (err) {
+      if (err.message === 'SMTP_UNAVAILABLE') {
+        toast.error(
+          'Password reset email service is currently unavailable. Please contact an Administrator to reset your password.',
+          { id: toastId, duration: 7000 }
+        );
+      } else {
+        toast.error(err.message || 'Failed to send reset email', { id: toastId });
+      }
+    }
+  };
   
   const [formData, setFormData] = useState({
     firstName: profile?.first_name || user?.user_metadata?.first_name || '',
@@ -39,13 +58,23 @@ const AdminProfile = () => {
     }
   }, [profile, user]);
 
+  // Password form is valid only when:
+  // 1. Current password is filled
+  // 2. New password is more than 4 characters
+  // 3. Confirm password matches new password
+  const isPasswordFormValid =
+    formData.currentPassword.trim().length > 0 &&
+    formData.newPassword.length > 4 &&
+    formData.confirmPassword.length > 0 &&
+    formData.newPassword === formData.confirmPassword;
+
   const handleUpdateClick = (action) => {
     if (action === 'password') {
       if (!formData.newPassword || formData.newPassword !== formData.confirmPassword) {
         return toast.error('Passwords do not match');
       }
-      if (formData.newPassword.length < 6) {
-        return toast.error('New password must be at least 6 characters');
+      if (formData.newPassword.length <= 4) {
+        return toast.error('New password must be more than 4 characters');
       }
     }
     setPendingAction(action);
@@ -214,8 +243,26 @@ const AdminProfile = () => {
           </div>
 
           <form onSubmit={(e) => { e.preventDefault(); executeVerifiedAction(); }} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <input 
+              type="text" 
+              name="username" 
+              autoComplete="username" 
+              defaultValue={profile?.email || user?.email || ''}
+              style={{ display: 'none' }} 
+              tabIndex={-1} 
+              aria-hidden="true" 
+            />
             <div>
-              <label style={labelStyle}>Current Password</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>Current Password</label>
+                <button 
+                  type="button" 
+                  onClick={handleForgotPassword}
+                  style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', padding: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}
+                >
+                  Forgot Password?
+                </button>
+              </div>
               <div style={{ position: 'relative' }}>
                 <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
@@ -225,6 +272,7 @@ const AdminProfile = () => {
                   placeholder="Verify identity"
                   value={formData.currentPassword}
                   onChange={e => setFormData({...formData, currentPassword: e.target.value})}
+                  required
                 />
               </div>
             </div>
@@ -259,27 +307,39 @@ const AdminProfile = () => {
               </div>
             </div>
 
+            {/* Inline validation hints */}
+            {formData.newPassword.length > 0 && formData.newPassword.length <= 4 && (
+              <div style={{ fontSize: '0.72rem', color: '#f59e0b', fontWeight: '700', marginTop: '-0.5rem' }}>
+                ⚠ Password must be more than 4 characters
+              </div>
+            )}
+            {formData.confirmPassword.length > 0 && formData.newPassword !== formData.confirmPassword && (
+              <div style={{ fontSize: '0.72rem', color: '#ef4444', fontWeight: '700', marginTop: '-0.5rem' }}>
+                ✕ Passwords do not match
+              </div>
+            )}
             <button 
               type="submit"
-              disabled={loading || !formData.newPassword || !formData.currentPassword}
+              disabled={loading || !isPasswordFormValid}
               style={{ 
-                marginTop: '1rem',
+                marginTop: '0.5rem',
                 width: '100%', 
                 padding: '1rem', 
-                background: 'var(--admin-brand)', 
-                color: 'white', 
+                background: isPasswordFormValid && !loading ? 'var(--admin-brand)' : 'rgba(255,255,255,0.08)', 
+                color: isPasswordFormValid && !loading ? 'white' : 'rgba(255,255,255,0.3)', 
                 border: 'none', 
                 borderRadius: 'var(--admin-radius-sm)', 
                 fontWeight: '950', 
                 fontSize: '0.75rem', 
-                cursor: 'pointer',
+                cursor: isPasswordFormValid && !loading ? 'pointer' : 'not-allowed',
                 textTransform: 'uppercase',
                 letterSpacing: '1px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.75rem',
-                opacity: loading || !formData.newPassword || !formData.currentPassword ? 0.5 : 1
+                transition: 'all 0.2s ease',
+                opacity: loading || !isPasswordFormValid ? 0.5 : 1
               }}
             >
               <Shield size={18} /> {loading ? 'Processing...' : 'Rotate Security Key'}
@@ -287,16 +347,7 @@ const AdminProfile = () => {
             <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
               <button 
                 type="button"
-                onClick={() => {
-                  const email = user?.email;
-                  if (email) {
-                    toast.promise(supabase.auth.resetPasswordForEmail(email), {
-                      loading: 'Sending reset link...',
-                      success: 'Reset link sent to your email!',
-                      error: 'Failed to send reset link.'
-                    });
-                  }
-                }}
+                onClick={handleForgotPassword}
                 style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
               >
                 Forgot Password?
