@@ -50,7 +50,7 @@ const StaffDashboard = () => {
         .select(`
           *,
           customer:profiles!bookings_customer_id_fkey(full_name, email, phone_number),
-          vehicles:booking_vehicles(*, services:booking_vehicle_services(*))
+          vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*, services:booking_vehicle_services(*))
         `)
         .eq('staff_id', profile.id)
         .neq('status', 'cancelled')

@@ -19,6 +19,7 @@ const AdminAccountsManagement = () => {
   const { profile: currentUserProfile, user: currentUser } = useAuth();
   
   const [accounts, setAccounts] = useState([]);
+  const [defaultAdminId, setDefaultAdminId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -36,14 +37,14 @@ const AdminAccountsManagement = () => {
     setLoading(true);
     try {
       logger.admin('Synchronizing account directory...');
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .in('role', ['STAFF', 'ADMIN'])
-        .order('full_name');
-
-      if (error) throw error;
-      setAccounts(data || []);
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/admin/profiles`);
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error);
+      // Store the default admin ID from the backend (single source of truth)
+      setDefaultAdminId(result.defaultAdminId || null);
+      // Filter to only STAFF and ADMIN roles
+      const staffAndAdmins = (result.data || []).filter(p => p.role === 'STAFF' || p.role === 'ADMIN');
+      setAccounts(staffAndAdmins);
       logger.admin('Account directory synchronized.');
     } catch (err) {
       logger.error('Account Fetch Error', err);
@@ -95,9 +96,13 @@ const AdminAccountsManagement = () => {
   };
 
 
+  // 🛡️ Default Admin Guard — single source of truth from the backend.
+  // Only the specific DEFAULT_ADMIN_ID account gets the badge and is protected.
+  const isDefaultAdmin = (member) => member.id === defaultAdminId;
+
   const handleDeactivate = (member) => {
-    if (member.email === 'speedway.automox@gmail.com') {
-      toast.error('System default admin cannot be deactivated.');
+    if (isDefaultAdmin(member)) {
+      toast.error('Default Admin accounts cannot be deactivated.');
       return;
     }
 
@@ -109,15 +114,17 @@ const AdminAccountsManagement = () => {
       onConfirm: async () => {
         setIsSubmitting(true);
         try {
-          const { error } = await supabase
-            .from('profiles')
-            .update({ role: 'CUSTOMER' })
-            .eq('id', member.id);
-          if (error) throw error;
-          toast.success('Account deactivated successfully');
+          const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/admin/revoke-access`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ memberId: member.id })
+          });
+          const result = await response.json();
+          if (!result.success) throw new Error(result.error);
+          toast.success('Account access revoked successfully');
           fetchAccounts();
         } catch (err) {
-          toast.error('Failed to deactivate account');
+          toast.error(err.message || 'Failed to revoke account access');
         } finally {
           setIsSubmitting(false);
         }
@@ -237,7 +244,7 @@ const AdminAccountsManagement = () => {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '0.9rem', fontWeight: '950', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     {member.full_name}
-                    {member.email === 'speedway.automox@gmail.com' && (
+                    {isDefaultAdmin(member) && (
                       <span style={{ fontSize: '0.55rem', background: 'var(--admin-brand)', color: 'white', padding: '0.1rem 0.4rem', borderRadius: '2px' }}>DEFAULT ADMIN</span>
                     )}
                   </div>
@@ -246,7 +253,7 @@ const AdminAccountsManagement = () => {
                   </div>
                 </div>
 
-                {member.email !== 'speedway.automox@gmail.com' && (
+                {!isDefaultAdmin(member) && (
                   <button 
                     onClick={() => handleDeactivate(member)}
                     style={{ 

@@ -33,14 +33,10 @@ const AdminUserManagement = () => {
     setLoading(true);
     try {
       logger.admin('Fetching system directory...');
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('role', { ascending: true })
-        .order('full_name');
-
-      if (error) throw error;
-      setUsers(data || []);
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/admin/profiles`);
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error);
+      setUsers(result.data || []);
       logger.admin('System directory synchronized.');
     } catch (err) {
       logger.error('User Fetch Error', err);

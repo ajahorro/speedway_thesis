@@ -318,6 +318,7 @@ const CustomerProfile = () => {
                 <label style={labelStyle}>Current Password</label>
                 <input 
                   type="password" 
+                  autoComplete="current-password"
                   placeholder="Verify your identity"
                   value={passwordData.currentPassword}
                   onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
@@ -328,6 +329,7 @@ const CustomerProfile = () => {
                 <label style={labelStyle}>New Password</label>
                 <input 
                   type="password" 
+                  autoComplete="new-password"
                   placeholder="Min. 6 characters"
                   value={passwordData.newPassword}
                   onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
@@ -338,6 +340,7 @@ const CustomerProfile = () => {
                 <label style={labelStyle}>Confirm Password</label>
                 <input 
                   type="password" 
+                  autoComplete="new-password"
                   placeholder="Repeat new password"
                   value={passwordData.confirmPassword}
                   onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}

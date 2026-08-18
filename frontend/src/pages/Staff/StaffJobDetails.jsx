@@ -28,7 +28,7 @@ const StaffJobDetails = () => {
         .from('booking_vehicles')
         .select(`
           *,
-          booking:bookings(id, start_datetime, end_datetime, status, staff_id),
+          booking:bookings!booking_vehicles_booking_id_fkey(id, start_datetime, end_datetime, status, staff_id),
           services:booking_vehicle_services(*)
         `)
         .eq('id', id)

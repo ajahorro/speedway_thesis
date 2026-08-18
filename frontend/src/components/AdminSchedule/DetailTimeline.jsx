@@ -11,6 +11,63 @@ const DetailTimeline = ({
   onDeleteBlock,
   config = CONFIG
 }) => {
+  // Check if a Full Day block (start_time === null) exists for this date
+  const fullDayBlock = hours.map(h => getBlockForHour(h)).find(b => b && !b.start_time);
+
+  if (fullDayBlock) {
+    return (
+      <div style={{
+        background: 'repeating-linear-gradient(45deg, rgba(230, 30, 42, 0.08), rgba(230, 30, 42, 0.08) 12px, rgba(230, 30, 42, 0.14) 12px, rgba(230, 30, 42, 0.14) 24px)',
+        border: `1px solid ${COLORS.BRAND}`,
+        borderRadius: '6px',
+        padding: '3.5rem 2rem',
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '1rem',
+        boxShadow: '0 8px 30px rgba(230, 30, 42, 0.15)',
+        margin: '1rem 0'
+      }}>
+        <div style={{
+          width: '56px', height: '56px', borderRadius: '50%',
+          background: 'rgba(230, 30, 42, 0.15)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: COLORS.BRAND, border: `1px solid ${COLORS.BRAND}`
+        }}>
+          <Lock size={28} />
+        </div>
+        <div>
+          <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            FULL DAY RESOURCE RESTRICTION
+          </h3>
+          <p style={{ margin: '0.5rem 0 0 0', color: COLORS.MUTED, fontSize: '0.85rem', fontWeight: '700' }}>
+            {fullDayBlock.reason || 'ALL RESOURCE BAYS LOCKED FOR THIS DAY'}
+          </p>
+        </div>
+        <button
+          onClick={() => onDeleteBlock(fullDayBlock.id, fullDayBlock)}
+          style={{
+            marginTop: '0.5rem',
+            padding: '0.75rem 1.75rem',
+            background: 'var(--admin-bg)',
+            color: COLORS.BRAND,
+            border: `1px solid ${COLORS.BRAND}`,
+            borderRadius: '4px',
+            fontWeight: '950',
+            fontSize: '0.75rem',
+            cursor: 'pointer',
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          Lift Full Day Restriction
+        </button>
+      </div>
+    );
+  }
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {hours.map((hour) => {
@@ -47,10 +104,10 @@ const DetailTimeline = ({
                   display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1, gap: '1rem'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.6rem 1.25rem', borderRadius: '4px', border: `1px solid ${COLORS.BRAND}`, color: COLORS.BRAND, fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '1px', boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }}>
-                    <Lock size={14} /> {block.reason || 'UNAVAILABLE'}
+                    <Lock size={14} /> {block.start_time ? `WINDOW (${block.start_time.slice(0,5)} - ${block.end_time.slice(0,5)})` : 'FULL DAY'}: {block.reason || 'UNAVAILABLE'}
                   </div>
                   <button 
-                    onClick={() => onDeleteBlock(block.id)}
+                    onClick={() => onDeleteBlock(block.id, block)}
                     style={{ background: 'rgba(230, 30, 42, 0.1)', color: COLORS.BRAND, border: `1px solid ${COLORS.BRAND}`, padding: '0.4rem 0.8rem', borderRadius: '2px', fontSize: '0.6rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', transition: 'all 0.2s' }}
                   >
                     Lift Block

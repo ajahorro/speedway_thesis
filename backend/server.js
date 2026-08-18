@@ -72,6 +72,12 @@ if (supabaseUrl && supabaseKey) {
   console.warn('⚠️ SUPABASE_SERVICE_ROLE_KEY missing. Database-dependent features (Emails/Invites) will be disabled, but AI services will remain active.');
 }
 
+// 🛡️ DEFAULT ADMIN — Single source of truth.
+// Only this specific account is protected from deactivation and always shows the DEFAULT ADMIN badge.
+// To change the default admin, update this ID to the new account's user ID.
+const DEFAULT_ADMIN_ID = '3057c70b-7eec-4445-9a1b-68118f9c6bd0'; // testadmin961@gmail.com
+console.log(`🛡️  Default Admin ID locked: ${DEFAULT_ADMIN_ID}`);
+
 // 🔍 DEBUG: Test Simple Admin Call on Startup
 (async () => {
   if (!supabaseAdmin) return;
@@ -874,6 +880,134 @@ app.post('/api/auth/confirm-email-change', async (req, res) => {
 });
 
 /**
+ * 📋 REQ-ADM-01: Fetch All Profiles (Service Role — bypasses RLS)
+ * Also returns the DEFAULT_ADMIN_ID so the frontend can badge the correct account.
+ */
+app.get('/api/admin/profiles', async (req, res) => {
+  console.log('📋 [ADMIN] Fetching all profiles...');
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .order('role', { ascending: true })
+      .order('full_name');
+
+    if (error) throw error;
+    // Include defaultAdminId so frontend knows which account is protected
+    return res.json({ success: true, data, defaultAdminId: DEFAULT_ADMIN_ID });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * 🚫 REQ-ADM-02: Revoke Staff/Admin Access (Service Role — bypasses RLS)
+ * Downgrades a STAFF or ADMIN account to CUSTOMER role.
+ * The Default Admin guard is enforced here too.
+ */
+app.post('/api/admin/revoke-access', async (req, res) => {
+  const { memberId } = req.body;
+  console.log(`🚫 [ADMIN] REVOKE ACCESS REQUEST for: ${memberId}`);
+
+  try {
+    // Check role first — cannot revoke an ADMIN account
+    const { data: profile, error: checkErr } = await supabaseAdmin
+      .from('profiles')
+      .select('role, email, full_name')
+      .eq('id', memberId)
+      .single();
+
+    if (checkErr) throw checkErr;
+
+    // 🛡️ DEFAULT ADMIN GUARD: Only the specific DEFAULT_ADMIN_ID is protected.
+    // Regular admins (non-default) can be deactivated normally.
+    if (memberId === DEFAULT_ADMIN_ID) {
+      console.warn(`🚫 [ADMIN] BLOCKED: Attempted revoke of Default Admin (${profile.email})`);
+      return res.status(403).json({
+        success: false,
+        error: 'The Default Admin account cannot be deactivated.'
+      });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .update({ role: 'CUSTOMER' })
+      .eq('id', memberId);
+
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_logs').insert({
+      actor_name: 'ADMIN',
+      actor_role: 'ADMIN',
+      action_type: 'REVOKE_ACCESS',
+      details: `Account access revoked for ${profile.full_name} (${profile.email}). Role downgraded to CUSTOMER.`
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * 📣 REQ-ADM-13: Global Broadcast (Service Role — bypasses RLS)
+ * Inserts a notification for every profile and logs the action in audit logs.
+ */
+app.post('/api/admin/broadcast', async (req, res) => {
+  const { message, actorEmail } = req.body;
+  console.log(`📣 [ADMIN] Global broadcast request: "${message}" from ${actorEmail}`);
+
+  try {
+    if (!message || !message.trim()) {
+      return res.status(400).json({ success: false, error: 'Message cannot be empty.' });
+    }
+
+    // Step 1: Fetch all profiles (bypasses RLS)
+    const { data: profiles, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('id');
+
+    if (profileError) throw profileError;
+
+    if (!profiles || profiles.length === 0) {
+      return res.status(404).json({ success: false, error: 'No profiles found to broadcast to.' });
+    }
+
+    // Step 2: Prepare and insert notification for each profile
+    const notifications = profiles.map(p => ({
+      user_id: p.id,
+      title: 'System Announcement 📣',
+      notification_type: 'ANNOUNCEMENT',
+      message: message.trim(),
+      is_read: false
+    }));
+
+    const { error: insertError } = await supabaseAdmin
+      .from('notifications')
+      .insert(notifications);
+
+    if (insertError) throw insertError;
+
+    // Step 3: Log to audit trail
+    const { error: auditError } = await supabaseAdmin
+      .from('audit_logs')
+      .insert({
+        action_type: 'BROADCAST_SENT',
+        actor_name: actorEmail || 'SYSTEM',
+        actor_role: 'ADMIN',
+        details: `Global broadcast transmitted to ${profiles.length} users. Message: "${message.substring(0, 100)}${message.length > 100 ? '...' : ''}"`,
+        created_at: new Date().toISOString()
+      });
+
+    if (auditError) console.error('Audit Log Error (broadcast):', auditError);
+
+    return res.json({ success: true, receiversCount: profiles.length });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
  * 🛡️ REQ-ADM-14: Account Deactivation (15-Day Grace Period)
  * Marks account as INACTIVE instead of deleting immediately.
  */
@@ -882,6 +1016,27 @@ app.post('/api/auth/deactivate-account', async (req, res) => {
   console.log(`⚠️ [AUTH] DEACTIVATION REQUEST: ${userId}`);
 
   try {
+    // 🛡️ DEFAULT ADMIN GUARD: Fetch profile first to check role.
+    // ADMIN accounts can NEVER be deactivated — this is enforced server-side
+    // regardless of what the frontend sends.
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('role, email')
+      .eq('id', userId)
+      .single();
+
+    if (profileError) throw profileError;
+
+    // 🛡️ DEFAULT ADMIN GUARD: Only the specific DEFAULT_ADMIN_ID is protected.
+    // Regular admins can self-deactivate via the customer profile page.
+    if (userId === DEFAULT_ADMIN_ID) {
+      console.warn(`🚫 [AUTH] BLOCKED: Attempted deactivation of Default Admin (${profile.email})`);
+      return res.status(403).json({
+        success: false,
+        error: 'The Default Admin account cannot be deactivated.'
+      });
+    }
+
     const deactivatedAt = new Date().toISOString();
     const { error } = await supabaseAdmin
       .from('profiles')
@@ -1548,6 +1703,136 @@ app.post('/api/staff/toggle-shift', async (req, res) => {
     return res.json({ success: true, profile });
   } catch (err) {
     console.error('❌ Shift Toggle Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 🔒 Schedule Block Management Endpoints (Bypassing RLS 403 Forbidden)
+app.post('/api/admin/blocked-slots', async (req, res) => {
+  const { block_date, dates, start_date, end_date, start_time, end_time, reason } = req.body;
+
+  try {
+    if (!supabaseAdmin) throw new Error('Supabase Admin not initialized');
+
+    let rowsToInsert = [];
+
+    if (Array.isArray(dates) && dates.length > 0) {
+      // Multi-day date array provided
+      rowsToInsert = dates.map(d => ({
+        block_date: d,
+        start_time,
+        end_time,
+        reason: reason || 'ADMIN BLOCK'
+      }));
+    } else if (start_date && end_date) {
+      // Multi-day date range provided
+      const curr = new Date(start_date);
+      const last = new Date(end_date);
+      while (curr <= last) {
+        const dStr = curr.toISOString().split('T')[0];
+        rowsToInsert.push({
+          block_date: dStr,
+          start_time,
+          end_time,
+          reason: reason || 'ADMIN BLOCK'
+        });
+        curr.setDate(curr.getDate() + 1);
+      }
+    } else if (block_date) {
+      // Single day
+      rowsToInsert = [{
+        block_date,
+        start_time,
+        end_time,
+        reason: reason || 'ADMIN BLOCK'
+      }];
+    } else {
+      return res.status(400).json({ success: false, error: 'Target date or date range is required' });
+    }
+
+    console.log(`🔒 [ADMIN SCHEDULE] BLOCKING SLOTS: ${rowsToInsert.length} day(s) (${start_time || 'WHOLE DAY'} - ${end_time || 'WHOLE DAY'})`);
+
+    const { data, error } = await supabaseAdmin
+      .from('blocked_slots')
+      .insert(rowsToInsert)
+      .select();
+
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_logs').insert({
+      action_type: 'SCHEDULE_SLOT_BLOCKED',
+      actor_name: 'ADMIN',
+      actor_role: 'ADMIN',
+      details: `Blocked schedule slots across ${rowsToInsert.length} day(s): ${reason || 'ADMIN BLOCK'}`
+    });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('❌ Block Slot Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/admin/blocked-slots/:id', async (req, res) => {
+  const { id } = req.params;
+  const { start_time, end_time, reason } = req.body;
+  console.log(`✂️ [ADMIN SCHEDULE] TRIMMING/UPDATING BLOCK ID ${id}: ${start_time} - ${end_time}`);
+
+  try {
+    if (!supabaseAdmin) throw new Error('Supabase Admin not initialized');
+
+    const updateFields = {};
+    if (start_time !== undefined) updateFields.start_time = start_time;
+    if (end_time !== undefined) updateFields.end_time = end_time;
+    if (reason !== undefined) updateFields.reason = reason;
+
+    const { data, error } = await supabaseAdmin
+      .from('blocked_slots')
+      .update(updateFields)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_logs').insert({
+      action_type: 'SCHEDULE_SLOT_TRIMMED',
+      actor_name: 'ADMIN',
+      actor_role: 'ADMIN',
+      details: `Adjusted restriction timeframe on slot ID ${id} to ${start_time || 'WHOLE DAY'} - ${end_time || 'WHOLE DAY'}`
+    });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('❌ Trim Block Slot Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/admin/blocked-slots/:id', async (req, res) => {
+  const { id } = req.params;
+  console.log(`🔓 [ADMIN SCHEDULE] UNBLOCKING SLOT ID: ${id}`);
+
+  try {
+    if (!supabaseAdmin) throw new Error('Supabase Admin not initialized');
+
+    const { error } = await supabaseAdmin
+      .from('blocked_slots')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_logs').insert({
+      action_type: 'SCHEDULE_SLOT_UNBLOCKED',
+      actor_name: 'ADMIN',
+      actor_role: 'ADMIN',
+      details: `Lifted restriction on slot ID ${id}`
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Unblock Slot Error:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

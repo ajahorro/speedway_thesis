@@ -135,9 +135,6 @@ const AdminNotifications = () => {
     }
   };
 
-  // ── BROADCAST HANDLER (REQ-ADM-13) ──────────────────────────────────────
-  // Writes one notification per profile (all roles: ADMIN, STAFF, CUSTOMER).
-  // Also inserts a corresponding AUDIT LOG entry so the Admin action is traceable.
   const handleBroadcast = async (e) => {
     e.preventDefault();
     if (!broadcastForm.message.trim()) return;
@@ -146,64 +143,30 @@ const AdminNotifications = () => {
     try {
       logger.admin('Preparing global signal broadcast...');
       
-      // Step 1: Get current admin user
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('No authenticated user found');
 
-      // Step 2: Fetch ALL profiles (Admin + Staff + Customer)
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('id');
-        
-      if (profileError) throw profileError;
-      
-      if (!profiles || profiles.length === 0) {
-        toast.error('No profiles found to broadcast to.');
-        setBroadcasting(false);
-        return;
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/admin/broadcast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: broadcastForm.message,
+          actorEmail: user.email
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to transmit broadcast');
       }
       
-      // Step 3: Insert one notification row per profile
-      const broadcastNotifications = profiles.map(p => ({
-        user_id: p.id,
-        title: 'System Announcement 📣',
-        notification_type: 'ANNOUNCEMENT',
-        message: broadcastForm.message,
-        is_read: false
-      }));
-      
-      const { error: broadcastError } = await supabase
-        .from('notifications')
-        .insert(broadcastNotifications);
-        
-      if (broadcastError) throw broadcastError;
-
-      // Step 4: Create Audit Log entry for the broadcast action (REQ #4)
-      // This records WHO sent the broadcast and WHEN — audit trail for admin accountability.
-      const { error: auditError } = await supabase
-        .from('audit_logs')
-        .insert({
-          action_type: 'BROADCAST_SENT',
-          actor_name: user.email,
-          actor_role: 'ADMIN',
-          details: `Global broadcast transmitted to ${profiles.length} users. Message: "${broadcastForm.message.substring(0, 100)}${broadcastForm.message.length > 100 ? '...' : ''}"`,
-          created_at: new Date().toISOString()
-        });
-
-      if (auditError) {
-        // Non-blocking: log warning but don't fail the broadcast
-        logger.error('Audit Log Warning (broadcast)', auditError);
-      } else {
-        logger.admin('Audit log entry created for broadcast action.');
-      }
-      
-      toast.success(`Broadcast signal transmitted to ${profiles.length} receivers`);
+      toast.success(`Broadcast signal transmitted to ${result.receiversCount} receivers`);
       setBroadcastForm({ message: '' });
       fetchNotifications();
       logger.admin('Global broadcast complete.');
     } catch (err) {
       logger.error('Broadcast Error', err);
-      toast.error('Failed to transmit global signal');
+      toast.error(err.message || 'Failed to transmit global signal');
     } finally {
       setBroadcasting(false);
     }
@@ -313,12 +276,21 @@ const AdminNotifications = () => {
           />
           <button 
             type="submit"
-            disabled={broadcasting}
+            disabled={broadcasting || !broadcastForm.message.trim()}
             style={{ 
-              padding: '0.85rem 2rem', background: 'var(--admin-brand)', color: 'white', 
-              border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', 
-              fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', 
-              gap: '0.75rem', textTransform: 'uppercase' 
+              padding: '0.85rem 2rem', 
+              background: (broadcasting || !broadcastForm.message.trim()) ? '#374151' : 'var(--admin-brand)', 
+              color: (broadcasting || !broadcastForm.message.trim()) ? '#9ca3af' : 'white', 
+              border: 'none', 
+              borderRadius: 'var(--admin-radius-sm)', 
+              fontWeight: '950', 
+              fontSize: '0.75rem', 
+              cursor: (broadcasting || !broadcastForm.message.trim()) ? 'not-allowed' : 'pointer', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.75rem', 
+              textTransform: 'uppercase',
+              opacity: (broadcasting || !broadcastForm.message.trim()) ? 0.5 : 1
             }}
           >
             {broadcasting ? <CheckCircle size={18} className="animate-spin" /> : 'Transmit Broadcast'}

@@ -39,6 +39,9 @@ const AdminSchedule = () => {
   // State: Blocking Panel
   const [isAddingBlock, setIsAddingBlock] = useState(false);
   const [blockData, setBlockData] = useState({
+    scope: 'day', // 'day', 'window', 'range'
+    startDate: selectedDate,
+    endDate: selectedDate,
     startTime: `${String(settings.OPENING_HOUR).padStart(2, '0')}:00`,
     endTime: `${String(settings.CLOSING_HOUR - 4).padStart(2, '0')}:00`,
     reason: '',
@@ -56,6 +59,7 @@ const AdminSchedule = () => {
 
   useEffect(() => {
     fetchDailyContext();
+    setBlockData(prev => ({ ...prev, startDate: selectedDate, endDate: selectedDate }));
 
     // 🛡️ REAL-TIME SYNCHRONIZATION (REQ-ADM-02)
     const channel = supabase.channel('admin-schedule-live')
@@ -80,11 +84,10 @@ const AdminSchedule = () => {
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('id, start_datetime, end_datetime, status')
-        .lte('start_datetime', lastDay)
-        .gte('end_datetime', firstDay)
-        .not('status', 'ilike', 'cancelled')
-        .not('status', 'ilike', 'completed');
+        .select('start_datetime')
+        .gte('start_datetime', `${firstDay}T00:00:00Z`)
+        .lte('start_datetime', `${lastDay}T23:59:59Z`)
+        .not('status', 'ilike', 'cancelled');
 
       if (error) throw error;
       setAllMonthBookings(data || []);
@@ -145,46 +148,67 @@ const AdminSchedule = () => {
   };
 
   const handleCommitBlock = async () => {
-    // ── DUPLICATE PROTECTION ──
-    const isDuplicate = blockedSlots.some(b => {
-      const sameDate = b.block_date === selectedDate;
-      const bothWhole = !b.start_time && blockData.isWholeDay;
-      const bothPartial = b.start_time === blockData.startTime && b.end_time === blockData.endTime;
-      return sameDate && (bothWhole || bothPartial);
-    });
+    let payload = {};
+    let confirmMsg = '';
 
-    if (isDuplicate) {
-      toast.error('A restriction already exists for this timeframe.');
-      return;
+    if (blockData.scope === 'range') {
+      if (!blockData.startDate || !blockData.endDate) {
+        toast.error('Please specify both Start Date and End Date');
+        return;
+      }
+      if (blockData.startDate > blockData.endDate) {
+        toast.error('Start Date cannot be after End Date');
+        return;
+      }
+      payload = {
+        start_date: blockData.startDate,
+        end_date: blockData.endDate,
+        start_time: blockData.isWholeDay ? null : blockData.startTime,
+        end_time: blockData.isWholeDay ? null : blockData.endTime,
+        reason: blockData.reason || 'MULTI-DAY BLOCK'
+      };
+      confirmMsg = `Are you sure you want to block resource bays from ${blockData.startDate} to ${blockData.endDate}?`;
+    } else {
+      const isWindow = blockData.scope === 'window';
+      payload = {
+        block_date: selectedDate,
+        start_time: isWindow ? blockData.startTime : null,
+        end_time: isWindow ? blockData.endTime : null,
+        reason: blockData.reason || (isWindow ? 'TIME WINDOW RESTRICTION' : 'FULL DAY BLOCK')
+      };
+      confirmMsg = `Are you sure you want to block ${isWindow ? `time window ${blockData.startTime} - ${blockData.endTime}` : 'the full working day'} on ${selectedDate}?`;
     }
 
     toast.custom((t) => (
       <ConfirmationToast
         t={t}
-        title="Confirm Restriction"
-        message={`Are you sure you want to block ${blockData.isWholeDay ? 'the entire day' : 'these business hours'}? This will lock all resource bays.`}
+        title="Confirm Schedule Restriction"
+        message={confirmMsg}
         icon={AlertTriangle}
-        confirmLabel="Block Hours"
+        confirmLabel="Commit Restriction"
         variant="danger"
         onConfirm={async () => {
           toast.dismiss(t.id);
           try {
-            const { error } = await supabase
-              .from('blocked_slots')
-              .insert([{
-                block_date: selectedDate,
-                start_time: blockData.isWholeDay ? null : blockData.startTime,
-                end_time: blockData.isWholeDay ? null : blockData.endTime,
-                reason: blockData.reason || 'ADMIN BLOCK'
-              }]);
+            const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+            const res = await fetch(`${BACKEND_URL}/api/admin/blocked-slots`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
 
-            if (error) throw error;
+            const resData = await res.json().catch(() => ({}));
+            if (!res.ok || !resData.success) {
+              throw new Error(resData.error || 'Failed to commit restriction');
+            }
+
             toast.success('Schedule restriction committed');
             setIsAddingBlock(false);
             fetchDailyContext();
+            fetchMonthData();
           } catch (err) {
             logger.error('Block Error', err);
-            toast.error('Failed to commit restriction');
+            toast.error(err.message || 'Failed to commit restriction');
           }
         }}
         onCancel={() => toast.dismiss(t.id)}
@@ -192,14 +216,19 @@ const AdminSchedule = () => {
     ), { duration: Infinity });
   };
 
-  const handleDeleteBlock = async (id) => {
+  const handleDeleteBlock = async (id, targetBlock = null) => {
+    const isFullDay = targetBlock ? !targetBlock.start_time : false;
+    const timeDesc = targetBlock
+      ? (isFullDay ? 'Full Day Restriction' : `Time Window ${targetBlock.start_time} - ${targetBlock.end_time}`)
+      : 'this restriction';
+
     toast.custom((t) => (
       <ConfirmationToast
         t={t}
-        title="Lift Restriction"
-        message="Are you sure you want to lift this block? This will reopen resource bays for booking."
+        title="Lift Schedule Restriction"
+        message={`Are you sure you want to lift ${timeDesc}? This will reopen resource bays for booking.`}
         icon={Info}
-        confirmLabel="Lift Block"
+        confirmLabel="Lift Restriction"
         variant="brand"
         centered={true}
         onConfirm={async () => {
@@ -209,15 +238,22 @@ const AdminSchedule = () => {
           // 2. Optimistic remove immediately
           setBlockedSlots(prev => prev.filter(b => b.id !== id));
           try {
-            const { error } = await supabase
-              .from('blocked_slots')
-              .delete()
-              .eq('id', id);
+            const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+            const res = await fetch(`${BACKEND_URL}/api/admin/blocked-slots/${id}`, {
+              method: 'DELETE'
+            });
 
-            if (error) throw error;
+            const resData = await res.json().catch(() => ({}));
+            if (!res.ok || !resData.success) {
+              throw new Error(resData.error || 'Failed to lift restriction');
+            }
+
             toast.success('Restriction lifted');
             // 3. Delayed re-sync to prevent DB race condition
-            setTimeout(() => fetchDailyContext(), 800);
+            setTimeout(() => {
+              fetchDailyContext();
+              fetchMonthData();
+            }, 500);
           } catch (err) {
             logger.error('Delete Block Error', err);
             // 4. Rollback optimistic update on failure
@@ -397,19 +433,50 @@ const AdminSchedule = () => {
           {isAddingBlock && (
             <div style={{ padding: '1.25rem', background: 'rgba(230, 30, 42, 0.05)', borderBottom: '1px solid var(--admin-border)' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-end' }}>
-                <div style={{ flex: '0 0 200px' }}>
-                  <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Scope</label>
+                <div style={{ flex: '0 0 220px' }}>
+                  <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Restriction Scope</label>
                   <select 
-                    value={blockData.isWholeDay ? 'day' : 'window'} 
-                    onChange={(e) => setBlockData({...blockData, isWholeDay: e.target.value === 'day'})}
+                    value={blockData.scope} 
+                    onChange={(e) => {
+                      const s = e.target.value;
+                      setBlockData(prev => ({
+                        ...prev,
+                        scope: s,
+                        isWholeDay: s !== 'window'
+                      }));
+                    }}
                     style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.85rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }}
                   >
-                    <option value="day">Full Working Day</option>
-                    <option value="window">Specific Time Frame</option>
+                    <option value="day">Full Working Day (Single Date)</option>
+                    <option value="window">Specific Time Frame (Single Date)</option>
+                    <option value="range">Multi-Day Date Range</option>
                   </select>
                 </div>
 
-                {!blockData.isWholeDay && (
+                {blockData.scope === 'range' && (
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div>
+                      <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Start Date</label>
+                      <input 
+                        type="date" 
+                        value={blockData.startDate} 
+                        onChange={(e) => setBlockData({ ...blockData, startDate: e.target.value })}
+                        style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.75rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }} 
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>End Date</label>
+                      <input 
+                        type="date" 
+                        value={blockData.endDate} 
+                        onChange={(e) => setBlockData({ ...blockData, endDate: e.target.value })}
+                        style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.75rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }} 
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {blockData.scope === 'window' && (
                   <div style={{ display: 'flex', gap: '1rem' }}>
                     <div>
                       <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Start</label>

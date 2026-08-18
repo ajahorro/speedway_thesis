@@ -28,7 +28,7 @@ const StaffWorkHistory = () => {
         .from('booking_vehicles')
         .select(`
           *,
-          booking:bookings!inner(staff_id, status, updated_at, total_amount),
+          booking:bookings!booking_vehicles_booking_id_fkey!inner(staff_id, status, updated_at, total_amount),
           services:booking_vehicle_services(*)
         `)
         .eq('booking.staff_id', profile.id)

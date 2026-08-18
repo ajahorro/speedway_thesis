@@ -27,7 +27,7 @@ const StaffActiveJobs = () => {
         .from('bookings')
         .select(`
           *,
-          vehicles:booking_vehicles(*, services:booking_vehicle_services(*))
+          vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*, services:booking_vehicle_services(*))
         `)
         .eq('staff_id', profile.id)
         .neq('status', 'cancelled')
