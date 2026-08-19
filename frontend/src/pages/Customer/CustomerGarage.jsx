@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Car, Plus, Settings, CheckCircle2, ChevronRight, Loader2, Trash2, Calendar, History, AlertCircle, X } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import { 
-  fetchUserGarage, 
-  addVehicleToGarage, 
-  updateGarageVehicle, 
+import { useUI } from '../../context/UIContext';
+import {
+  fetchUserGarage,
+  addVehicleToGarage,
+  updateGarageVehicle,
   deleteGarageVehicle,
-  fetchVehicleHistory 
+  fetchVehicleHistory
 } from '../../services/garageService';
 import toast from 'react-hot-toast';
 import ConfirmationToast from '../../components/ConfirmationToast';
@@ -20,7 +21,8 @@ const CustomerGarage = () => {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [historyData, setHistoryData] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  
+  const { openModal, showToast } = useUI();
+
   const [formData, setFormData] = useState({
     type: 'Sedan',
     brand: '',
@@ -34,14 +36,14 @@ const CustomerGarage = () => {
     setLoading(true);
     try {
       const data = await fetchUserGarage(user.id);
-      
+
       // Fetch "Last Service" for each vehicle
       const vehiclesWithHistory = await Promise.all(data.map(async (v) => {
         const history = await fetchVehicleHistory(v.plate_number);
         const lastService = history.length > 0 ? new Date(history[0].created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null;
         return { ...v, lastService };
       }));
-      
+
       setVehicles(vehiclesWithHistory);
     } catch (error) {
       console.error('Garage Load Error:', error);
@@ -105,30 +107,23 @@ const CustomerGarage = () => {
     }
   };
 
-  const handleDelete = async (vehicleId) => {
-    toast.custom((t) => (
-      <ConfirmationToast
-        t={t}
-        title="Remove Vehicle"
-        message="Are you sure you want to remove this vehicle from your garage? This action cannot be undone."
-        icon={Trash2}
-        confirmLabel="Remove Unit"
-        variant="danger"
-        centered={true}
-        onConfirm={async () => {
-          toast.dismiss(t.id);
-          const deleteToastId = toast.loading('Removing vehicle...');
-          try {
-            await deleteGarageVehicle(vehicleId);
-            toast.success('Vehicle Removed', { id: deleteToastId });
-            loadGarage();
-          } catch (error) {
-            toast.error('Failed to remove vehicle', { id: deleteToastId });
-          }
-        }}
-        onCancel={() => toast.dismiss(t.id)}
-      />
-    ), { duration: Infinity });
+  const handleDelete = (vehicleId) => {
+    openModal({
+      title: 'Remove Vehicle',
+      message: 'Are you sure you want to remove this vehicle from your garage? This action cannot be undone.',
+      confirmText: 'Remove Unit',
+      cancelText: 'Cancel',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteGarageVehicle(vehicleId);
+          showToast('Vehicle Removed', 'success');
+          loadGarage();
+        } catch (error) {
+          showToast('Failed to remove vehicle', 'error');
+        }
+      }
+    });
   };
 
   if (loading) {
@@ -142,7 +137,7 @@ const CustomerGarage = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
-      
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
@@ -151,7 +146,7 @@ const CustomerGarage = () => {
             Manage your registered vehicles for high-fidelity booking tracking.
           </p>
         </div>
-        <button 
+        <button
           onClick={handleOpenAdd}
           className="admin-card-hover"
           style={{ padding: '1rem 2rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: '0.75rem', boxShadow: '0 4px 15px rgba(var(--admin-brand-rgb), 0.3)' }}
@@ -173,7 +168,7 @@ const CustomerGarage = () => {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1.5rem' }}>
           {vehicles.map(vehicle => (
-            <div 
+            <div
               key={vehicle.id}
               style={{
                 background: 'var(--admin-card)',
@@ -202,7 +197,7 @@ const CustomerGarage = () => {
                     <div style={{ fontSize: '0.8rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>{vehicle.type}</div>
                   </div>
                 </div>
-                
+
                 {vehicle.is_primary && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.35rem 0.75rem', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '1px' }}>
                     <CheckCircle2 size={12} /> Primary Unit
@@ -224,19 +219,19 @@ const CustomerGarage = () => {
               </div>
 
               <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button 
+                <button
                   onClick={() => handleViewHistory(vehicle)}
                   style={{ flex: 1.5, padding: '0.85rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'white', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', textTransform: 'uppercase', letterSpacing: '1px' }}
                 >
                   <History size={16} /> Service Log
                 </button>
-                <button 
+                <button
                   onClick={() => handleOpenEdit(vehicle)}
                   style={{ padding: '0.85rem', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'var(--admin-text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
                   <Settings size={16} />
                 </button>
-                <button 
+                <button
                   onClick={() => handleDelete(vehicle.id)}
                   style={{ padding: '0.85rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 'var(--admin-radius-sm)', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -261,9 +256,9 @@ const CustomerGarage = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '1px' }}>Vehicle Type</label>
-                  <select 
+                  <select
                     value={formData.type}
-                    onChange={(e) => setFormData({...formData, type: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                     style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', padding: '0.85rem', color: 'white', fontWeight: '800', outline: 'none' }}
                   >
                     <option value="Sedan">Sedan</option>
@@ -273,12 +268,12 @@ const CustomerGarage = () => {
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '1px' }}>Plate Number</label>
-                  <input 
+                  <input
                     type="text"
                     placeholder="ABC-1234"
                     required
                     value={formData.plateNumber}
-                    onChange={(e) => setFormData({...formData, plateNumber: e.target.value.toUpperCase()})}
+                    onChange={(e) => setFormData({ ...formData, plateNumber: e.target.value.toUpperCase() })}
                     style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', padding: '0.85rem', color: 'white', fontWeight: '950', outline: 'none', letterSpacing: '2px' }}
                   />
                 </div>
@@ -286,30 +281,30 @@ const CustomerGarage = () => {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '1px' }}>Brand / Make</label>
-                <input 
+                <input
                   type="text"
                   placeholder="e.g. Honda"
                   required
                   value={formData.brand}
-                  onChange={(e) => setFormData({...formData, brand: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
                   style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', padding: '0.85rem', color: 'white', fontWeight: '800', outline: 'none' }}
                 />
               </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '1px' }}>Model Name</label>
-                <input 
+                <input
                   type="text"
                   placeholder="e.g. Civic Type R"
                   required
                   value={formData.model}
-                  onChange={(e) => setFormData({...formData, model: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
                   style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', padding: '0.85rem', color: 'white', fontWeight: '800', outline: 'none' }}
                 />
               </div>
 
-              <div 
-                onClick={() => setFormData({...formData, isPrimary: !formData.isPrimary})}
+              <div
+                onClick={() => setFormData({ ...formData, isPrimary: !formData.isPrimary })}
                 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', padding: '1rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: `1px solid ${formData.isPrimary ? 'var(--admin-brand)' : 'var(--admin-border)'}` }}
               >
                 <div style={{ width: '20px', height: '20px', borderRadius: '4px', border: `2px solid ${formData.isPrimary ? 'var(--admin-brand)' : 'var(--admin-text-secondary)'}`, background: formData.isPrimary ? 'var(--admin-brand)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -361,7 +356,7 @@ const CustomerGarage = () => {
                           <span style={{ fontSize: '0.6rem', fontWeight: '950', padding: '0.25rem 0.6rem', borderRadius: '4px', background: entry.status === 'completed' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(168, 85, 247, 0.1)', color: entry.status === 'completed' ? '#10b981' : '#a855f7', border: `1px solid ${entry.status === 'completed' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(168, 85, 247, 0.2)'}`, textTransform: 'uppercase' }}>{entry.status}</span>
                         </div>
                       </div>
-                      
+
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.75rem' }}>
                         {(entry.services || []).map((s, sIdx) => (
                           <div key={sIdx} style={{ background: 'rgba(var(--admin-brand-rgb), 0.1)', border: '1px solid rgba(var(--admin-brand-rgb), 0.2)', padding: '0.3rem 0.6rem', borderRadius: '4px', fontSize: '0.65rem', fontWeight: '950', color: 'white', textTransform: 'uppercase' }}>{s.service_name}</div>
@@ -372,7 +367,7 @@ const CustomerGarage = () => {
                 </div>
               )}
             </div>
-            
+
             <div style={{ padding: '1.5rem 2rem', background: 'var(--admin-bg)', borderTop: '1px solid var(--admin-border)', textAlign: 'center' }}>
               <p style={{ margin: 0, fontSize: '0.75rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>Showing automated fleet history log from Speedway Engine.</p>
             </div>

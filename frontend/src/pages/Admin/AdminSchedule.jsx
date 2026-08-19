@@ -18,24 +18,27 @@ import DetailTimeline from '../../components/AdminSchedule/DetailTimeline';
 import ConfirmationToast from '../../components/ConfirmationToast';
 import { AlertTriangle, Info } from 'lucide-react';
 
+import { useUI } from '../../context/UIContext';
+
 const AdminSchedule = () => {
   const navigate = useNavigate();
   const { settings } = useConfig();
   const isMobile = useMediaQuery('(max-width: 1024px)');
-  
+  const { openModal, showToast } = useUI();
+
   // State: Navigation & Context
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
   const [viewDate, setViewDate] = useState(new Date());
-  
+
   // State: Data
   const [bookings, setBookings] = useState([]);
   const [blockedSlots, setBlockedSlots] = useState([]);
   const [allMonthBookings, setAllMonthBookings] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   // State: Blocking Panel
   const [isAddingBlock, setIsAddingBlock] = useState(false);
   const [blockData, setBlockData] = useState({
@@ -49,7 +52,7 @@ const AdminSchedule = () => {
   });
 
   const hours = Array.from(
-    { length: settings.CLOSING_HOUR - settings.OPENING_HOUR + 1 }, 
+    { length: settings.CLOSING_HOUR - settings.OPENING_HOUR + 1 },
     (_, i) => i + settings.OPENING_HOUR
   );
 
@@ -103,10 +106,10 @@ const AdminSchedule = () => {
       const d = new Date(selectedDate);
       const prev = new Date(d); prev.setDate(d.getDate() - 1);
       const next = new Date(d); next.setDate(d.getDate() + 1);
-      
+
       const fetchStart = `${prev.toLocaleDateString('en-CA')}T00:00:00Z`;
       const fetchEnd = `${next.toLocaleDateString('en-CA')}T23:59:59Z`;
-      
+
       const { data: bookingsRaw, error: bookingsError } = await supabase
         .from('bookings')
         .select(`
@@ -179,41 +182,35 @@ const AdminSchedule = () => {
       confirmMsg = `Are you sure you want to block ${isWindow ? `time window ${blockData.startTime} - ${blockData.endTime}` : 'the full working day'} on ${selectedDate}?`;
     }
 
-    toast.custom((t) => (
-      <ConfirmationToast
-        t={t}
-        title="Confirm Schedule Restriction"
-        message={confirmMsg}
-        icon={AlertTriangle}
-        confirmLabel="Commit Restriction"
-        variant="danger"
-        onConfirm={async () => {
-          toast.dismiss(t.id);
-          try {
-            const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-            const res = await fetch(`${BACKEND_URL}/api/admin/blocked-slots`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
+    openModal({
+      title: "Confirm Schedule Restriction",
+      message: confirmMsg,
+      confirmText: "Commit Restriction",
+      type: "danger",
+      onConfirm: async () => {
+        try {
+          const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+          const res = await fetch(`${BACKEND_URL}/api/admin/blocked-slots`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
 
-            const resData = await res.json().catch(() => ({}));
-            if (!res.ok || !resData.success) {
-              throw new Error(resData.error || 'Failed to commit restriction');
-            }
-
-            toast.success('Schedule restriction committed');
-            setIsAddingBlock(false);
-            fetchDailyContext();
-            fetchMonthData();
-          } catch (err) {
-            logger.error('Block Error', err);
-            toast.error(err.message || 'Failed to commit restriction');
+          const resData = await res.json().catch(() => ({}));
+          if (!res.ok || !resData.success) {
+            throw new Error(resData.error || 'Failed to commit restriction');
           }
-        }}
-        onCancel={() => toast.dismiss(t.id)}
-      />
-    ), { duration: Infinity });
+
+          showToast('Schedule restriction committed', 'success');
+          setIsAddingBlock(false);
+          fetchDailyContext();
+          fetchMonthData();
+        } catch (err) {
+          logger.error('Block Error', err);
+          showToast(err.message || 'Failed to commit restriction', 'error');
+        }
+      }
+    });
   };
 
   const handleDeleteBlock = async (id, targetBlock = null) => {
@@ -222,48 +219,35 @@ const AdminSchedule = () => {
       ? (isFullDay ? 'Full Day Restriction' : `Time Window ${targetBlock.start_time} - ${targetBlock.end_time}`)
       : 'this restriction';
 
-    toast.custom((t) => (
-      <ConfirmationToast
-        t={t}
-        title="Lift Schedule Restriction"
-        message={`Are you sure you want to lift ${timeDesc}? This will reopen resource bays for booking.`}
-        icon={Info}
-        confirmLabel="Lift Restriction"
-        variant="brand"
-        centered={true}
-        onConfirm={async () => {
-          toast.dismiss(t.id);
-          // 1. Snapshot current state for rollback
-          const snapshot = blockedSlots;
-          // 2. Optimistic remove immediately
-          setBlockedSlots(prev => prev.filter(b => b.id !== id));
-          try {
-            const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-            const res = await fetch(`${BACKEND_URL}/api/admin/blocked-slots/${id}`, {
-              method: 'DELETE'
-            });
+    openModal({
+      title: "Lift Schedule Restriction",
+      message: `Are you sure you want to lift ${timeDesc}? This will reopen resource bays for booking.`,
+      confirmText: "Lift Restriction",
+      type: "brand",
+      onConfirm: async () => {
+        // 1. Snapshot current state for rollback
+        const snapshot = blockedSlots;
+        // 2. Optimistic remove immediately
+        setBlockedSlots(prev => prev.filter(b => b.id !== id));
+        try {
+          const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+          const res = await fetch(`${BACKEND_URL}/api/admin/blocked-slots/${id}`, {
+            method: 'DELETE'
+          });
 
-            const resData = await res.json().catch(() => ({}));
-            if (!res.ok || !resData.success) {
-              throw new Error(resData.error || 'Failed to lift restriction');
-            }
+          if (!res.ok) throw new Error('Failed to delete block');
 
-            toast.success('Restriction lifted');
-            // 3. Delayed re-sync to prevent DB race condition
-            setTimeout(() => {
-              fetchDailyContext();
-              fetchMonthData();
-            }, 500);
-          } catch (err) {
-            logger.error('Delete Block Error', err);
-            // 4. Rollback optimistic update on failure
-            setBlockedSlots(snapshot);
-            toast.error('Failed to lift restriction');
-          }
-        }}
-        onCancel={() => toast.dismiss(t.id)}
-      />
-    ), { duration: Infinity });
+          showToast('Restriction lifted', 'success');
+          fetchDailyContext();
+          fetchMonthData();
+        } catch (err) {
+          logger.error('Block delete error', err);
+          showToast('Failed to lift restriction', 'error');
+          // 3. Rollback on failure
+          setBlockedSlots(snapshot);
+        }
+      }
+    });
   };
 
   const getBookingsForHour = (hour) => {
@@ -271,9 +255,9 @@ const AdminSchedule = () => {
       // 🛡️ NAIVE LOCAL COMPARISON: Treat DB string as a wall-clock anchor
       const bStart = new Date(b.start_datetime.substring(0, 19));
       const bEnd = new Date(b.end_datetime.substring(0, 19));
-      
+
       const checkTime = new Date(`${selectedDate}T${String(hour).padStart(2, '0')}:00:00`);
-      
+
       return checkTime >= bStart && checkTime < bEnd;
     });
   };
@@ -289,13 +273,13 @@ const AdminSchedule = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem', maxWidth: '1600px', margin: '0 auto' }}>
-      <PageHeader 
+      <PageHeader
         badge="SERVICE_RESOURCES"
-        title="SERVICE SCHEDULE" 
+        title="SERVICE SCHEDULE"
         subtitle="Manage resource occupancy and daily throughput."
         onRefresh={fetchDailyContext}
       >
-        <button 
+        <button
           onClick={() => { fetchDailyContext(); fetchMonthData(); }}
           title="Refresh schedule data"
           style={{ background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-secondary)', padding: '0.6rem', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -331,7 +315,7 @@ const AdminSchedule = () => {
 
             {/* Weekday Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'rgba(0,0,0,0.2)' }}>
-              {['S','M','T','W','T','F','S'].map((d, i) => (
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
                 <div key={i} style={{ textAlign: 'center', fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', padding: '0.75rem 0' }}>{d}</div>
               ))}
             </div>
@@ -340,7 +324,7 @@ const AdminSchedule = () => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px', background: 'var(--admin-border)' }}>
               {(() => {
                 const today = new Date().toLocaleDateString('en-CA');
-                const year  = viewDate.getFullYear();
+                const year = viewDate.getFullYear();
                 const month = viewDate.getMonth();
                 const firstDay = new Date(year, month, 1).getDay();
                 const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -407,7 +391,7 @@ const AdminSchedule = () => {
                         {block.start_time ? `${block.start_time} - ${block.end_time}` : 'FULL DAY BLOCK'}
                       </p>
                     </div>
-                    <button 
+                    <button
                       onClick={() => handleDeleteBlock(block.id)}
                       style={{ background: 'none', border: '1px solid rgba(230,30,42,0.3)', color: 'var(--admin-brand)', fontSize: '0.55rem', fontWeight: '950', padding: '0.25rem 0.5rem', borderRadius: '2px', cursor: 'pointer', textTransform: 'uppercase' }}
                     >Lift</button>
@@ -419,7 +403,7 @@ const AdminSchedule = () => {
             )}
           </div>
 
-          <button 
+          <button
             onClick={() => setIsAddingBlock(!isAddingBlock)}
             style={{ width: '100%', padding: '1rem', background: isAddingBlock ? 'rgba(230, 30, 42, 0.1)' : 'var(--admin-card)', color: isAddingBlock ? 'var(--admin-brand)' : 'white', border: `1px solid ${isAddingBlock ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: '8px', fontWeight: '950', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}
           >
@@ -435,8 +419,8 @@ const AdminSchedule = () => {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-end' }}>
                 <div style={{ flex: '0 0 220px' }}>
                   <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Restriction Scope</label>
-                  <select 
-                    value={blockData.scope} 
+                  <select
+                    value={blockData.scope}
                     onChange={(e) => {
                       const s = e.target.value;
                       setBlockData(prev => ({
@@ -457,20 +441,20 @@ const AdminSchedule = () => {
                   <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                     <div>
                       <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Start Date</label>
-                      <input 
-                        type="date" 
-                        value={blockData.startDate} 
+                      <input
+                        type="date"
+                        value={blockData.startDate}
                         onChange={(e) => setBlockData({ ...blockData, startDate: e.target.value })}
-                        style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.75rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }} 
+                        style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.75rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }}
                       />
                     </div>
                     <div>
                       <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>End Date</label>
-                      <input 
-                        type="date" 
-                        value={blockData.endDate} 
+                      <input
+                        type="date"
+                        value={blockData.endDate}
                         onChange={(e) => setBlockData({ ...blockData, endDate: e.target.value })}
-                        style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.75rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }} 
+                        style={{ background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.75rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }}
                       />
                     </div>
                   </div>
@@ -480,28 +464,28 @@ const AdminSchedule = () => {
                   <div style={{ display: 'flex', gap: '1rem' }}>
                     <div>
                       <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Start</label>
-                      <SegmentedTimePicker value={blockData.startTime} onChange={(v) => setBlockData({...blockData, startTime: v})} />
+                      <SegmentedTimePicker value={blockData.startTime} onChange={(v) => setBlockData({ ...blockData, startTime: v })} />
                     </div>
                     <div>
                       <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>End</label>
-                      <SegmentedTimePicker value={blockData.endTime} onChange={(v) => setBlockData({...blockData, endTime: v})} />
+                      <SegmentedTimePicker value={blockData.endTime} onChange={(v) => setBlockData({ ...blockData, endTime: v })} />
                     </div>
                   </div>
                 )}
 
                 <div style={{ flex: 1, minWidth: '200px' }}>
                   <label style={{ fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.6rem', display: 'block' }}>Rationale / Reason</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g., Shop Maintenance, Staff Holiday..." 
-                    value={blockData.reason} 
-                    onChange={(e) => setBlockData({...blockData, reason: e.target.value})}
+                  <input
+                    type="text"
+                    placeholder="e.g., Shop Maintenance, Staff Holiday..."
+                    value={blockData.reason}
+                    onChange={(e) => setBlockData({ ...blockData, reason: e.target.value })}
                     style={{ width: '100%', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'white', padding: '0.85rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: '900', outline: 'none' }}
                   />
                 </div>
 
-                <button 
-                  onClick={handleCommitBlock} 
+                <button
+                  onClick={handleCommitBlock}
                   style={{ background: 'var(--admin-brand)', color: 'white', border: 'none', padding: '0.85rem 2rem', borderRadius: '4px', fontWeight: '950', fontSize: '0.75rem', textTransform: 'uppercase', cursor: 'pointer', letterSpacing: '1px' }}
                 >
                   Commit Block
@@ -511,9 +495,9 @@ const AdminSchedule = () => {
           )}
 
           <div style={{ padding: '1.5rem' }}>
-            <OccupancyShelf 
-              bookings={bookings} 
-                  onBookingClick={(id) => navigate(`/admin/bookings/${id}`)}
+            <OccupancyShelf
+              bookings={bookings}
+              onBookingClick={(id) => navigate(`/admin/bookings/${id}`)}
               config={settings}
             />
 
@@ -549,7 +533,7 @@ const AdminSchedule = () => {
                     </button>
                   </div>
                 )}
-                <DetailTimeline 
+                <DetailTimeline
                   hours={hours}
                   getBookingsForHour={getBookingsForHour}
                   getBlockForHour={getBlockForHour}

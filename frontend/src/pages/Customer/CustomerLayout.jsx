@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, NavLink, Outlet } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
 import {
   LayoutDashboard, PlusCircle, ClipboardList, CreditCard,
@@ -10,19 +9,21 @@ import ProfileHeader from '../../components/ProfileHeader';
 import NotificationPopover from '../../components/NotificationPopover';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useTheme } from '../../context/ThemeContext';
+import { useUI } from '../../context/UIContext';
+import { useAuth } from '../../hooks/useAuth';
 import { confirmLogout } from '../../utils/logoutConfirm';
 
 const CustomerLayout = () => {
-  const { theme } = useTheme();
-  const { user, profile, signOut } = useAuth();
+  const { openModal, closeModal } = useUI(); const { theme } = useTheme();
+  const { user, profile, signOut, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifPopover, setShowNotifPopover] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const notifRef = useRef(null);
-
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (notifRef.current && !notifRef.current.contains(event.target)) {
@@ -72,10 +73,18 @@ const CustomerLayout = () => {
     return () => supabase.removeChannel(channel);
   }, [user?.id, fetchUnreadCount]);
 
-  const handleLogout = async () => {
-    confirmLogout(async () => {
+  const handleLogout = () => {
+    confirmLogout(openModal, async () => {
+      // 1. Close any active modal first to prevent UI flashes
+      if (typeof closeModal === 'function') {
+        closeModal();
+      }
+
+      // 2. Perform sign out
       await signOut();
-      navigate('/', { replace: true });
+
+      // 3. Force clean redirect to homepage
+      window.location.href = '/';
     });
   };
 
@@ -117,14 +126,14 @@ const CustomerLayout = () => {
 
   return (
     <div className="admin-theme" data-theme={theme} style={{ display: 'flex', height: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', position: 'relative', overflow: 'hidden' }}>
-      
+
       {/* Mobile Overlay */}
       <div style={overlayStyle} onClick={() => setIsSidebarOpen(false)} />
 
       <aside className="no-print" style={sidebarStyle}>
-        <div style={{ 
-          padding: '2rem 1.5rem', 
-          display: 'flex', 
+        <div style={{
+          padding: '2rem 1.5rem',
+          display: 'flex',
           flexDirection: 'column',
           alignItems: 'flex-start',
           gap: '0.1rem',
@@ -295,8 +304,8 @@ const CustomerLayout = () => {
               </div>
             )}
             <div style={{ width: '1px', height: '20px', background: 'var(--admin-border)', opacity: 0.5 }}></div>
-            <div 
-              onClick={() => navigate('/customer/profile')} 
+            <div
+              onClick={() => navigate('/customer/profile')}
               style={{ cursor: 'pointer', transition: 'all 0.2s', opacity: location.pathname === '/customer/profile' ? 1 : 0.8 }}
               onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
               onMouseLeave={(e) => { if (location.pathname !== '/customer/profile') e.currentTarget.style.opacity = '0.8'; }}

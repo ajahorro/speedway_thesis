@@ -375,22 +375,15 @@ const StaffDashboard = () => {
                     {task.status?.toUpperCase() === 'IN_PROGRESS' && (
                       <button 
                         onClick={() => {
-                          toast.custom((t) => (
-                            <ConfirmationToast
-                              t={t}
-                              title="Finalize Service?"
-                              message={`Confirming completion for ${task.brand} ${task.model}. This will notify the customer and prepare the final invoice.`}
-                              icon={CheckCircle2}
-                              confirmLabel="Finish Job"
-                              variant="brand"
-                              centered={true}
-                              onConfirm={() => {
-                                toast.dismiss(t.id);
-                                handleUpdateStatus(task, 'COMPLETED');
-                              }}
-                              onCancel={() => toast.dismiss(t.id)}
-                            />
-                          ), { duration: Infinity });
+                          openModal({
+                            title: "Finalize Service?",
+                            message: `Confirming completion for ${task.brand} ${task.model}. This will notify the customer and prepare the final invoice.`,
+                            confirmText: "Finish Job",
+                            type: "brand",
+                            onConfirm: () => {
+                              handleUpdateStatus(task, 'COMPLETED');
+                            }
+                          });
                         }} 
                         disabled={!profile?.is_clocked_in} 
                         style={{ flex: 1, padding: '1rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px' }}

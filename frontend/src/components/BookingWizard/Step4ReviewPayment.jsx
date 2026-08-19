@@ -9,7 +9,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
   const [receiptDetails, setReceiptDetails] = useState(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  
+
   const labelStyle = {
     fontSize: '0.65rem',
     fontWeight: '950',
@@ -33,20 +33,20 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
     if (file) {
       // 🔄 RESET: Clear the input so selecting the same file again triggers onChange
       e.target.value = null;
-      
+
       setIsUploading(true);
       setReceiptDetails(null);
       setScanStep('TRANSMITTING TO AI AUDITOR...');
-      
+
       // Save the file reference
       setBookingData(prev => ({
         ...prev,
         payment: { ...prev.payment, proofOfPayment: file }
       }));
-      
+
       try {
         const targetAmount = bookingData.payment.type === 'Full' ? grandTotal : Math.ceil(grandTotal * 0.3);
-        
+
         const formData = new FormData();
         formData.append('receipt', file);
         formData.append('bookingId', bookingData.id || 'PENDING');
@@ -88,7 +88,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         if (!result.success) throw new Error(result.error);
 
         const extractedData = result.data;
-        
+
         // 🛡️ THESIS FLOW: Use the Authoritative Backend Status
         const isAmountMatched = result.isMatch;
 
@@ -108,7 +108,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         };
 
         setReceiptDetails(resultObj);
-        
+
         // SYNC TO MASTER STATE
         setBookingData(prev => ({
           ...prev,
@@ -132,7 +132,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
   // TIGHTENED LOGIC: must have terms AND (either Cash OR GCash with Proof)
   // Added !isUploading to ensure OCR finishes before submission is allowed
   const isValid = termsAccepted && (
-    (!isGcash) || 
+    (!isGcash) ||
     (isGcash && bookingData.payment.proofOfPayment !== null && !isUploading)
   );
 
@@ -162,7 +162,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      
+
       {/* Header */}
       <div>
         <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>Review & Payment</h2>
@@ -172,16 +172,16 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(400px, 1fr) minmax(400px, 1.2fr)', gap: '4rem', alignItems: 'start' }}>
-        
+
         {/* Left Column: Master Summary */}
         <div style={{ background: 'var(--admin-bg)', padding: '1.5rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)' }}>
           <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', fontWeight: '900', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>Booking Summary</h3>
-          
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--admin-border)', paddingBottom: '0.75rem' }}>
               <span style={{ color: 'var(--admin-text-secondary)', fontWeight: '600', fontSize: '0.85rem' }}>Schedule</span>
               <span style={{ color: 'var(--admin-text-primary)', fontWeight: '900', fontSize: '0.85rem', textAlign: 'right' }}>
-                {bookingData.date} <br/> {bookingData.time}
+                {bookingData.date} <br /> {bookingData.time}
               </span>
             </div>
 
@@ -213,7 +213,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
 
         {/* Right Column: Payment Logic */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Payment Toggle */}
             <div>
@@ -241,7 +241,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                     background: !isGcash ? 'rgba(var(--admin-brand-rgb), 0.1)' : 'var(--admin-bg)',
                     border: `2px solid ${!isGcash ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
                     color: !isGcash ? 'var(--admin-brand)' : 'var(--admin-text-primary)',
-                    fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', 
+                    fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
                     cursor: canUseCash ? 'pointer' : 'not-allowed', transition: 'all 0.2s',
                     opacity: canUseCash ? 1 : 0.3, filter: canUseCash ? 'none' : 'grayscale(1)'
                   }}
@@ -259,7 +259,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
             {/* GCash Flow */}
             {isGcash && (
               <div style={{ background: 'var(--admin-bg)', padding: '1.5rem', borderRadius: 'var(--admin-radius-md)', border: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                
+
                 {/* Payment Type Selection (Full vs Downpayment) */}
                 <div>
                   <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
@@ -286,7 +286,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                         background: bookingData.payment.type === 'Downpayment' ? 'var(--admin-brand)' : 'var(--admin-card)',
                         color: bookingData.payment.type === 'Downpayment' ? '#fff' : 'var(--admin-text-primary)',
                         border: `1px solid ${bookingData.payment.type === 'Downpayment' ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                        fontSize: '0.8rem', fontWeight: '900', cursor: canUseDownpayment ? 'pointer' : 'not-allowed', 
+                        fontSize: '0.8rem', fontWeight: '900', cursor: canUseDownpayment ? 'pointer' : 'not-allowed',
                         transition: '0.2s', opacity: canUseDownpayment ? 1 : 0.3
                       }}
                     >
@@ -328,17 +328,17 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
 
                 {/* Receipt Upload & OCR Visualization */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <input 
-                    type="file" 
-                    id="receipt-upload" 
-                    accept="image/*" 
-                    onChange={handleFileUpload} 
-                    style={{ display: 'none' }} 
+                  <input
+                    type="file"
+                    id="receipt-upload"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    style={{ display: 'none' }}
                   />
-                  
+
                   {!receiptDetails ? (
-                    <label 
-                      htmlFor="receipt-upload" 
+                    <label
+                      htmlFor="receipt-upload"
                       className="admin-card-hover"
                       style={{
                         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem',
@@ -371,29 +371,29 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                     </label>
                   ) : (
                     /* OCR RESULTS CARD (The Description View) */
-                    <div style={{ 
-                      background: 'var(--admin-card)', 
-                      borderRadius: 'var(--admin-radius-lg)', 
-                      border: `1px solid ${receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-success)'}`, 
-                      overflow: 'hidden', 
-                      animation: 'fadeIn 0.5s ease' 
+                    <div style={{
+                      background: 'var(--admin-card)',
+                      borderRadius: 'var(--admin-radius-lg)',
+                      border: `1px solid ${receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-success)'}`,
+                      overflow: 'hidden',
+                      animation: 'fadeIn 0.5s ease'
                     }}>
                       {/* Header */}
-                      <div style={{ 
-                        background: receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(var(--admin-success-rgb), 0.1)', 
-                        padding: '1.25rem', 
-                        borderBottom: `1px solid ${receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(var(--admin-success-rgb), 0.2)'}`, 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center' 
+                      <div style={{
+                        background: receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(var(--admin-success-rgb), 0.1)',
+                        padding: '1.25rem',
+                        borderBottom: `1px solid ${receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(var(--admin-success-rgb), 0.2)'}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <div style={{ 
-                            width: '32px', height: '32px', borderRadius: '50%', 
-                            background: receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-success)', 
-                            display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                          <div style={{
+                            width: '32px', height: '32px', borderRadius: '50%',
+                            background: receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-success)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
                           }}>
-                             {receiptDetails.status === 'REJECTED' ? <ShieldAlert size={20} color="#fff" /> : <CheckCircle2 size={20} color="#fff" />}
+                            {receiptDetails.status === 'REJECTED' ? <ShieldAlert size={20} color="#fff" /> : <CheckCircle2 size={20} color="#fff" />}
                           </div>
                           <div>
                             <div style={{ color: receiptDetails.status === 'REJECTED' ? '#ef4444' : (receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)'), fontWeight: '950', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
@@ -407,16 +407,16 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                       </div>
 
                       <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                        
+
                         {/* Summary Description */}
-                        <div style={{ 
-                          background: 'var(--admin-bg)', 
-                          padding: '1rem', 
-                          borderRadius: 'var(--admin-radius-sm)', 
-                          border: `1px solid ${receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.3)' : 'var(--admin-border)'}`, 
-                          fontSize: '0.8rem', 
-                          color: receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-text-secondary)', 
-                          lineHeight: 1.5, 
+                        <div style={{
+                          background: 'var(--admin-bg)',
+                          padding: '1rem',
+                          borderRadius: 'var(--admin-radius-sm)',
+                          border: `1px solid ${receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.3)' : 'var(--admin-border)'}`,
+                          fontSize: '0.8rem',
+                          color: receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-text-secondary)',
+                          lineHeight: 1.5,
                           fontStyle: 'italic',
                           fontWeight: receiptDetails.status === 'REJECTED' ? '700' : 'normal'
                         }}>
@@ -433,10 +433,10 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                               <div>
                                 <div style={labelStyle}>Integrity Score</div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                   <div style={{ flex: 1, height: '6px', background: 'var(--admin-border)', borderRadius: '3px', overflow: 'hidden' }}>
-                                      <div style={{ width: `${receiptDetails.integrity}%`, height: '100%', background: 'var(--admin-success)' }} />
-                                   </div>
-                                   <span style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-success)' }}>{receiptDetails.integrity}%</span>
+                                  <div style={{ flex: 1, height: '6px', background: 'var(--admin-border)', borderRadius: '3px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${receiptDetails.integrity}%`, height: '100%', background: 'var(--admin-success)' }} />
+                                  </div>
+                                  <span style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-success)' }}>{receiptDetails.integrity}%</span>
                                 </div>
                               </div>
                             </div>
@@ -486,7 +486,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                         )}
 
                       </div>
-                      <button 
+                      <button
                         onClick={() => { setReceiptDetails(null); setBookingData(prev => ({ ...prev, payment: { ...prev.payment, proofOfPayment: null } })); }}
                         style={{ width: '100%', padding: '1rem', background: 'var(--admin-bg)', border: 'none', borderTop: '1px solid var(--admin-border)', color: '#ef4444', fontSize: '0.75rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
                       >
@@ -515,8 +515,8 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
           {/* Terms & Conditions Checkbox (NEW) */}
           <div style={{ padding: '1rem', background: termsAccepted ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'transparent', borderRadius: 'var(--admin-radius-md)', border: `1px solid ${termsAccepted ? 'var(--admin-brand)' : 'var(--admin-border)'}`, transition: 'all 0.2s' }}>
             <label style={{ display: 'flex', gap: '1rem', cursor: 'pointer', alignItems: 'flex-start' }}>
-              <input 
-                type="checkbox" 
+              <input
+                type="checkbox"
                 checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
                 style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer', accentColor: 'var(--admin-brand)' }}
@@ -532,7 +532,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
 
       {/* Action Footer */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1rem', gap: '1rem' }}>
-        <button 
+        <button
           onClick={onBack}
           style={{
             padding: '1rem 2rem', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-md)', fontWeight: '950', fontSize: '1rem', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px'
@@ -540,7 +540,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         >
           Back
         </button>
-        <button 
+        <button
           onClick={() => setShowConfirm(true)}
           disabled={!isValid || isSubmitting}
           style={{
@@ -573,14 +573,14 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
               Are you sure you want to proceed with this booking? Please ensure all vehicle details and payment info are correct.
             </p>
             <div style={{ display: 'flex', gap: '1rem' }}>
-              <button 
+              <button
                 onClick={() => !isSubmitting && setShowConfirm(false)}
                 disabled={isSubmitting}
                 style={{ flex: 1, padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-md)', fontWeight: '900', color: 'var(--admin-text-primary)', cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.5 : 1 }}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={handleConfirmSubmit}
                 disabled={isSubmitting}
                 style={{ flex: 1, padding: '1rem', background: 'var(--admin-brand)', border: 'none', borderRadius: 'var(--admin-radius-md)', fontWeight: '900', color: '#fff', cursor: isSubmitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: isSubmitting ? 0.7 : 1 }}

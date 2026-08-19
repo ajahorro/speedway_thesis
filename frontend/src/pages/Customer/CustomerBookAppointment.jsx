@@ -121,6 +121,16 @@ const CustomerBookAppointment = () => {
 
   return (
     <div style={{ paddingBottom: '5rem' }}>
+      {/* Responsive Wizard Styling */}
+      <style>{`
+        /* Desktop Default: Show step titles */
+        .step-title { display: block; }
+
+        /* Mobile View: Hide step titles to save horizontal space */
+        @media (max-width: 768px) {
+          .step-title { display: none; }
+        }
+      `}</style>
       
       {/* Header with Back Arrow */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -175,7 +185,7 @@ const CustomerBookAppointment = () => {
             }}>
               {step.num < currentStep ? <CheckCircle size={20} /> : step.num}
             </div>
-            <span style={{ fontSize: '0.7rem', fontWeight: '800', color: step.num === currentStep ? 'white' : 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
+            <span className="step-title" style={{ fontSize: '0.7rem', fontWeight: '800', color: step.num === currentStep ? 'white' : 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
               {step.title}
             </span>
           </div>

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ChevronRight, 
-  MapPin, 
-  Phone, 
-  Mail, 
-  Clock, 
-  Shield, 
-  Zap, 
+import {
+  ChevronRight,
+  MapPin,
+  Phone,
+  Mail,
+  Clock,
+  Shield,
+  Zap,
   Star,
   Facebook,
   Instagram,
@@ -101,19 +101,24 @@ const Landing = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // 🛡️ AUTO-REDIRECT: If user is authenticated and profile is ready, 
-  // skip landing page and go straight to their dashboard
+  // 🛡️ AUTO-REDIRECT: Skip landing page only if user session is firmly verified
   useEffect(() => {
-    if (isInitialized && !authLoading && user && profile) {
+    // Check if fully initialized AND user object has an ID (prevents logout race conditions)
+    if (isInitialized && !authLoading && user?.id && profile?.role) {
       const routes = {
         ADMIN: '/admin',
         STAFF: '/staff',
         CUSTOMER: '/customer'
       };
-      navigate(routes[profile.role] || '/customer', { replace: true });
+
+      const targetRoute = routes[profile.role] || '/customer';
+
+      // Only redirect if we aren't already on that path
+      if (window.location.pathname !== targetRoute) {
+        navigate(targetRoute, { replace: true });
+      }
     }
   }, [isInitialized, authLoading, user, profile, navigate]);
-
   const scrollToSection = (id) => {
     const element = document.getElementById(id);
     if (element) {
@@ -134,9 +139,9 @@ const Landing = () => {
 
   return (
     <div style={{ background: '#0A0B0D', color: 'white', minHeight: '100vh', position: 'relative' }}>
-      
+
       {/* 1. STICKY HEADER */}
-      <header 
+      <header
         className="landing-header"
         style={{
           position: 'fixed',
@@ -157,7 +162,7 @@ const Landing = () => {
         {/* LOGO (Left) */}
         <div style={{ flex: 1 }}>
           <div onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-             <img src={logo} alt="Speedway Logo" style={{ height: 'clamp(60px, 8vw, 100px)', width: 'auto', objectFit: 'contain', position: 'relative', top: '10px' }} />
+            <img src={logo} alt="Speedway Logo" style={{ height: 'clamp(60px, 8vw, 100px)', width: 'auto', objectFit: 'contain', position: 'relative', top: '10px' }} />
           </div>
         </div>
 
@@ -173,7 +178,7 @@ const Landing = () => {
         {/* LOGIN/DASHBOARD (Right) */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', gap: '1rem', alignItems: 'center' }}>
           {user && (
-            <button 
+            <button
               onClick={() => signOut()}
               style={{
                 padding: '0.75rem 1.5rem',
@@ -191,7 +196,7 @@ const Landing = () => {
               SIGN OUT
             </button>
           )}
-          <button 
+          <button
             onClick={handleAuthAction}
             style={{
               padding: '0.75rem clamp(1rem, 3vw, 2rem)',
@@ -215,12 +220,12 @@ const Landing = () => {
       </header>
 
       {/* 2. HERO SECTION */}
-      <section id="home" style={{ 
-        height: '100vh', 
-        width: '100%', 
-        position: 'relative', 
-        display: 'flex', 
-        alignItems: 'center', 
+      <section id="home" style={{
+        height: '100vh',
+        width: '100%',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden'
       }}>
@@ -234,7 +239,7 @@ const Landing = () => {
             <span style={{ color: '#E61E2A' }}>TO THE MAXIMUM</span>
           </h1>
           <p className="text-fluid-body" style={{ color: 'rgba(255,255,255,0.7)', maxWidth: '600px', margin: '0 auto 2.5rem', lineHeight: '1.6', fontWeight: '600' }}>
-            Experience premium automotive detailing services that bring out the true brilliance 
+            Experience premium automotive detailing services that bring out the true brilliance
             of your vehicle. Our expert team uses cutting-edge techniques to deliver stunning results.
           </p>
           <button onClick={handleAuthAction} style={{ padding: '1.25rem 3.5rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '2px', cursor: 'pointer', boxShadow: '0 10px 30px rgba(230, 30, 42, 0.3)' }}>
@@ -249,24 +254,24 @@ const Landing = () => {
           <div>
             <h2 className="text-fluid-h2" style={{ textTransform: 'uppercase', marginBottom: '2rem' }}>ABOUT US</h2>
             <p style={{ fontSize: '1.1rem', color: 'rgba(255,255,255,0.6)', lineHeight: '1.8', marginBottom: '1.5rem' }}>
-              At Speedway Detail Studio, we believe that every vehicle deserves to look its absolute best. 
-              Founded with a passion for automotive excellence, we have grown into one of the region's 
+              At Speedway Detail Studio, we believe that every vehicle deserves to look its absolute best.
+              Founded with a passion for automotive excellence, we have grown into one of the region's
               most trusted detailing centers.
             </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-             {[
-               { icon: Shield, title: "PROTECTION", desc: "Premium ceramic coatings" },
-               { icon: Zap, title: "PERFORMANCE", desc: "Expert technicians" },
-               { icon: Star, title: "QUALITY", desc: "Satisfaction guaranteed" },
-               { icon: Clock, title: "RELIABILITY", desc: "Punctual service" },
-             ].map((item, i) => (
-               <div key={i} style={{ background: '#15171A', padding: '2rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <item.icon style={{ color: '#E61E2A', marginBottom: '1rem' }} size={32} />
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: '950', marginBottom: '0.5rem' }}>{item.title}</h4>
-                  <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>{item.desc}</p>
-               </div>
-             ))}
+            {[
+              { icon: Shield, title: "PROTECTION", desc: "Premium ceramic coatings" },
+              { icon: Zap, title: "PERFORMANCE", desc: "Expert technicians" },
+              { icon: Star, title: "QUALITY", desc: "Satisfaction guaranteed" },
+              { icon: Clock, title: "RELIABILITY", desc: "Punctual service" },
+            ].map((item, i) => (
+              <div key={i} style={{ background: '#15171A', padding: '2rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <item.icon style={{ color: '#E61E2A', marginBottom: '1rem' }} size={32} />
+                <h4 style={{ fontSize: '0.9rem', fontWeight: '950', marginBottom: '0.5rem' }}>{item.title}</h4>
+                <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>{item.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -292,33 +297,33 @@ const Landing = () => {
                 {services.map((service, i) => {
                   const serviceKey = `${catIndex}-${i}`;
                   return (
-                    <div 
-                      key={i} 
-                      className="admin-card-hover" 
+                    <div
+                      key={i}
+                      className="admin-card-hover"
                       onClick={() => setOpenService(openService === serviceKey ? null : serviceKey)}
-                      style={{ 
-                        background: '#15171A', 
-                        padding: '2rem', 
-                        borderRadius: '4px', 
-                        border: '1px solid rgba(255,255,255,0.05)', 
+                      style={{
+                        background: '#15171A',
+                        padding: '2rem',
+                        borderRadius: '4px',
+                        border: '1px solid rgba(255,255,255,0.05)',
                         cursor: 'pointer',
                         display: 'flex',
                         flexDirection: 'column'
                       }}
                     >
                       <div style={{ width: '40px', height: '40px', background: 'rgba(230, 30, 42, 0.1)', borderRadius: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem' }}>
-                        <ChevronRight 
-                          style={{ 
+                        <ChevronRight
+                          style={{
                             color: '#E61E2A',
                             transform: openService === serviceKey ? 'rotate(90deg)' : 'rotate(0deg)',
                             transition: 'transform 0.3s ease'
-                          }} 
-                          size={20} 
+                          }}
+                          size={20}
                         />
                       </div>
                       <h4 style={{ fontSize: '1.1rem', fontWeight: '950', marginBottom: '1rem', textTransform: 'uppercase' }}>{service.name}</h4>
                       <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)', lineHeight: '1.6' }}>{service.desc}</p>
-                      
+
                       {/* EXPANDABLE PRICE TABLE */}
                       <div style={{
                         maxHeight: openService === serviceKey ? '400px' : '0',
@@ -327,9 +332,9 @@ const Landing = () => {
                         opacity: openService === serviceKey ? 1 : 0,
                         marginTop: openService === serviceKey ? '1.5rem' : '0'
                       }}>
-                        <div style={{ 
-                          padding: '1rem', 
-                          background: 'rgba(230, 30, 42, 0.05)', 
+                        <div style={{
+                          padding: '1rem',
+                          background: 'rgba(230, 30, 42, 0.05)',
                           border: '1px dashed rgba(230, 30, 42, 0.2)',
                           borderRadius: '4px',
                         }}>
@@ -365,31 +370,31 @@ const Landing = () => {
               "What payment methods do you accept?",
               "Do I need to leave my car overnight?"
             ].map((q, i) => (
-              <div 
-                key={i} 
-                className="admin-card-hover" 
+              <div
+                key={i}
+                className="admin-card-hover"
                 onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                style={{ 
-                  background: '#15171A', 
-                  padding: '1.5rem 2rem', 
-                  borderRadius: '4px', 
-                  border: '1px solid rgba(255,255,255,0.05)', 
+                style={{
+                  background: '#15171A',
+                  padding: '1.5rem 2rem',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(255,255,255,0.05)',
                   cursor: 'pointer',
                   transition: 'all 0.3s ease'
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontWeight: '800', fontSize: '0.9rem' }}>{q}</span>
-                  <ChevronRight 
-                    size={20} 
-                    style={{ 
-                      color: 'rgba(255,255,255,0.2)', 
+                  <ChevronRight
+                    size={20}
+                    style={{
+                      color: 'rgba(255,255,255,0.2)',
                       transform: openFaq === i ? 'rotate(90deg)' : 'rotate(0deg)',
                       transition: 'transform 0.3s ease'
-                    }} 
+                    }}
                   />
                 </div>
-                
+
                 {/* SMOOTH EXPANDABLE ANSWER */}
                 <div style={{
                   maxHeight: openFaq === i ? '200px' : '0',
@@ -398,9 +403,9 @@ const Landing = () => {
                   opacity: openFaq === i ? 1 : 0,
                   marginTop: openFaq === i ? '1rem' : '0'
                 }}>
-                  <p style={{ 
-                    fontSize: '0.85rem', 
-                    color: 'rgba(255,255,255,0.5)', 
+                  <p style={{
+                    fontSize: '0.85rem',
+                    color: 'rgba(255,255,255,0.5)',
                     lineHeight: '1.6',
                     paddingTop: '0.5rem',
                     borderTop: '1px solid rgba(255,255,255,0.05)'
@@ -433,14 +438,14 @@ const Landing = () => {
             </div>
           </div>
           <div style={{ background: '#15171A', padding: 'clamp(1.5rem, 5vw, 3rem)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
-             <form style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem' }}>
-                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}><label style={{ fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', opacity: 0.5 }}>Name</label><input type="text" style={{ background: '#0A0B0D', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '4px', color: 'white', fontWeight: '700' }} placeholder="John Doe" /></div>
-                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}><label style={{ fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', opacity: 0.5 }}>Email</label><input type="email" style={{ background: '#0A0B0D', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '4px', color: 'white', fontWeight: '700' }} placeholder="john@example.com" /></div>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}><label style={{ fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', opacity: 0.5 }}>Message</label><textarea rows="5" style={{ background: '#0A0B0D', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '4px', color: 'white', fontWeight: '700', resize: 'none' }} placeholder="Tell us about your project..."></textarea></div>
-                <button style={{ padding: '1.25rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase', cursor: 'pointer' }}>SEND MESSAGE</button>
-             </form>
+            <form style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}><label style={{ fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', opacity: 0.5 }}>Name</label><input type="text" style={{ background: '#0A0B0D', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '4px', color: 'white', fontWeight: '700' }} placeholder="John Doe" /></div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}><label style={{ fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', opacity: 0.5 }}>Email</label><input type="email" style={{ background: '#0A0B0D', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '4px', color: 'white', fontWeight: '700' }} placeholder="john@example.com" /></div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}><label style={{ fontSize: '0.7rem', fontWeight: '950', textTransform: 'uppercase', opacity: 0.5 }}>Message</label><textarea rows="5" style={{ background: '#0A0B0D', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '4px', color: 'white', fontWeight: '700', resize: 'none' }} placeholder="Tell us about your project..."></textarea></div>
+              <button style={{ padding: '1.25rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase', cursor: 'pointer' }}>SEND MESSAGE</button>
+            </form>
           </div>
         </div>
       </section>
@@ -453,9 +458,9 @@ const Landing = () => {
             <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.5rem' }}>© 2024 SPEEDWAY AUTOXMOTO. ALL RIGHTS RESERVED.</div>
           </div>
           <div style={{ display: 'flex', gap: '2rem' }}>
-             <Facebook size={18} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
-             <Instagram size={18} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
-             <Twitter size={18} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
+            <Facebook size={18} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
+            <Instagram size={18} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
+            <Twitter size={18} style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }} />
           </div>
         </div>
       </footer>

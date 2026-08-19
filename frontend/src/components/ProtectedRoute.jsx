@@ -10,9 +10,9 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   // 1. Session Gate: Only block UI while we're unsure if a session exists
   if (!isInitialized) {
     return (
-      <div style={{ 
-        height: '100vh', width: '100vw', display: 'flex', 
-        alignItems: 'center', justifyContent: 'center', 
+      <div style={{
+        height: '100vh', width: '100vw', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
         background: 'var(--admin-bg)', color: 'var(--admin-brand)',
         fontWeight: '950', letterSpacing: '2px', fontSize: '0.8rem'
       }}>
@@ -23,7 +23,7 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
 
   // 2. Authentication Check: No session? Straight to Login.
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to="/" replace />;
   }
 
   // 3. Optional Profile Enrichment Gate:
@@ -31,9 +31,9 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   if (allowedRoles.length > 0 && !profile) {
     // If it's still loading the profile, show a subtle progress bar or message
     return (
-      <div style={{ 
-        height: '100vh', width: '100vw', display: 'flex', 
-        alignItems: 'center', justifyContent: 'center', 
+      <div style={{
+        height: '100vh', width: '100vw', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
         background: 'var(--admin-bg)', color: 'var(--admin-text-secondary)',
         fontSize: '0.7rem', fontWeight: '950', letterSpacing: '1px'
       }}>
@@ -47,7 +47,7 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
     const hasRole = allowedRoles.includes(profile.role?.toUpperCase());
     if (!hasRole) {
       logger.warn(`Access Denied: '${profile.role}' lacks permission for this route.`);
-      return <Navigate to="/login" replace />;
+      return <Navigate to="/" replace />;
     }
   }
 
