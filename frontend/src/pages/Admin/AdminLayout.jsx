@@ -1,20 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate, NavLink, Outlet } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
 import {
   LayoutDashboard, ClipboardList, CheckSquare, Calendar,
   Bell, Undo, BarChart2, History, Users, User,
   Settings, LogOut, Menu, X, ShieldAlert
 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { useUI } from '../../context/UIContext';
+import { useAuth } from '../../hooks/useAuth';
+import { confirmLogout } from '../../utils/logoutConfirm';
 import ProfileHeader from '../../components/ProfileHeader';
 import AdminSearch from '../../components/AdminSearch';
 import NotificationPopover from '../../components/NotificationPopover';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useTheme } from '../../context/ThemeContext';
 import BrandLogo from '../../components/BrandLogo';
-import { confirmLogout } from '../../utils/logoutConfirm';
 
 const AdminLayout = () => {
   const { theme } = useTheme();
@@ -26,6 +26,7 @@ const AdminLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const notifRef = useRef(null);
+  const { openModal, closeModal } = useUI();
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -81,24 +82,33 @@ const AdminLayout = () => {
   useEffect(() => {
     if (isMobile) setIsSidebarOpen(false);
   }, [location, isMobile]);
-  const handleLogout = async () => {
-    confirmLogout(async () => {
+
+  const handleLogout = () => {
+    confirmLogout(openModal, async () => {
+      // 1. Close any active modal first to prevent UI flashes
+      if (typeof closeModal === 'function') {
+        closeModal();
+      }
+
+      // 2. Perform sign out
       await signOut();
-      navigate('/', { replace: true });
+
+      // 3. Force clean redirect to homepage
+      window.location.href = '/';
     });
   };
+
   const navLinks = [
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard, exact: true },
     { name: 'Booking Management', path: '/admin/bookings', icon: ClipboardList },
     { name: 'Payment Verification', path: '/admin/payments', icon: CheckSquare },
-    {name: 'Schedule', path: '/admin/schedule', icon: Calendar },
+    { name: 'Schedule', path: '/admin/schedule', icon: Calendar },
     { name: 'Refund Hub', path: '/admin/refunds', icon: Undo },
     { name: 'Analytics', path: '/admin/analytics', icon: BarChart2 },
     { name: 'Audit Logs', path: '/admin/audit-logs', icon: History },
     { name: 'Accounts Management', path: '/admin/accounts', icon: Users },
     { name: 'Users', path: '/admin/users', icon: User },
     { name: 'Notifications', path: '/admin/notifications', icon: Bell },
-
   ];
 
   const bottomLinks = [
@@ -154,9 +164,9 @@ const AdminLayout = () => {
       <div style={overlayStyle} onClick={() => setIsSidebarOpen(false)} />
 
       <aside className="no-print" style={sidebarStyle}>
-        <div style={{ 
-          padding: '2rem 1.5rem', 
-          display: 'flex', 
+        <div style={{
+          padding: '2rem 1.5rem',
+          display: 'flex',
           flexDirection: 'column',
           alignItems: 'flex-start',
           gap: '0.1rem',
@@ -334,8 +344,8 @@ const AdminLayout = () => {
               </div>
             )}
             <div style={{ width: '1px', height: '20px', background: 'var(--admin-border)', opacity: 0.5 }}></div>
-            <div 
-              onClick={() => navigate('/admin/profile')} 
+            <div
+              onClick={() => navigate('/admin/profile')}
               style={{ cursor: 'pointer', transition: 'all 0.2s', opacity: location.pathname === '/admin/profile' ? 1 : 0.8 }}
               onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
               onMouseLeave={(e) => { if (location.pathname !== '/admin/profile') e.currentTarget.style.opacity = '0.8'; }}

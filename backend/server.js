@@ -81,7 +81,7 @@ function normalizeBookingData(booking) {
   if (!booking) return booking;
   const customerName = booking.customer_name || booking.customer?.full_name || 'Customer';
   const customerObj = booking.customer || {};
-  
+
   return {
     ...booking,
     customer_name: customerName,
@@ -611,7 +611,7 @@ app.post('/customer/register', async (req, res) => {
 
 /**
  * 🤖 REQ-SYS-01: AI-Assisted OCR Verification
- * Uses Gemini 1.5 Flash for high-fidelity receipt auditing
+ * Uses Gemini for high-fidelity receipt auditing
  */
 app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) => {
   try {
@@ -625,7 +625,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     const imagePart = {
       inlineData: {
         data: req.file.buffer.toString('base64'),
-        mimeType: req.file.mimetype
+        mimeType: req.file.mimetype || 'image/jpeg'
       }
     };
 
@@ -639,8 +639,8 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
       Rules:
       - Return the data in STRICT JSON format.
       - If you cannot find a specific field, use "N/A".
-      - Be extremely precise with the amount.
-      - Return ONLY the JSON object, no other text.
+      - Be extremely precise with the amount. Return numbers only for amount (e.g., 500 or 1250.50).
+      - Return ONLY the raw JSON object, no markdown formatting or backticks.
 
       JSON Structure:
       {
@@ -656,15 +656,24 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     const response = await result.response;
     const text = response.text();
 
-    // 🧹 Clean JSON (sometimes AI adds markdown blocks)
+    // 🧹 Clean JSON safely
     const cleanedJson = text.replace(/```json|```/g, '').trim();
-    const extractedData = JSON.parse(cleanedJson);
+
+    let extractedData = {};
+    try {
+      extractedData = JSON.parse(cleanedJson);
+    } catch (parseError) {
+      console.error('❌ [AI OCR] Failed to parse JSON from AI output:', text);
+      throw new Error('Invalid response structure from AI model');
+    }
 
     console.log(`✅ [AI OCR] EXTRACTION SUCCESSFUL:`, extractedData);
 
     // 🛡️ FINANCIAL INTEGRITY GUARD: Comparison Logic
-    const extractedAmount = parseFloat(extractedData.amount);
-    const requiredAmount = parseFloat(req.body.requiredAmount);
+    // Clean amount string if AI included '₱' or commas
+    const rawAmountString = String(extractedData.amount || 0).replace(/[^0-9.]/g, '');
+    const extractedAmount = parseFloat(rawAmountString) || 0;
+    const requiredAmount = parseFloat(req.body.requiredAmount) || 0;
     const bookingId = req.body.bookingId;
 
     // Check for mismatch (handling minor precision differences)
@@ -677,7 +686,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     console.log(`📊 [AUDIT] Result: ${isMatch ? '✅ MATCH' : '⚠️ MISMATCH'} -> Status: ${finalStatus}`);
 
     // Update the booking in Supabase ONLY IF it already exists (Post-creation flow)
-    if (bookingId && bookingId !== 'PENDING') {
+    if (bookingId && bookingId !== 'PENDING' && typeof supabaseAdmin !== 'undefined') {
       const { error: updateError } = await supabaseAdmin
         .from('bookings')
         .update({
@@ -691,7 +700,9 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
         })
         .eq('id', bookingId);
 
-      if (updateError) throw updateError;
+      if (updateError) {
+        console.error('⚠️ Supabase update failed:', updateError.message);
+      }
 
       // Record in Master Audit Log
       try {
@@ -700,7 +711,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
           action_type: 'AI_VERIFICATION_COMPLETE',
           actor_name: 'AI_AUDITOR',
           actor_role: 'SYSTEM',
-          details: `AI extraction complete. Reference: ${extractedData.referenceNo}. Amount: ₱${extractedAmount}. Match: ${isMatch}.`
+          details: `AI extraction complete. Reference: ${extractedData.referenceNo || 'N/A'}. Amount: ₱${extractedAmount}. Match: ${isMatch}.`
         });
       } catch (logErr) {
         console.warn('⚠️ Audit logging failed, but booking was updated.');
@@ -709,17 +720,19 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
       console.log('ℹ️ [AI OCR] Booking is in PENDING state. Returning extraction results to frontend for submission.');
     }
 
-    res.json({
+    return res.json({
       success: true,
       status: finalStatus,
       isMatch: isMatch,
-      data: extractedData
+      data: {
+        ...extractedData,
+        amount: extractedAmount
+      }
     });
 
   } catch (error) {
-    // Masking raw error for professional UI as per Technical Directive
-    console.warn('⚠️ [AI OCR] Service unavailable, masked error returned to client.');
-    res.status(500).json({
+    console.error('❌ [AI OCR Error]:', error);
+    return res.status(500).json({
       success: false,
       error: "AI analysis service is temporarily offline for maintenance. Our system will transition to manual verification to ensure your booking proceeds. Please continue."
     });

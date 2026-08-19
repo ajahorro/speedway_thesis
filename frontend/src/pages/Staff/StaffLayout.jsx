@@ -1,24 +1,23 @@
 import React, { useCallback, useEffect } from 'react';
 import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
-import { 
-  ClipboardList, CheckCircle2, User, LogOut, 
+import {
+  ClipboardList, CheckCircle2, User, LogOut,
   Menu, X, Bell, LayoutDashboard, History, Settings, Clock
 } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { supabase } from '../../lib/supabase';
-import toast from 'react-hot-toast';
+import { useUI } from '../../context/UIContext';
+import { useAuth } from '../../hooks/useAuth';
 import { confirmLogout } from '../../utils/logoutConfirm';
-import ConfirmationToast from '../../components/ConfirmationToast';
 
 const StaffLayout = () => {
-  const { user, profile, signOut, fetchProfile, setProfile, toggleShift } = useAuth();
+  const { openModal, closeModal } = useUI(); const { user, profile, signOut, logout, fetchProfile, setProfile, toggleShift } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(!isMobile);
   const [unreadCount, setUnreadCount] = React.useState(0);
-
   const userId = user?.id || profile?.id;
 
   const fetchUnreadCount = useCallback(async () => {
@@ -72,32 +71,33 @@ const StaffLayout = () => {
     const isClockingOut = profile.is_clocked_in;
 
     if (isClockingOut) {
-      toast.custom((t) => (
-        <ConfirmationToast
-          t={t}
-          title="End Shift?"
-          message="Confirming clock-out will mark you as unavailable for new detailing assignments."
-          icon={Clock}
-          confirmLabel="Clock Out"
-          variant="danger"
-          centered={true}
-          onConfirm={async () => {
-            toast.dismiss(t.id);
-            await toggleShift(false);
-          }}
-          onCancel={() => toast.dismiss(t.id)}
-        />
-      ), { duration: Infinity });
+      openModal({
+        title: "End Shift?",
+        message: "Confirming clock-out will mark you as unavailable for new detailing assignments.",
+        confirmText: "Clock Out",
+        type: "danger",
+        onConfirm: async () => {
+          await toggleShift(false);
+        }
+      });
       return;
     }
 
     await toggleShift(true);
   };
 
-  const handleLogout = async () => {
-    confirmLogout(async () => {
+  const handleLogout = () => {
+    confirmLogout(openModal, async () => {
+      // 1. Close any active modal first to prevent UI flashes
+      if (typeof closeModal === 'function') {
+        closeModal();
+      }
+
+      // 2. Perform sign out
       await signOut();
-      navigate('/', { replace: true });
+
+      // 3. Force clean redirect to homepage
+      window.location.href = '/';
     });
   };
 
@@ -122,12 +122,12 @@ const StaffLayout = () => {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#0A0B0D', color: 'white', fontFamily: 'Inter, system-ui, sans-serif' }}>
-      
+
       {/* Mobile Backdrop */}
       {isMobile && isSidebarOpen && (
-        <div 
+        <div
           onClick={() => setIsSidebarOpen(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 40, backdropFilter: 'blur(4px)' }} 
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 40, backdropFilter: 'blur(4px)' }}
         />
       )}
 
@@ -165,9 +165,9 @@ const StaffLayout = () => {
         <div style={{ padding: '1.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
           {/* 🕹️ Primary Footer Action: Shift Lifecycle Controller */}
           <div style={{ marginBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <button 
+            <button
               onClick={handleToggleShift}
-              style={{ 
+              style={{
                 width: '100%', padding: '0.85rem', borderRadius: '4px',
                 background: profile?.is_clocked_in ? '#333' : '#E61E2A',
                 border: 'none', color: 'white',
@@ -191,7 +191,7 @@ const StaffLayout = () => {
             </div>
           </div>
 
-          <Link 
+          <Link
             to="/staff/settings"
             onClick={() => isMobile && setIsSidebarOpen(false)}
             style={{
@@ -208,12 +208,12 @@ const StaffLayout = () => {
             <Settings size={18} /> SETTINGS
           </Link>
 
-          <button 
+          <button
             onClick={handleLogout}
-            style={{ 
-              width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem', 
-              padding: '0.85rem', borderRadius: '4px', background: 'transparent', 
-              border: '1px solid rgba(255, 255, 255, 0.05)', color: '#ef4444', fontWeight: '950', 
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
+              padding: '0.85rem', borderRadius: '4px', background: 'transparent',
+              border: '1px solid rgba(255, 255, 255, 0.05)', color: '#ef4444', fontWeight: '950',
               fontSize: '0.8rem', cursor: 'pointer', transition: 'all 0.2s'
             }}
           >
@@ -225,9 +225,9 @@ const StaffLayout = () => {
       {/* Main Content */}
       <main style={{ flex: 1, height: '100vh', overflowY: 'auto', position: 'relative', background: '#0A0B0D' }}>
         {/* Top Header */}
-        <header style={{ 
+        <header style={{
           height: '70px', background: 'rgba(21, 23, 26, 0.8)', backdropFilter: 'blur(10px)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center', 
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)', display: 'flex', alignItems: 'center',
           justifyContent: 'space-between', padding: '0 2rem', position: 'sticky', top: 0, zIndex: 30
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -242,13 +242,13 @@ const StaffLayout = () => {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
             {/* 🟢 Header Status Badge */}
-            <div style={{ 
-              padding: '0.4rem 0.85rem', background: 'rgba(255,255,255,0.03)', 
+            <div style={{
+              padding: '0.4rem 0.85rem', background: 'rgba(255,255,255,0.03)',
               borderRadius: '100px', border: '1px solid rgba(255,255,255,0.08)',
               display: 'flex', alignItems: 'center', gap: '0.6rem'
             }}>
-              <div style={{ 
-                width: '6px', height: '6px', borderRadius: '50%', 
+              <div style={{
+                width: '6px', height: '6px', borderRadius: '50%',
                 background: profile?.is_clocked_in ? '#10b981' : '#ef4444',
                 boxShadow: profile?.is_clocked_in ? '0 0 10px #10b981' : 'none'
               }}></div>
@@ -257,7 +257,7 @@ const StaffLayout = () => {
               </span>
             </div>
 
-            <button 
+            <button
               onClick={() => navigate('/staff/notifications')}
               style={{ background: '#15171A', border: '1px solid rgba(255, 255, 255, 0.05)', color: '#8E9196', padding: '0.5rem', borderRadius: '4px', cursor: 'pointer', position: 'relative' }}
             >

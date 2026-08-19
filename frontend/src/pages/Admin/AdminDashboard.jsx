@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { getStatusColor } from '../../utils/bookingHelpers';
-import { 
-  LayoutDashboard, ClipboardList, CreditCard, Users, 
+import {
+  LayoutDashboard, ClipboardList, CreditCard, Users,
   TrendingUp, Calendar, AlertCircle, Clock, CheckCircle2,
   ChevronRight, ArrowUpRight, ArrowDownRight, Filter,
   ShieldCheck, ShieldAlert, Package, RefreshCcw
@@ -15,7 +15,7 @@ import { calculatePaymentStatus, getPaymentStatusUI } from '../../utils/paymentU
 
 // MEMOIZED SUB-COMPONENTS: Prevent entire dashboard from re-rendering on single metric change
 const MetricCard = React.memo(({ title, value, icon: Icon, color, subtext, trendIcon: TrendIcon, onClick, gradient }) => (
-  <div 
+  <div
     onClick={onClick}
     style={{
       background: gradient || 'var(--admin-card)',
@@ -52,10 +52,10 @@ const AttentionCard = React.memo(({ count, label, icon: Icon, color, bg, onClick
     cursor: 'pointer',
     transition: 'all 0.2s ease'
   }} className="attention-card">
-    <div style={{ 
-      width: '48px', height: '48px', borderRadius: 'var(--admin-radius-sm)', 
-      background: bg, display: 'flex', alignItems: 'center', 
-      justifyContent: 'center', color: color, border: `1px solid ${color}33` 
+    <div style={{
+      width: '48px', height: '48px', borderRadius: 'var(--admin-radius-sm)',
+      background: bg, display: 'flex', alignItems: 'center',
+      justifyContent: 'center', color: color, border: `1px solid ${color}33`
     }}>
       <Icon size={24} />
     </div>
@@ -69,7 +69,7 @@ const AttentionCard = React.memo(({ count, label, icon: Icon, color, bg, onClick
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  
+
   // BATCHED STATE
   const [state, setState] = useState({
     loading: true,
@@ -155,12 +155,12 @@ const AdminDashboard = () => {
       const refundRequestsCount = (refundData || []).filter(b => {
         // Exclude bookings already processed in the hub
         if (b.refund_status === 'PROCESSED') return false;
-        
+
         // Check if there is actual financial liability (money was paid)
         const totalPaid = (b.payments || [])
           .filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING')
           .reduce((sum, p) => sum + Number(p.amount), 0);
-          
+
         return totalPaid > 0;
       }).length;
 
@@ -174,7 +174,7 @@ const AdminDashboard = () => {
           payments:payments(*)
         `)
         .order('created_at', { ascending: false })
-        .limit(20); 
+        .limit(20);
 
       // DEDUPLICATION ENGINE: Ensure unique IDs only
       const uniqueBookings = Array.from(
@@ -185,26 +185,26 @@ const AdminDashboard = () => {
       const pItems = [];
       // Add unassigned
       const { data: unassignedRaw } = await supabase.from('bookings').select('id, customer_id, start_datetime').is('staff_id', null).not('status', 'ilike', 'cancelled').limit(2);
-      
+
       const unassignedItems = [];
       if (unassignedRaw && unassignedRaw.length > 0) {
         for (const item of unassignedRaw) {
-          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).single();
+          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).maybeSingle();
           unassignedItems.push({ ...item, customer: { full_name: profile?.full_name || 'Unknown' } });
         }
       }
 
       unassignedItems.forEach(item => pItems.push({ id: item.id, type: 'STAFF', title: `Unassigned Fleet: ${item.customer?.full_name}`, sub: `Scheduled for ${new Date(item.start_datetime).toLocaleDateString()}`, color: '#3b82f6' }));
-      
+
       // Add pending payments
       const { data: pendingRaw } = await supabase.from('payments').select('id, amount, booking_id').eq('status', 'FOR_VERIFICATION').limit(2);
-      
+
       const pendingItems = [];
       if (pendingRaw && pendingRaw.length > 0) {
         for (const item of pendingRaw) {
-          const { data: b } = await supabase.from('bookings').select('customer_id').eq('id', item.booking_id).single();
+          const { data: b } = await supabase.from('bookings').select('customer_id').eq('id', item.booking_id).maybeSingle();
           if (b) {
-            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', b.customer_id).single();
+            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', b.customer_id).maybeSingle();
             pendingItems.push({ ...item, bookings: { customer: { full_name: profile?.full_name || 'Unknown' } } });
           }
         }
@@ -214,31 +214,31 @@ const AdminDashboard = () => {
 
       // Add rejected payments
       const { data: rejectedRaw } = await supabase.from('payments').select('id, amount, booking_id').eq('status', 'REJECTED').limit(2);
-      
+
       const rejectedItems = [];
       if (rejectedRaw && rejectedRaw.length > 0) {
         for (const item of rejectedRaw) {
-          const { data: b } = await supabase.from('bookings').select('customer_id').eq('id', item.booking_id).single();
+          const { data: b } = await supabase.from('bookings').select('customer_id').eq('id', item.booking_id).maybeSingle();
           if (b) {
-            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', b.customer_id).single();
+            const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', b.customer_id).maybeSingle();
             rejectedItems.push({ ...item, bookings: { customer: { full_name: profile?.full_name || 'Unknown' } } });
           }
         }
       }
 
       rejectedItems.forEach(item => pItems.push({ id: item.id, type: 'ALERT', title: `Rejected Payment: ₱${item.amount}`, sub: item.bookings?.customer?.full_name, color: '#ef4444' }));
-      
+
       // Add FLAGGED_NOSHOW items (REQ-ADM-02)
       const { data: overdueRaw } = await supabase.from('bookings').select('id, customer_id, start_datetime').eq('status', 'FLAGGED_NOSHOW').limit(2);
       if (overdueRaw) {
         for (const item of overdueRaw) {
-          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).single();
-          pItems.push({ 
-            id: item.id, 
-            type: 'NO-SHOW', 
-            title: `No-Show: ${profile?.full_name || 'Unknown'}`, 
-            sub: `Missed ${new Date(item.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} slot`, 
-            color: '#E61E2A' 
+          const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', item.customer_id).maybeSingle();
+          pItems.push({
+            id: item.id,
+            type: 'NO-SHOW',
+            title: `No-Show: ${profile?.full_name || 'Unknown'}`,
+            sub: `Missed ${new Date(item.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} slot`,
+            color: '#E61E2A'
           });
         }
       }
@@ -260,9 +260,9 @@ const AdminDashboard = () => {
         recentBookings: uniqueBookings,
         priorityItems: pItems
       });
-      
+
       logger.admin('Operational intelligence synchronized.');
-      
+
       // Refund gateway mapped
       window.refundGatewayMappedToastFired = true;
     } catch (err) {
@@ -296,7 +296,7 @@ const AdminDashboard = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', animation: 'fadeIn 0.5s ease' }}>
-      <PageHeader 
+      <PageHeader
         badge="OPERATIONAL OVERVIEW"
         title="Command Center"
         subtitle="Real-time performance metrics and fleet coordination."
@@ -305,35 +305,35 @@ const AdminDashboard = () => {
 
       {/* Hero Metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
-        <MetricCard 
+        <MetricCard
           title="Today's Appointments"
           value={state.stats.todayBookings}
           icon={Calendar}
           subtext="Live Synchronization"
           gradient="linear-gradient(135deg, var(--admin-brand), #ef4444)"
         />
-        <MetricCard 
+        <MetricCard
           title="Total Fleet Volume"
           value={state.stats.totalBookings}
           color="#10b981"
           subtext="Cumulative Records"
           icon={ArrowUpRight}
         />
-        <MetricCard 
+        <MetricCard
           title="Total Gross Revenue"
           value={`₱${state.stats.totalRevenue.toLocaleString()}`}
           color="var(--admin-brand)"
           subtext="Verified Transactions"
           icon={CreditCard}
         />
-        <MetricCard 
+        <MetricCard
           title="Service Success Rate"
           value={`${state.stats.successRate}%`}
           color="#10b981"
           subtext="Completed vs Total"
           icon={CheckCircle2}
         />
-        <MetricCard 
+        <MetricCard
           title="Active Shop Load"
           value={`${state.stats.shopLoad}%`}
           color="#3b82f6"
@@ -350,7 +350,7 @@ const AdminDashboard = () => {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-          <AttentionCard 
+          <AttentionCard
             count={state.stats.pendingPayments}
             label="Pending Verifications"
             icon={CreditCard}
@@ -358,7 +358,7 @@ const AdminDashboard = () => {
             bg="rgba(245, 158, 11, 0.1)"
             onClick={() => navigate('/admin/payments')}
           />
-          <AttentionCard 
+          <AttentionCard
             count={state.stats.flaggedBookings}
             label="Flagged for Review"
             icon={ShieldAlert}
@@ -366,7 +366,7 @@ const AdminDashboard = () => {
             bg="rgba(239, 68, 68, 0.1)"
             onClick={() => navigate('/admin/bookings?filter=flagged')}
           />
-          <AttentionCard 
+          <AttentionCard
             count={state.stats.unassignedBookings}
             label="Unassigned Fleets"
             icon={Users}
@@ -374,7 +374,7 @@ const AdminDashboard = () => {
             bg="rgba(59, 130, 246, 0.1)"
             onClick={() => navigate('/admin/bookings?filter=unassigned')}
           />
-          <AttentionCard 
+          <AttentionCard
             count={state.stats.overdueServices}
             label="No-Show Flagged"
             icon={AlertCircle}
@@ -382,7 +382,7 @@ const AdminDashboard = () => {
             bg="rgba(230, 30, 42, 0.1)"
             onClick={() => navigate('/admin/bookings?filter=overdue')}
           />
-          <AttentionCard 
+          <AttentionCard
             count={state.stats.refundRequests}
             label="Refund Requests"
             icon={RefreshCcw}
@@ -401,8 +401,8 @@ const AdminDashboard = () => {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {state.priorityItems.map((item, idx) => (
-                <div 
-                  key={idx} 
+                <div
+                  key={idx}
                   onClick={() => navigate(item.type === 'STAFF' ? `/admin/bookings/${item.id}` : '/admin/payments')}
                   style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: '2px', padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
                   className="priority-row"
@@ -460,9 +460,9 @@ const AdminDashboard = () => {
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: '0.85rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>₱{Number(b.total_amount).toLocaleString()}</div>
-                  <div style={{ 
-                    fontSize: '0.65rem', 
-                    fontWeight: '950', 
+                  <div style={{
+                    fontSize: '0.65rem',
+                    fontWeight: '950',
                     textTransform: 'uppercase',
                     color: getPaymentStatusUI(calculatePaymentStatus(b)).color
                   }}>

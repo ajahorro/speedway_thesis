@@ -39,7 +39,13 @@ export const useBookings = (customerId) => {
 
       setBookings(enriched);
     } catch (err) {
-      console.error('useBookings fetch error:', err);
+      console.error('useBookings fetch error details:', {
+        message: err?.message || err,
+        details: err?.details,
+        hint: err?.hint,
+        code: err?.code,
+        raw: err
+      });
     } finally {
       setLoading(false);
     }
