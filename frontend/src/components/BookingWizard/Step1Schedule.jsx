@@ -6,7 +6,7 @@ import CustomCalendar from './CustomCalendar';
 const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack }) => {
   const [availableSlots, setAvailableSlots] = useState([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
-  
+
   // Calculate total duration for all vehicles + 1 hour operational buffer
   const totalDuration = ((bookingData.vehicles || []).reduce((total, v) => {
     return total + (v.services || []).reduce((sub, s) => sub + (s.durationMinutes || 60), 0);
@@ -15,8 +15,8 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
   // Basic validation
   const vehicle = bookingData.vehicles && bookingData.vehicles[activeVehicleIndex] ? bookingData.vehicles[activeVehicleIndex] : {};
   const isValid = bookingData.date && bookingData.time && (bookingData.contactNumber || '').length >= 10 &&
-                  (bookingData.customerName || '').trim().length > 0 &&
-                  vehicle.type && vehicle.brand && vehicle.model && vehicle.plateNumber;
+    (bookingData.customerName || '').trim().length > 0 &&
+    vehicle.type && vehicle.brand && vehicle.model && vehicle.plateNumber;
 
   // Fetch available slots when date changes (real bay capacity check)
   useEffect(() => {
@@ -27,7 +27,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
       try {
         const slots = await getAvailableSlots(bookingData.date, totalDuration);
         setAvailableSlots(slots);
-        
+
         // Auto-clear time if the selected time is no longer available
         if (bookingData.time && !slots.includes(bookingData.time)) {
           setBookingData(prev => ({ ...prev, time: '' }));
@@ -61,7 +61,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
     } else {
       updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], [field]: value };
     }
-    
+
     setBookingData({ ...bookingData, vehicles: updatedVehicles });
   };
 
@@ -87,6 +87,21 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      
+      {/* Responsive Layout Styling */}
+      <style>{`
+        .schedule-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 2rem;
+        }
+        @media (min-width: 800px) {
+          .schedule-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+      `}</style>
+
       <div>
         <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>Select Schedule</h2>
         <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.9rem', fontWeight: '600' }}>
@@ -94,16 +109,16 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
-        
+      <div className="schedule-grid">
+
         {/* Left Col: Contact & Date */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          
+
           <div>
             <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Full Name
             </label>
-            <input 
+            <input
               type="text"
               value={bookingData.customerName || ''}
               onChange={(e) => setBookingData({ ...bookingData, customerName: e.target.value })}
@@ -118,7 +133,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             </label>
             <div style={{ position: 'relative' }}>
               <Phone size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)' }} />
-              <input 
+              <input
                 type="tel"
                 value={bookingData.contactNumber}
                 onChange={(e) => setBookingData({ ...bookingData, contactNumber: e.target.value })}
@@ -132,7 +147,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Select Date
             </label>
-            <CustomCalendar 
+            <CustomCalendar
               selectedDate={bookingData.date}
               onDateSelect={(date) => setBookingData({ ...bookingData, date })}
             />
@@ -142,7 +157,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Special Instructions / Notes (Optional)
             </label>
-            <textarea 
+            <textarea
               value={bookingData.notes || ''}
               onChange={(e) => setBookingData({ ...bookingData, notes: e.target.value })}
               placeholder="e.g. Please take extra care of the leather seats..."
@@ -154,13 +169,13 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
 
         {/* Right Col: Time Slots & Vehicle Details */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          
+
           {/* Time Slots Section */}
           <div>
             <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
               Available Time Slots
             </label>
-            
+
             {!bookingData.date ? (
               <div style={{ background: 'var(--admin-bg)', border: '1px dashed var(--admin-border)', borderRadius: 'var(--admin-radius-md)', padding: '2rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontSize: '0.9rem', fontWeight: '600' }}>
                 Please select a date first to view available slots.
@@ -206,10 +221,19 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
       </div>
 
       {/* Action Footer */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1rem' }}>
+      <div style={{ 
+        display: 'flex', 
+        flexWrap: 'wrap', 
+        gap: '1rem', 
+        justifyContent: 'space-between', 
+        borderTop: '1px solid var(--admin-border)', 
+        paddingTop: '1.5rem', 
+        marginTop: '1rem' 
+      }}>
         <button 
           onClick={onBack}
           style={{
+            flex: '1 1 200px',
             padding: '1rem 2rem',
             background: 'var(--admin-bg)',
             color: 'var(--admin-text-primary)',
@@ -219,7 +243,8 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             fontSize: '1rem',
             cursor: 'pointer',
             textTransform: 'uppercase',
-            letterSpacing: '1px'
+            letterSpacing: '1px',
+            textAlign: 'center'
           }}
         >
           Back: Adjust Services
@@ -229,6 +254,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           onClick={onNext}
           disabled={!isValid}
           style={{
+            flex: '1 1 200px',
             padding: '1rem 2rem',
             background: isValid ? 'var(--admin-brand)' : 'var(--admin-bg)',
             color: isValid ? '#fff' : 'var(--admin-text-secondary)',
@@ -239,7 +265,8 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             cursor: isValid ? 'pointer' : 'not-allowed',
             textTransform: 'uppercase',
             letterSpacing: '1px',
-            transition: 'all 0.3s ease'
+            transition: 'all 0.3s ease',
+            textAlign: 'center'
           }}
         >
           Next: Fleet Editing
