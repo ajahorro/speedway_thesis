@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../../hooks/useAuth';
-import { useBookings } from '../../hooks/useBookings';
+import { useUnifiedData } from '../../context/UnifiedContext'; // 1. IMPORT OUR NEW BRAIN
 import { Car, CreditCard, ClipboardList, Activity } from 'lucide-react';
 import ActiveBookingContainer from '../../components/Customer/ActiveBookingContainer';
 import UpcomingAppointments from '../../components/Customer/UpcomingAppointments';
@@ -8,12 +8,27 @@ import RecentNotifications from '../../components/Customer/RecentNotifications';
 
 const CustomerDashboard = () => {
   const { user, profile } = useAuth();
-  const { activeBooking, upcomingBookings, allBookings, loading } = useBookings(user?.id);
 
-  // Calculate Metrics
+  // 2. PULL LIVE REAL-TIME DATA
+  const { bookings, isLoading: loading } = useUnifiedData();
+
+  const allBookings = bookings || [];
+
+  // 3. THE GHOST BOOKING FIX: 
+  // Strictly filter out inactive statuses so they never show up in the trackers
+  const activeTrackableBookings = allBookings.filter(
+    b => !['cancelled', 'completed', 'flagged_noshow'].includes(b.status?.toLowerCase())
+  );
+
+  // The 'Active' booking is the most immediate one
+  const activeBooking = activeTrackableBookings[0] || null;
+  // The rest fall into the upcoming tracker
+  const upcomingBookings = activeTrackableBookings.slice(1);
+
+  // Calculate Metrics (These stay exactly the same, reading from the live allBookings array)
   const totalBookings = allBookings?.length || 0;
   const activeServices = allBookings?.filter(b => b.status === 'ongoing' || b.status === 'in_progress').length || 0;
-  
+
   // REQ-CST-01: Count queued vehicles across all active bookings
   const queuedVehicles = (allBookings || []).reduce((count, b) => {
     if (['in_progress'].includes(b.status?.toLowerCase())) {
@@ -21,7 +36,7 @@ const CustomerDashboard = () => {
     }
     return count;
   }, 0);
-  
+
   // REQ-CST-09: BALANCE TRACKER (Real-time calculation)
   const totalOutstanding = (allBookings || []).reduce((sum, b) => {
     const status = b.status?.toLowerCase();
@@ -40,7 +55,7 @@ const CustomerDashboard = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
-      
+
       {/* Header Section */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
@@ -56,7 +71,7 @@ const CustomerDashboard = () => {
       {/* Quick Stats Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem' }}>
         {stats.map((stat, idx) => (
-          <div 
+          <div
             key={idx}
             style={{
               background: 'var(--admin-card)',

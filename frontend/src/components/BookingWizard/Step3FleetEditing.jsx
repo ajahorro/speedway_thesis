@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { getVehicleWeight } from '../../utils/schedulingUtils';
 import { SHOP_CONFIG } from '../../config/constants';
 
-const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, setActiveVehicleIndex, setCurrentStep, onNext, onBack, isSubTaskActive, setIsSubTaskActive }) => {
+const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, setActiveVehicleIndex, setCurrentStep, onNext, onBack, isSubTaskActive, setIsSubTaskActive, onCancel }) => {
   const vehicles = bookingData.vehicles || [];
 
   const [draftVehicle, setDraftVehicle] = React.useState(null);
@@ -285,6 +285,26 @@ const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, se
         >
           Back
         </button>
+
+        {onCancel && (
+          <button 
+            type="button" 
+            onClick={onCancel} 
+            style={{ 
+              background: 'transparent', 
+              border: '1px solid #ef4444', 
+              color: '#ef4444', 
+              padding: '1rem 2rem', 
+              borderRadius: 'var(--admin-radius-md)', 
+              fontWeight: '950', 
+              cursor: 'pointer', 
+              textTransform: 'uppercase',
+              letterSpacing: '1px'
+            }}
+          >
+            Cancel Booking
+          </button>
+        )}
         <div style={{ position: 'relative' }}>
           {vehicles.length === 0 && (
             <div style={{ position: 'absolute', bottom: '100%', right: 0, marginBottom: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '0.4rem 0.8rem', borderRadius: '4px', fontSize: '0.65rem', fontWeight: '950', textTransform: 'uppercase', border: '1px solid rgba(239, 68, 68, 0.2)', whiteSpace: 'nowrap' }}>

@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useUnifiedData } from '../context/UnifiedContext';
 import { Bell, CheckCheck, ChevronRight, Info, Calendar, Star, Megaphone } from 'lucide-react';
+import NotificationDetailsModal from './NotificationDetailsModal';
 
 const TYPE_ICONS = {
   ANNOUNCEMENT: Megaphone,
@@ -24,44 +26,41 @@ function timeAgo(dateStr) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-const NotificationPopover = ({ user, profile, onClose, onRead }) => {
+// 1. Destructured `onRead` from props
+const NotificationPopover = ({ profile, onClose, onRead }) => {
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // 2. Extracted `refreshData` from global context
+  const { notifications, isLoading: loading, refreshData } = useUnifiedData();
+  const [selectedNotification, setSelectedNotification] = useState(null);
 
-  const fetchRecent = useCallback(async () => {
-    if (!user?.id) return;
-    setLoading(true);
-    try {
-      const { data } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(5);
-      setNotifications(data || []);
-    } catch {
-      setNotifications([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
-
-  useEffect(() => {
-    fetchRecent();
-  }, [fetchRecent]);
+  const recentNotifications = (notifications || []).slice(0, 5);
 
   const handleMarkAllRead = async () => {
-    if (!user?.id) return;
-    await supabase
+    const unreadIds = (notifications || []).filter(n => !n.is_read).map(n => n.id);
+    if (unreadIds.length === 0) return;
+
+    const { error } = await supabase
       .from('notifications')
       .update({ is_read: true })
-      .eq('user_id', user.id)
-      .eq('is_read', false);
-    await fetchRecent();
-    // Tell the layout badge to recount
-    onRead?.();
-    window.dispatchEvent(new Event('notificationsRead'));
+      .in('id', unreadIds);
+
+    if (!error) {
+      // 3. Sync global context and refresh header count in CustomerLayout
+      if (typeof refreshData === 'function') await refreshData();
+      if (typeof onRead === 'function') await onRead();
+      window.dispatchEvent(new Event('notificationsRead'));
+    }
+  };
+
+  const handleNotificationClick = async (n) => {
+    if (!n.is_read) {
+      await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
+      // 4. Update state when clicking an individual unread item
+      if (typeof refreshData === 'function') await refreshData();
+      if (typeof onRead === 'function') await onRead();
+    }
+
+    setSelectedNotification(n);
   };
 
   const isAdmin = profile?.role?.toUpperCase() === 'ADMIN';
@@ -70,10 +69,18 @@ const NotificationPopover = ({ user, profile, onClose, onRead }) => {
 
   return (
     <div style={{
-      position: 'absolute', top: '100%', right: 0, width: '340px',
-      background: 'var(--admin-card)', border: '1px solid var(--admin-border)',
-      borderRadius: 'var(--admin-radius)', boxShadow: 'var(--admin-card-shadow)',
-      zIndex: 100, marginTop: '0.5rem', overflow: 'hidden'
+      position: 'absolute',
+      top: '100%',
+      right: 0,
+      width: '340px',
+      maxWidth: '90vw',
+      background: 'var(--admin-card)',
+      border: '1px solid var(--admin-border)',
+      borderRadius: 'var(--admin-radius)',
+      boxShadow: 'var(--admin-card-shadow)',
+      zIndex: 100,
+      marginTop: '0.5rem',
+      overflow: 'hidden'
     }}>
       {/* Header */}
       <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -98,23 +105,27 @@ const NotificationPopover = ({ user, profile, onClose, onRead }) => {
           <div style={{ padding: '2rem', textAlign: 'center', fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>
             Loading...
           </div>
-        ) : notifications.length === 0 ? (
+        ) : recentNotifications.length === 0 ? (
           <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--admin-text-secondary)', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             No notifications yet
           </div>
         ) : (
-          notifications.map(n => {
+          recentNotifications.map(n => {
             const Icon = getIcon(n.notification_type);
             return (
               <div
                 key={n.id}
+                onClick={() => handleNotificationClick(n)}
                 style={{
                   padding: '0.9rem 1.25rem',
                   borderBottom: '1px solid var(--admin-border)',
                   display: 'flex', gap: '0.75rem', alignItems: 'flex-start',
                   background: n.is_read ? 'transparent' : 'rgba(var(--admin-brand-rgb), 0.04)',
                   transition: 'background 0.2s',
+                  cursor: 'pointer'
                 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                onMouseLeave={e => e.currentTarget.style.background = n.is_read ? 'transparent' : 'rgba(var(--admin-brand-rgb), 0.04)'}
               >
                 <div style={{
                   width: '28px', height: '28px', borderRadius: '50%', flexShrink: 0,
@@ -138,7 +149,7 @@ const NotificationPopover = ({ user, profile, onClose, onRead }) => {
                   </div>
                 </div>
                 {!n.is_read && (
-                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--admin-brand)', flexShrink: 0, marginTop: '4px' }} />
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--admin-brand)', flexShrink: '0', marginTop: '4px' }} />
                 )}
               </div>
             );
@@ -162,6 +173,17 @@ const NotificationPopover = ({ user, profile, onClose, onRead }) => {
       >
         View All Notifications <ChevronRight size={12} />
       </button>
+
+      {/* Render Modal if a notification is selected */}
+      <NotificationDetailsModal
+        notification={selectedNotification}
+        onClose={() => {
+          setSelectedNotification(null);
+          onClose(); // Optional: Close the popover after viewing the modal
+        }}
+        onMarkRead={null} // Already marked read on click
+        profile={profile}
+      />
     </div>
   );
 };

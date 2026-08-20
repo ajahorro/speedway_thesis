@@ -5,7 +5,9 @@ import { Bell, CheckCircle, Clock, Trash2, Filter, Search, AlertTriangle, X } fr
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
+import { useAuth } from '../../hooks/useAuth';
 import { BACKEND_URL } from '../../config/api';
+import NotificationDetailsModal from '../../components/NotificationDetailsModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DELETE CONFIRMATION MODAL (REQ #5)
@@ -93,6 +95,9 @@ const AdminNotifications = () => {
   const [filter, setFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
+  const { profile } = useAuth();
+  const [selectedNotification, setSelectedNotification] = useState(null);
+  
   const [broadcastForm, setBroadcastForm] = useState({ message: '' });
   const [broadcasting, setBroadcasting] = useState(false);
 
@@ -177,7 +182,7 @@ const AdminNotifications = () => {
     fetchNotifications();
   }, []);
 
-  const handleMarkAsRead = async (id) => {
+  const handleMarkAsRead = async (id, silent = false) => {
     try {
       const { error } = await supabase
         .from('notifications')
@@ -186,7 +191,7 @@ const AdminNotifications = () => {
 
       if (error) throw error;
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      toast.success('Signal acknowledged');
+      if (!silent) toast.success('Signal acknowledged');
     } catch (err) {
       logger.error('Mark Read Error', err);
     }
@@ -249,6 +254,14 @@ const AdminNotifications = () => {
           onCancel={() => setConfirmDeleteId(null)}
         />
       )}
+      
+      {/* NOTIFICATION DETAILS MODAL */}
+      <NotificationDetailsModal
+        notification={selectedNotification}
+        onClose={() => setSelectedNotification(null)}
+        onMarkRead={handleMarkAsRead}
+        profile={profile}
+      />
 
       <PageHeader badge="SYSTEM SIGNALS" title="NOTIFICATIONS" subtitle="Operational alerts and system activity logs." onRefresh={fetchNotifications}>
         <button onClick={handleMarkAllAsRead} style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'var(--admin-text-primary)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}>mark all as read</button>
@@ -316,7 +329,14 @@ const AdminNotifications = () => {
           [1,2,3].map(i => <div key={i} style={{ height: '100px', background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)' }} className="animate-pulse" />)
         ) : filteredNotifications.length > 0 ? (
           filteredNotifications.map((notif) => (
-            <div key={notif.id} style={{ ...cardStyle, opacity: notif.is_read ? 0.6 : 1, borderLeft: notif.is_read ? '1px solid var(--admin-border)' : '4px solid var(--admin-brand)' }}>
+            <div 
+              key={notif.id} 
+              onClick={() => {
+                setSelectedNotification(notif);
+                if (!notif.is_read) handleMarkAsRead(notif.id, true);
+              }}
+              style={{ ...cardStyle, opacity: notif.is_read ? 0.6 : 1, borderLeft: notif.is_read ? '1px solid var(--admin-border)' : '4px solid var(--admin-brand)', cursor: 'pointer' }}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <Bell size={20} color={notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)'} />
@@ -329,8 +349,7 @@ const AdminNotifications = () => {
                     <p style={{ margin: 0, fontSize: '0.85rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>{notif.message}</p>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  {!notif.is_read && <button onClick={() => handleMarkAsRead(notif.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><CheckCircle size={18} /></button>}
+                <div style={{ display: 'flex', gap: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
                   {/* Clicking trash opens confirmation modal — no direct delete */}
                   <button
                     onClick={() => setConfirmDeleteId(notif.id)}

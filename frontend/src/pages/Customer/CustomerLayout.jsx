@@ -47,14 +47,18 @@ const CustomerLayout = () => {
   const fetchUnreadCount = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from('notifications')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id)
-        .eq('is_read', false);
+        .or('is_read.eq.false,is_read.is.null');
+      if (error) {
+        console.error('[CustomerLayout] Failed to fetch unread count:', error);
+        return;
+      }
       setUnreadCount(count || 0);
-    } catch {
-      setUnreadCount(0);
+    } catch (err) { // 2. Added '(err)' parameter here
+      console.error('[CustomerLayout] Exception fetching unread count:', err);
     }
   }, [user?.id]);
 

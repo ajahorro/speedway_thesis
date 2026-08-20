@@ -3,7 +3,7 @@ import { Calendar as CalendarIcon, Clock, Phone, AlertCircle } from 'lucide-reac
 import { getAvailableSlots } from '../../services/scheduleService';
 import CustomCalendar from './CustomCalendar';
 
-const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack }) => {
+const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack, onCancel }) => {
   const [availableSlots, setAvailableSlots] = useState([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
 
@@ -233,7 +233,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
         <button 
           onClick={onBack}
           style={{
-            flex: '1 1 200px',
+            flex: '1 1 150px',
             padding: '1rem 2rem',
             background: 'var(--admin-bg)',
             color: 'var(--admin-text-primary)',
@@ -250,11 +250,33 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           Back: Adjust Services
         </button>
 
+        {onCancel && (
+          <button 
+            type="button" 
+            onClick={onCancel} 
+            style={{ 
+              flex: '1 1 150px',
+              background: 'transparent', 
+              border: '1px solid #ef4444', 
+              color: '#ef4444', 
+              padding: '1rem 2rem', 
+              borderRadius: 'var(--admin-radius-md)', 
+              fontWeight: '950', 
+              cursor: 'pointer', 
+              textTransform: 'uppercase',
+              letterSpacing: '1px',
+              textAlign: 'center'
+            }}
+          >
+            Cancel Booking
+          </button>
+        )}
+
         <button 
           onClick={onNext}
           disabled={!isValid}
           style={{
-            flex: '1 1 200px',
+            flex: '1 1 150px',
             padding: '1rem 2rem',
             background: isValid ? 'var(--admin-brand)' : 'var(--admin-bg)',
             color: isValid ? '#fff' : 'var(--admin-text-secondary)',

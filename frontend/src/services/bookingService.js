@@ -15,7 +15,7 @@ import { SHOP_CONFIG } from '../config/constants';
  */
 export const createBooking = async (customerId, bookingData) => {
   const vehicles = bookingData.vehicles || [];
-  
+
   // 🛡️ INTEGRITY SHIELD: Prevent 'Ghost Bookings' (REQ-SYS-01)
   if (vehicles.length === 0) {
     console.error('CRITICAL: Attempted to create a booking without any vehicles.');
@@ -33,7 +33,7 @@ export const createBooking = async (customerId, bookingData) => {
       customer_id: customerId,
       customer_name: bookingData.customerName, // Added this field
       start_datetime: combineDateAndTime(bookingData.date, bookingData.time),
-      end_datetime: calculateEstimatedEnd(bookingData.date, bookingData.time, vehicles), 
+      end_datetime: calculateEstimatedEnd(bookingData.date, bookingData.time, vehicles),
       status: bookingData.payment?.method === 'Cash' ? 'confirmed' : 'scheduled',
       total_amount: totalAmount,
       notes: bookingData.notes || '',
@@ -42,7 +42,7 @@ export const createBooking = async (customerId, bookingData) => {
     })
     .select()
     .single();
-  
+
   if (bookingError) {
     console.error('Master Booking Insert Error:', bookingError);
     throw new Error(`Master Booking Error: ${bookingError.message}`);
@@ -107,7 +107,7 @@ export const createBooking = async (customerId, bookingData) => {
       const file = bookingData.payment.proofOfPayment;
       const fileExt = file.name.split('.').pop();
       const filePath = `receipts/${booking.id}/${Date.now()}.${fileExt}`;
-      
+
       const { error: uploadError } = await supabase.storage
         .from('payment-receipts')
         .upload(filePath, file);
@@ -230,17 +230,17 @@ export const subscribeToCustomerBookings = (customerId, callback) => {
 function combineDateAndTime(dateStr, timeStr) {
   if (!dateStr) return new Date().toISOString();
   if (!timeStr) return `${dateStr}T00:00:00Z`;
-  
+
   try {
     const [time, meridian] = timeStr.split(' ');
     let [hours, minutes = 0] = time.split(':').map(Number);
     if (meridian === 'PM' && hours !== 12) hours += 12;
     if (meridian === 'AM' && hours === 12) hours = 0;
-    
+
     // Construct Date in local timezone, then convert to UTC ISO string
     const [year, month, day] = dateStr.split('-').map(Number);
     const d = new Date(year, month - 1, day, hours, minutes, 0);
-    
+
     if (isNaN(d.getTime())) throw new Error('Invalid Date');
     return d.toISOString();
   } catch (e) {
@@ -286,18 +286,25 @@ export function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
  */
 export const cancelBooking = async (bookingId, reason) => {
   try {
-    // 1. Fetch the booking
+    // 1. Fetch the booking using maybeSingle() to prevent hard 404 crashes
     const { data: booking, error: fetchError } = await supabase
       .from('bookings')
       .select('*')
       .eq('id', bookingId)
-      .single();
+      .maybeSingle();
 
     if (fetchError) throw fetchError;
 
+    // 🛡️ Defensive Check: If the booking doesn't exist or RLS blocks it
+    if (!booking) {
+      throw new Error(`Booking ID ${bookingId} not found. It may have been deleted, or you do not have permission to access it.`);
+    }
+
     // 2. Update booking status to 'cancelled' and append reason to notes
-    const updatedNotes = booking.notes ? `${booking.notes}\nCancellation Reason: ${reason}` : `Cancellation Reason: ${reason}`;
-    
+    const updatedNotes = booking.notes
+      ? `${booking.notes}\nCancellation Reason: ${reason}`
+      : `Cancellation Reason: ${reason}`;
+
     const { error: updateError } = await supabase
       .from('bookings')
       .update({
@@ -309,17 +316,19 @@ export const cancelBooking = async (bookingId, reason) => {
     if (updateError) throw updateError;
 
     // 3. Mark all related vehicles as cancelled to free up the queue
-    await supabase
+    const { error: vehicleError } = await supabase
       .from('booking_vehicles')
       .update({ status: 'cancelled' })
       .eq('booking_id', bookingId);
+
+    if (vehicleError) console.warn('Non-fatal error updating vehicles:', vehicleError);
 
     // 4. Mark associated active payments as REFUND_PENDING
     const { data: payments } = await supabase
       .from('payments')
       .select('id, status')
       .eq('booking_id', bookingId);
-      
+
     if (payments && payments.length > 0) {
       for (const p of payments) {
         if (p.status === 'PAID' || p.status === 'FOR_VERIFICATION') {
@@ -340,7 +349,7 @@ export const cancelBooking = async (bookingId, reason) => {
 
     return { success: true };
   } catch (err) {
-    console.error('Error cancelling booking:', err);
+    console.error('Error cancelling booking:', err.message || err);
     throw err;
   }
 };

@@ -6,6 +6,7 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import toast from 'react-hot-toast';
 import { logger } from '../../utils/logger';
 import { useAuth } from '../../hooks/useAuth';
+import NotificationDetailsModal from '../../components/NotificationDetailsModal';
 
 const DeleteConfirmModal = ({ onConfirm, onCancel }) => (
   <div style={{
@@ -56,6 +57,7 @@ const StaffNotifications = () => {
   const [filter, setFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [selectedNotification, setSelectedNotification] = useState(null);
 
   const fetchNotifications = async () => {
     if (!userId) {
@@ -102,12 +104,12 @@ const StaffNotifications = () => {
     };
   }, [userId]);
 
-  const handleMarkAsRead = async (id) => {
+  const handleMarkAsRead = async (id, silent = false) => {
     try {
       const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
       if (error) throw error;
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      toast.success('Notification acknowledged');
+      if (!silent) toast.success('Notification acknowledged');
     } catch (err) {
       logger.error('Mark Read Error', err);
     }
@@ -151,6 +153,12 @@ const StaffNotifications = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem' }}>
       {confirmDeleteId !== null && <DeleteConfirmModal onConfirm={handleConfirmDelete} onCancel={() => setConfirmDeleteId(null)} />}
+      <NotificationDetailsModal
+        notification={selectedNotification}
+        onClose={() => setSelectedNotification(null)}
+        onMarkRead={handleMarkAsRead}
+        profile={profile}
+      />
 
       <PageHeader badge="STAFF SIGNALS" title="NOTIFICATIONS" subtitle="Updates on your assigned tasks and system alerts." onRefresh={fetchNotifications}>
         <button onClick={handleMarkAllAsRead} style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'var(--admin-text-primary)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}>mark all as read</button>
@@ -173,7 +181,14 @@ const StaffNotifications = () => {
           [1,2,3].map(i => <div key={i} style={{ height: '100px', background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)' }} className="animate-pulse" />)
         ) : filteredNotifications.length > 0 ? (
           filteredNotifications.map((notif) => (
-            <div key={notif.id} style={{ ...cardStyle, opacity: notif.is_read ? 0.6 : 1, borderLeft: notif.is_read ? '1px solid var(--admin-border)' : '4px solid var(--admin-brand)' }}>
+            <div 
+              key={notif.id} 
+              onClick={() => {
+                setSelectedNotification(notif);
+                if (!notif.is_read) handleMarkAsRead(notif.id, true);
+              }}
+              style={{ ...cardStyle, opacity: notif.is_read ? 0.6 : 1, borderLeft: notif.is_read ? '1px solid var(--admin-border)' : '4px solid var(--admin-brand)', cursor: 'pointer' }}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <Bell size={20} color={notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)'} />
@@ -186,8 +201,7 @@ const StaffNotifications = () => {
                     <p style={{ margin: 0, fontSize: '0.85rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>{notif.message}</p>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  {!notif.is_read && <button onClick={() => handleMarkAsRead(notif.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><CheckCircle size={18} /></button>}
+                <div style={{ display: 'flex', gap: '0.5rem' }} onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => setConfirmDeleteId(notif.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><Trash2 size={18} /></button>
                 </div>
               </div>

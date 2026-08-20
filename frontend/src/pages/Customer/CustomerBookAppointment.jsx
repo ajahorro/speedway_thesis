@@ -115,6 +115,27 @@ const CustomerBookAppointment = () => {
     { num: 4, title: 'Review & Pay' }
   ];
 
+  const handleCancelBooking = () => {
+    // 1. Wipe the state back to default
+    setBookingData({
+      customerName: profile?.first_name ? `${profile.first_name} ${profile?.last_name || ''}`.trim() : (user?.user_metadata?.first_name ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim() : ''),
+      contactNumber: profile?.phone_number || user?.user_metadata?.phone_number || '',
+      date: '',
+      time: '',
+      notes: '',
+      vehicles: [{ id: crypto.randomUUID ? crypto.randomUUID() : 'v_' + Math.random().toString(36).substring(2, 9), type: '', brand: '', model: '', plateNumber: '', services: [] }],
+      payment: {
+        method: 'GCash', 
+        type: 'Full', 
+        proofOfPayment: null,
+        ocrData: null
+      }
+    });
+    
+    // 2. Redirect to the dashboard
+    navigate('/customer/dashboard');
+  };
+
   if (isSubmitted) {
     return <BookingSuccess bookingData={bookingData} />;
   }
@@ -194,8 +215,8 @@ const CustomerBookAppointment = () => {
 
       {/* Step Content */}
       <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', padding: '2rem', boxShadow: 'var(--admin-card-shadow)' }}>
-        {currentStep === 1 && <Step2Services bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} />}
-        {currentStep === 2 && <Step1Schedule bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onBack={prevStep} />}
+        {currentStep === 1 && <Step2Services bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onCancel={handleCancelBooking} />}
+        {currentStep === 2 && <Step1Schedule bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onBack={prevStep} onCancel={handleCancelBooking} />}
         {currentStep === 3 && (
           <Step3FleetEditing 
             bookingData={bookingData} 
@@ -207,9 +228,10 @@ const CustomerBookAppointment = () => {
             onBack={prevStep}
             isSubTaskActive={isSubTaskActive}
             setIsSubTaskActive={setIsSubTaskActive}
+            onCancel={handleCancelBooking}
           />
         )}
-        {currentStep === 4 && <Step4ReviewPayment bookingData={bookingData} setBookingData={setBookingData} onSubmit={handleSubmit} onBack={prevStep} isSubmitting={isSubmitting} />}
+        {currentStep === 4 && <Step4ReviewPayment bookingData={bookingData} setBookingData={setBookingData} onSubmit={handleSubmit} onBack={prevStep} isSubmitting={isSubmitting} onCancel={handleCancelBooking} />}
       </div>
     </div>
   );

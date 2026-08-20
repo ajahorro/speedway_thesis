@@ -5,7 +5,7 @@ import { fetchUserGarage } from '../../services/garageService';
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
 
-const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack }) => {
+const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack, onCancel }) => {
   const vehicle = bookingData.vehicles[activeVehicleIndex];
   const vehicleType = vehicle?.type;
   const currentServices = vehicle?.services || [];
@@ -104,9 +104,20 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
 
     const updatedVehicles = bookingData.vehicles.map((v, i) => {
       if (i === activeVehicleIndex) {
-        const newServices = exists
-          ? currentServices.filter(s => s.id !== service.id)
-          : [...currentServices, { ...service, price }];
+        let newServices;
+        if (exists) {
+          // Remove the service if it is already selected
+          newServices = currentServices.filter(s => s.id !== service.id);
+        } else {
+          // Add the service with a unique runtime ID and snapshotted price
+          const serviceWithIntegrity = {
+            ...service,
+            runtime_uuid: crypto.randomUUID ? crypto.randomUUID() : 'rt_' + Math.random().toString(36).substring(2, 9),
+            price_at_booking: price, // The exact price at the moment of booking
+            price: price // We keep this here so your calculateSubtotal() function doesn't break
+          };
+          newServices = [...currentServices, serviceWithIntegrity];
+        }
         return { ...v, services: newServices };
       }
       return v;
@@ -114,6 +125,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
 
     setBookingData({ ...bookingData, vehicles: updatedVehicles });
   };
+
 
   const calculateSubtotal = () => {
     return currentServices.reduce((sum, service) => sum + service.price, 0);
@@ -481,20 +493,42 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{calculateSubtotal().toLocaleString()}</div>
         </div>
 
-        <button
-          onClick={onNext}
-          disabled={!canProceed}
-          title={!canProceed ? getDisabledMessage() : ''}
-          style={{
-            flex: '1 1 auto', minWidth: '200px', padding: '1rem 2rem',
-            background: canProceed ? 'var(--admin-brand)' : 'var(--admin-bg)', color: canProceed ? '#fff' : 'var(--admin-text-secondary)',
-            border: `1px solid ${canProceed ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-md)',
-            fontWeight: '950', fontSize: '1rem', cursor: canProceed ? 'pointer' : 'not-allowed', opacity: canProceed ? 1 : 0.5,
-            textTransform: 'uppercase', letterSpacing: '1px', transition: 'all 0.3s ease', textAlign: 'center'
-          }}
-        >
-          Next: Select Schedule
-        </button>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {onCancel && (
+            <button 
+              type="button" 
+              onClick={onCancel} 
+              style={{ 
+                background: 'transparent', 
+                border: '1px solid #ef4444', 
+                color: '#ef4444', 
+                padding: '1rem 2rem', 
+                borderRadius: 'var(--admin-radius-md)', 
+                fontWeight: '950', 
+                cursor: 'pointer', 
+                textTransform: 'uppercase',
+                letterSpacing: '1px'
+              }}
+            >
+              Cancel Booking
+            </button>
+          )}
+
+          <button
+            onClick={onNext}
+            disabled={!canProceed}
+            title={!canProceed ? getDisabledMessage() : ''}
+            style={{
+              flex: '1 1 auto', minWidth: '200px', padding: '1rem 2rem',
+              background: canProceed ? 'var(--admin-brand)' : 'var(--admin-bg)', color: canProceed ? '#fff' : 'var(--admin-text-secondary)',
+              border: `1px solid ${canProceed ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-md)',
+              fontWeight: '950', fontSize: '1rem', cursor: canProceed ? 'pointer' : 'not-allowed', opacity: canProceed ? 1 : 0.5,
+              textTransform: 'uppercase', letterSpacing: '1px', transition: 'all 0.3s ease', textAlign: 'center'
+            }}
+          >
+            Next: Select Schedule
+          </button>
+        </div>
       </div>
 
     </div>

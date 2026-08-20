@@ -1,11 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
-import PageHeader from '../../components/PageHeader';
-import { Bell, CheckCircle, Trash2, Search, AlertTriangle } from 'lucide-react';
-import { useMediaQuery } from '../../hooks/useMediaQuery';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import PageHeader from "../components/PageHeader";
+import { Bell, CheckCircle, Trash2, Search, AlertTriangle, X, Info, Calendar, Star, Megaphone, ExternalLink } from 'lucide-react';
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import toast from 'react-hot-toast';
-import { logger } from '../../utils/logger';
-import { useAuth } from '../../hooks/useAuth';
+import { logger } from "../utils/logger";
+import { useAuth } from "../hooks/useAuth";
+import { useUnifiedData } from "../context/UnifiedContext";
+
+import NotificationDetailsModal from '../components/NotificationDetailsModal';
 
 const DeleteConfirmModal = ({ onConfirm, onCancel }) => (
   <div style={{
@@ -47,49 +51,22 @@ const DeleteConfirmModal = ({ onConfirm, onCancel }) => (
   </div>
 );
 
-const CustomerNotifications = () => {
-  const { user } = useAuth();
+const GlobalNotifications = () => {
+  const { user, profile } = useAuth();
+  const { notifications: globalNotifications, refreshData } = useUnifiedData();
   const isMobile = useMediaQuery('(max-width: 1024px)');
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
+
   const [filter, setFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [selectedNotification, setSelectedNotification] = useState(null);
 
-  const fetchNotifications = async () => {
-    if (!user?.id) return;
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setNotifications(data || []);
-    } catch (err) {
-      logger.error('Customer Notification Fetch Error', err);
-      toast.error('Failed to load notifications.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchNotifications();
-    const channel = supabase.channel(`cust-notifs-${user?.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user?.id}` }, () => fetchNotifications())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [user?.id]);
-
-  const handleMarkAsRead = async (id) => {
+  const handleMarkAsRead = async (id, silent = false) => {
     try {
       const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
       if (error) throw error;
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      toast.success('Notification acknowledged');
+      await refreshData();
+      if (!silent) toast.success('Notification acknowledged');
     } catch (err) {
       logger.error('Mark Read Error', err);
     }
@@ -99,7 +76,7 @@ const CustomerNotifications = () => {
     try {
       const { error } = await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
       if (error) throw error;
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      await refreshData();
       toast.success('All notifications acknowledged');
     } catch (err) {
       logger.error('Mark All Read Error', err);
@@ -112,7 +89,7 @@ const CustomerNotifications = () => {
     try {
       const { error } = await supabase.from('notifications').delete().eq('id', id);
       if (error) throw error;
-      setNotifications(prev => prev.filter(n => n.id !== id));
+      await refreshData();
       toast.success('Notification removed');
     } catch (err) {
       logger.error('Delete Notification Error', err);
@@ -120,20 +97,21 @@ const CustomerNotifications = () => {
     }
   };
 
-  const filteredNotifications = notifications.filter(n => {
-    const matchesSearch = n.message?.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredNotifications = (globalNotifications || []).filter(n => {
+    const matchesSearch = n.message?.toLowerCase().includes(searchQuery.toLowerCase()) || n.title?.toLowerCase().includes(searchQuery.toLowerCase());
     if (filter === 'UNREAD') return matchesSearch && !n.is_read;
     if (filter === 'READ') return matchesSearch && n.is_read;
     return matchesSearch;
   });
 
-  const cardStyle = { background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', padding: '1.25rem' };
+  const cardStyle = { background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', padding: '1.25rem', cursor: 'pointer', transition: '0.2s' };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
+    <div style={{ width: '100%', maxWidth: '1400px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
       {confirmDeleteId !== null && <DeleteConfirmModal onConfirm={handleConfirmDelete} onCancel={() => setConfirmDeleteId(null)} />}
+      <NotificationDetailsModal notification={selectedNotification} onClose={() => setSelectedNotification(null)} onMarkRead={handleMarkAsRead} profile={profile} />
 
-      <PageHeader badge="FLEET UPDATES" title="NOTIFICATIONS" subtitle="Stay informed about your vehicle detailing progress and account activity." onRefresh={fetchNotifications}>
+      <PageHeader badge="SYSTEM ALERTS" title="NOTIFICATIONS" subtitle="Stay informed about operational updates, bookings, and account activity." onRefresh={refreshData}>
         <button onClick={handleMarkAllAsRead} style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', color: 'var(--admin-text-primary)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}>mark all as read</button>
       </PageHeader>
 
@@ -150,25 +128,30 @@ const CustomerNotifications = () => {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
-        {loading ? (
-          [1,2,3].map(i => <div key={i} style={{ height: '100px', background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)' }} className="animate-pulse" />)
-        ) : filteredNotifications.length > 0 ? (
+        {filteredNotifications.length > 0 ? (
           filteredNotifications.map((notif) => (
-            <div key={notif.id} style={{ ...cardStyle, opacity: notif.is_read ? 0.6 : 1, borderLeft: notif.is_read ? '1px solid var(--admin-border)' : '4px solid var(--admin-brand)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <Bell size={20} color={notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)'} />
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '0.65rem', fontWeight: '950', color: notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)' }}>{notif.notification_type || 'ACCOUNT'}</span>
+            <div
+              key={notif.id}
+              onClick={() => {
+                setSelectedNotification(notif);
+                if (!notif.is_read) handleMarkAsRead(notif.id, true);
+              }}
+              style={{ ...cardStyle, opacity: notif.is_read ? 0.6 : 1, borderLeft: notif.is_read ? '1px solid var(--admin-border)' : '4px solid var(--admin-brand)' }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--admin-brand)'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--admin-border)'}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', minWidth: 0 }}>
+                  <Bell size={20} color={notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)'} style={{ flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.15rem' }}>
+                      <span style={{ fontSize: '0.65rem', fontWeight: '950', color: notif.is_read ? 'var(--admin-text-secondary)' : 'var(--admin-brand)' }}>{notif.notification_type || 'SYSTEM'}</span>
                       <span style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)' }}>{new Date(notif.created_at).toLocaleString()}</span>
                     </div>
-                    <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white' }}>{notif.title || 'Notification Received'}</p>
-                    <p style={{ margin: 0, fontSize: '0.85rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>{notif.message}</p>
+                    <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{notif.title || 'Notification Received'}</p>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  {!notif.is_read && <button onClick={() => handleMarkAsRead(notif.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><CheckCircle size={18} /></button>}
+                <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => setConfirmDeleteId(notif.id)} style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}><Trash2 size={18} /></button>
                 </div>
               </div>
@@ -188,4 +171,4 @@ const CustomerNotifications = () => {
   );
 };
 
-export default CustomerNotifications;
+export default GlobalNotifications;

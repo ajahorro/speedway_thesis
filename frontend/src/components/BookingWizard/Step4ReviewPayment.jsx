@@ -3,7 +3,7 @@ import { Upload, CheckCircle2, Wallet, Banknote, ShieldAlert } from 'lucide-reac
 import { supabase } from '../../lib/supabase';
 import { useConfig } from '../../context/ConfigContext';
 
-const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSubmit, isSubmitting }) => {
+const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSubmit, isSubmitting, onCancel }) => {
   const { settings } = useConfig();
   const [isUploading, setIsUploading] = useState(false);
   const [receiptDetails, setReceiptDetails] = useState(null);
@@ -540,6 +540,26 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         >
           Back
         </button>
+
+        {onCancel && (
+          <button 
+            type="button" 
+            onClick={onCancel} 
+            style={{ 
+              background: 'transparent', 
+              border: '1px solid #ef4444', 
+              color: '#ef4444', 
+              padding: '1rem 2rem', 
+              borderRadius: 'var(--admin-radius-md)', 
+              fontWeight: '950', 
+              cursor: 'pointer', 
+              textTransform: 'uppercase',
+              letterSpacing: '1px'
+            }}
+          >
+            Cancel Booking
+          </button>
+        )}
         <button
           onClick={() => setShowConfirm(true)}
           disabled={!isValid || isSubmitting}

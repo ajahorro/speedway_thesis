@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { UIProvider } from './context/UIContext';
 import { AuthProvider } from './context/AuthContext';
+import { UnifiedProvider } from './context/UnifiedContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ConfigProvider } from './context/ConfigContext';
 import AdminLayout from './pages/Admin/AdminLayout';
@@ -38,7 +39,7 @@ import CustomerBookAppointment from './pages/Customer/CustomerBookAppointment';
 import CustomerMyBookings from './pages/Customer/CustomerMyBookings';
 import CustomerBilling from './pages/Customer/CustomerBilling';
 import CustomerGarage from './pages/Customer/CustomerGarage';
-import CustomerNotifications from './pages/Customer/CustomerNotifications';
+import GlobalNotifications from "./pages/GlobalNotifications";
 import CustomerSettings from './pages/Customer/CustomerSettings';
 import CustomerProfile from './pages/Customer/CustomerProfile';
 import CustomerBookingDetails from './pages/Customer/CustomerBookingDetails';
@@ -57,84 +58,82 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <ConfigProvider>
     <ThemeProvider>
       <AuthProvider>
-        <BrowserRouter>
-          <UIProvider>
-            <Routes>
-              {/* Public Routes */}
-              <Route path="/" element={<Landing />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/accept-invite" element={<AdminAcceptInvite />} />
+        <UnifiedProvider>
+          <BrowserRouter>
+            <UIProvider>
+              <Routes>
+                {/* Public Routes */}
+                <Route path="/" element={<Landing />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/accept-invite" element={<AdminAcceptInvite />} />
 
+                {/* Admin Routes */}
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute allowedRoles={['ADMIN']}>
+                      <AdminLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<AdminDashboard />} />
+                  <Route path="bookings" element={<AdminBookings />} />
+                  <Route path="bookings/:id" element={<AdminBookingDetails />} />
+                  <Route path="schedule" element={<AdminSchedule />} />
+                  <Route path="payments" element={<AdminPayments />} />
+                  <Route path="refunds" element={<AdminRefunds />} />
+                  <Route path="analytics" element={<AdminSalesReport />} />
+                  <Route path="audit-logs" element={<AdminAuditLogs />} />
+                  <Route path="accounts" element={<AdminAccountsManagement />} />
+                  <Route path="users" element={<AdminUserManagement />} />
+                  <Route path="settings" element={<AdminSettings />} />
+                  <Route path="notifications" element={<AdminNotifications />} />
+                  <Route path="slots" element={<Navigate to="/admin/schedule" replace />} />
+                  <Route path="profile" element={<AdminProfile />} />
+                  <Route path="*" element={<div style={{ padding: '2rem' }}>Module under development</div>} />
+                </Route>
 
-              <Route
-                path="/admin"
-                element={
-                  <ProtectedRoute allowedRoles={['ADMIN']}>
-                    <AdminLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route index element={<AdminDashboard />} />
-                <Route path="bookings" element={<AdminBookings />} />
-                <Route path="bookings/:id" element={<AdminBookingDetails />} />
-                <Route path="schedule" element={<AdminSchedule />} />
-                <Route path="payments" element={<AdminPayments />} />
-                <Route path="refunds" element={<AdminRefunds />} />
-                <Route path="analytics" element={<AdminSalesReport />} />
-                <Route path="audit-logs" element={<AdminAuditLogs />} />
-                <Route path="accounts" element={<AdminAccountsManagement />} />
-                <Route path="users" element={<AdminUserManagement />} />
-                <Route path="settings" element={<AdminSettings />} />
-                <Route path="notifications" element={<AdminNotifications />} />
-                <Route path="slots" element={<Navigate to="/admin/schedule" replace />} />
-                <Route path="profile" element={<AdminProfile />} />
-                {/* Fallback for other admin routes */}
-                <Route path="*" element={<div style={{ padding: '2rem' }}>Module under development</div>} />
-              </Route>
+                {/* Staff Routes */}
+                <Route
+                  path="/staff"
+                  element={
+                    <ProtectedRoute allowedRoles={['STAFF']}>
+                      <StaffLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<StaffDashboard />} />
+                  <Route path="tasks" element={<StaffActiveJobs />} />
+                  <Route path="history" element={<StaffWorkHistory />} />
+                  <Route path="job/:id" element={<StaffJobDetails />} />
+                  <Route path="profile" element={<StaffProfile />} />
+                  <Route path="notifications" element={<StaffNotifications />} />
+                  <Route path="settings" element={<StaffSettings />} />
+                </Route>
 
-              {/* Staff Routes */}
-              <Route
-                path="/staff"
-                element={
-                  <ProtectedRoute allowedRoles={['STAFF']}>
-                    <StaffLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route index element={<StaffDashboard />} />
-                <Route path="tasks" element={<StaffActiveJobs />} />
-                <Route path="history" element={<StaffWorkHistory />} />
-                <Route path="job/:id" element={<StaffJobDetails />} />
-                <Route path="profile" element={<StaffProfile />} />
-                <Route path="notifications" element={<StaffNotifications />} />
-                <Route path="settings" element={<StaffSettings />} />
-              </Route>
-
-              {/* Customer Routes */}
-              <Route
-                path="/customer"
-                element={
-                  <ProtectedRoute allowedRoles={['CUSTOMER']}>
-                    <CustomerLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route index element={<CustomerDashboard />} />
-                <Route path="book" element={<CustomerBookAppointment />} />
-                <Route path="bookings" element={<CustomerMyBookings />} />
-                <Route path="bookings/:id" element={<CustomerBookingDetails />} />
-                <Route path="billing" element={<CustomerBilling />} />
-                <Route path="garage" element={<CustomerGarage />} />
-                <Route path="notifications" element={<CustomerNotifications />} />
-                <Route path="settings" element={<CustomerSettings />} />
-                <Route path="profile" element={<CustomerProfile />} />
-              </Route>
-
-              {/* Global Fallback: Catch-all for unknown routes */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </UIProvider>
-        </BrowserRouter>
+                {/* Customer Routes */}
+                <Route
+                  path="/customer"
+                  element={
+                    <ProtectedRoute allowedRoles={['CUSTOMER']}>
+                      <CustomerLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route index element={<CustomerDashboard />} />
+                  <Route path="book" element={<CustomerBookAppointment />} />
+                  <Route path="bookings" element={<CustomerMyBookings />} />
+                  <Route path="bookings/:id" element={<CustomerBookingDetails />} />
+                  <Route path="billing" element={<CustomerBilling />} />
+                  <Route path="garage" element={<CustomerGarage />} />
+                  <Route path="notifications" element={<GlobalNotifications />} />
+                  <Route path="settings" element={<CustomerSettings />} />
+                  <Route path="profile" element={<CustomerProfile />} />
+                </Route>
+              </Routes>
+            </UIProvider>
+          </BrowserRouter>
+        </UnifiedProvider>
       </AuthProvider>
     </ThemeProvider>
   </ConfigProvider>

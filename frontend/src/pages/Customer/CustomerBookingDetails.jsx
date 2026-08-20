@@ -10,6 +10,7 @@ import BookingChat from '../../components/BookingChat';
 import toast from 'react-hot-toast';
 import { cancelBooking } from '../../services/bookingService';
 import { getStatusColor, getStatusLabel } from '../../utils/bookingHelpers';
+import { useUnifiedData } from '../../context/UnifiedContext';
 
 const STATUS_STEPS = ['scheduled', 'confirmed', 'in_progress', 'completed'];
 const STATUS_STEPS_WITH_NOSHOW = ['scheduled', 'confirmed', 'flagged_noshow'];
@@ -18,25 +19,69 @@ const CustomerBookingDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { refreshData } = useUnifiedData(); // Now safely inside the component!
 
   const [booking, setBooking] = useState(null);
   const [vehicles, setVehicles] = useState([]);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [receiptModal, setReceiptModal] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
 
   const formatCurrency = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(val);
 
+  // confirmCancellation now lives INSIDE the component where it has access to all state and hooks!
+  const confirmCancellation = async () => {
+    if (isCancelling) return;
+    setIsCancelling(true);
+    const toastId = toast.loading('Processing cancellation...');
+    try {
+      const result = await cancelBooking(id, cancelReason);
+
+      if (result.success) {
+        toast.success('Booking Cancelled & Refund Queued', { id: toastId });
+        setShowCancelModal(false);
+
+        await refreshData(); // Triggers the global context refresh instantly!
+
+        fetchAll();
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to cancel booking', { id: toastId });
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   // --- DATA FETCHING ---
   const fetchAll = async () => {
     setLoading(true);
     try {
+      let actualBookingId = id;
+
+      // 0. Handle short reference code lookups gracefully
+      if (id && id.length <= 12 && !id.includes('-')) {
+        const { data: refData, error: refErr } = await supabase
+          .from('bookings')
+          .select('id')
+          .ilike('id', `${id}%`)
+          .maybeSingle();
+
+        if (refErr || !refData) {
+          navigate('/customer/bookings');
+          return;
+        }
+        actualBookingId = refData.id;
+      }
+
       // 1. Booking
       const { data: bData, error: bErr } = await supabase
-        .from('bookings').select('*').eq('id', id).maybeSingle();
+        .from('bookings').select('*').eq('id', actualBookingId).maybeSingle();
       if (bErr) throw bErr;
       if (!bData) return navigate('/customer/bookings');
 
@@ -52,7 +97,7 @@ const CustomerBookingDetails = () => {
       const { data: vData, error: vError } = await supabase
         .from('booking_vehicles')
         .select('*')
-        .eq('booking_id', id)
+        .eq('booking_id', actualBookingId)
         .order('created_at');
 
       if (vError) throw vError;
@@ -64,7 +109,7 @@ const CustomerBookingDetails = () => {
           .from('booking_vehicle_services')
           .select('*')
           .in('booking_vehicle_id', vehicleIds);
-        
+
         vehiclesWithServices = vData.map(v => ({
           ...v,
           services: (sData || []).filter(s => s.booking_vehicle_id === v.id)
@@ -73,7 +118,7 @@ const CustomerBookingDetails = () => {
 
       // 4. Payments
       const { data: pData } = await supabase
-        .from('payments').select('*').eq('booking_id', id).order('created_at', { ascending: true });
+        .from('payments').select('*').eq('booking_id', actualBookingId).order('created_at', { ascending: true });
 
       const processedPayments = (pData || []).map(p => {
         let url = p.receipt_url;
@@ -127,19 +172,19 @@ const CustomerBookingDetails = () => {
   const timeStr = dt ? dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
   const balance = Math.max(0, (booking.total_amount || 0) - (booking.totalPaid || 0));
   const staffName = booking.assigned_staff ? `${booking.assigned_staff.first_name} ${booking.assigned_staff.last_name}` : 'Pending Assignment';
-  
+
   // 🚀 DERIVED STATE: Ensure UI reflects reality even if master status lags
   const vehicleStatuses = (vehicles || []).map(v => v.status?.toUpperCase());
   const anyUnitStarted = vehicleStatuses.includes('IN_PROGRESS');
   const allUnitsFinished = vehicleStatuses.length > 0 && vehicleStatuses.every(s => s === 'COMPLETED' || s === 'CANCELLED');
   const isFullySettled = (booking.total_amount || 0) > 0 && balance === 0;
-  
+
   // Real-time derived status for UI responsiveness
   let derivedStatus = (booking.status || 'scheduled').toLowerCase();
-  
+
   // Auto-advance logic for UI
   if (anyUnitStarted && derivedStatus === 'scheduled') derivedStatus = 'in_progress';
-  
+
   // Hard completion: All units done AND payment settled
   if (allUnitsFinished && isFullySettled && derivedStatus !== 'cancelled') derivedStatus = 'completed';
 
@@ -160,12 +205,12 @@ const CustomerBookingDetails = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)', fontFamily: 'monospace' }}>#{id.substring(0, 8).toUpperCase()}</h1>
             {['confirmed', 'completed'].includes(booking.status) && (
-              <button 
+              <button
                 onClick={() => navigate(`/customer/receipt/${id}`)}
-                style={{ 
-                  padding: '0.4rem 0.8rem', background: 'rgba(var(--admin-success-rgb), 0.1)', 
-                  border: '1px solid var(--admin-success)', color: 'var(--admin-success)', 
-                  borderRadius: 'var(--admin-radius-sm)', fontSize: '0.65rem', fontWeight: '950', 
+                style={{
+                  padding: '0.4rem 0.8rem', background: 'rgba(var(--admin-success-rgb), 0.1)',
+                  border: '1px solid var(--admin-success)', color: 'var(--admin-success)',
+                  borderRadius: 'var(--admin-radius-sm)', fontSize: '0.65rem', fontWeight: '950',
                   cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', textTransform: 'uppercase'
                 }}
               >
@@ -179,8 +224,8 @@ const CustomerBookingDetails = () => {
       {/* ===== A. LIVE STATUS TRACKER ===== */}
       <div style={cardStyle}>
         {booking.refund_status === 'PROCESSED' && (
-          <div style={{ 
-            marginBottom: '1.5rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', 
+          <div style={{
+            marginBottom: '1.5rem', padding: '1rem', background: 'rgba(239, 68, 68, 0.05)',
             border: '1px solid #ef4444', borderRadius: 'var(--admin-radius-sm)',
             display: 'flex', alignItems: 'center', gap: '1rem'
           }}>
@@ -225,7 +270,7 @@ const CustomerBookingDetails = () => {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
-        
+
         {/* LEFT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
@@ -291,7 +336,7 @@ const CustomerBookingDetails = () => {
                 {(v.service_notes || v.photo_proof_url) && (
                   <div style={{ display: 'flex', gap: '1.5rem' }}>
                     {v.photo_proof_url && (
-                      <div 
+                      <div
                         onClick={() => window.open(v.photo_proof_url, '_blank')}
                         style={{ width: '80px', height: '80px', borderRadius: '8px', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', overflow: 'hidden', cursor: 'zoom-in', flexShrink: 0 }}
                       >
@@ -442,7 +487,7 @@ const CustomerBookingDetails = () => {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.65rem', fontWeight: '700', color: 'var(--admin-text-secondary)' }}>{new Date(p.created_at).toLocaleDateString()}</span>
                     {p.status === 'PAID' && (
-                      <button 
+                      <button
                         onClick={() => { setSelectedPayment(p); setReceiptModal(true); }}
                         style={{ background: 'transparent', border: '1px solid var(--admin-brand)', color: 'var(--admin-brand)', padding: '0.35rem 0.6rem', borderRadius: '4px', fontSize: '0.6rem', fontWeight: '950', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
                       >
@@ -453,7 +498,7 @@ const CustomerBookingDetails = () => {
                 </div>
               ))}
             </div>
-            
+
             <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px dashed var(--admin-border)', display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '0.8rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>BALANCE REMAINING</span>
               <span style={{ fontSize: '1rem', fontWeight: '950', color: 'var(--admin-warning)' }}>{formatCurrency(Math.max(0, (booking.total_amount || 0) - (booking.totalPaid || 0)))}</span>
@@ -465,22 +510,22 @@ const CustomerBookingDetails = () => {
             <div style={{ ...cardStyle, border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.02)' }}>
               <div style={{ ...labelStyle, color: '#ef4444' }}>Danger Zone</div>
               <p style={{ margin: '0.5rem 0 1rem 0', fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>
-                {derivedStatus === 'scheduled' 
-                  ? "Need to cancel? You can cancel your appointment now." 
+                {derivedStatus === 'scheduled'
+                  ? "Need to cancel? You can cancel your appointment now."
                   : "This appointment is currently locked for service. Cancellations are no longer permitted."}
                 {booking.totalPaid > 0 && derivedStatus === 'scheduled' && " Since a payment was detected, a refund request will be automatically filed."}
               </p>
-              <button 
+              <button
                 disabled={derivedStatus !== 'scheduled'}
                 onClick={() => setShowCancelModal(true)}
-                style={{ 
-                  width: '100%', padding: '0.85rem', 
-                  background: derivedStatus === 'scheduled' ? 'transparent' : 'rgba(255,255,255,0.05)', 
-                  border: `1px solid ${derivedStatus === 'scheduled' ? '#ef4444' : 'var(--admin-border)'}`, 
-                  color: derivedStatus === 'scheduled' ? '#ef4444' : 'var(--admin-text-secondary)', 
-                  borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.75rem', 
-                  cursor: derivedStatus === 'scheduled' ? 'pointer' : 'not-allowed', 
-                  textTransform: 'uppercase' 
+                style={{
+                  width: '100%', padding: '0.85rem',
+                  background: derivedStatus === 'scheduled' ? 'transparent' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${derivedStatus === 'scheduled' ? '#ef4444' : 'var(--admin-border)'}`,
+                  color: derivedStatus === 'scheduled' ? '#ef4444' : 'var(--admin-text-secondary)',
+                  borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', fontSize: '0.75rem',
+                  cursor: derivedStatus === 'scheduled' ? 'pointer' : 'not-allowed',
+                  textTransform: 'uppercase'
                 }}
               >
                 {derivedStatus === 'scheduled' ? 'Cancel Appointment' : 'Service Ongoing / Locked'}
@@ -511,27 +556,22 @@ const CustomerBookingDetails = () => {
 
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <button onClick={() => setShowCancelModal(false)} style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'white', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer' }}>GO BACK</button>
-                  <button 
-                    disabled={!cancelReason.trim()}
-                    onClick={async () => {
-                      const toastId = toast.loading('Processing cancellation...');
-                      try {
-                        const result = await cancelBooking(id, cancelReason);
-                        
-                        if (result.success) {
-                          toast.success('Booking Cancelled & Refund Queued', { id: toastId });
-                          setShowCancelModal(false);
-                          fetchAll();
-                        } else {
-                          throw new Error(result.error);
-                        }
-                      } catch (err) {
-                        toast.error(err.message || 'Failed to cancel booking', { id: toastId });
-                      }
-                    }} 
-                    style={{ flex: 1, padding: '1rem', background: '#ef4444', border: 'none', color: 'white', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', opacity: !cancelReason.trim() ? 0.5 : 1 }}
+                  <button
+                    disabled={!cancelReason.trim() || isCancelling}
+                    onClick={confirmCancellation}
+                    style={{
+                      flex: 1,
+                      padding: '1rem',
+                      background: '#ef4444',
+                      border: 'none',
+                      color: 'white',
+                      borderRadius: 'var(--admin-radius-sm)',
+                      fontWeight: '900',
+                      cursor: (!cancelReason.trim() || isCancelling) ? 'not-allowed' : 'pointer',
+                      opacity: (!cancelReason.trim() || isCancelling) ? 0.5 : 1
+                    }}
                   >
-                    CONFIRM
+                    {isCancelling ? 'Processing...' : 'CONFIRM'}
                   </button>
                 </div>
               </div>
@@ -553,7 +593,7 @@ const CustomerBookingDetails = () => {
       {receiptModal && (
         <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '2rem' }}>
           <div className="no-print-bg" style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
-            
+
             <div className="no-print" style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <ShieldCheck size={24} color="var(--admin-brand)" />
@@ -653,18 +693,18 @@ const CustomerBookingDetails = () => {
               </div>
 
               <div style={{ padding: '1.25rem', background: '#f9f9f9', borderRadius: '12px', border: '1px solid #eee' }}>
-                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                    <div>
-                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
-                      <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedPayment?.method || 'Verified Channel'}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <div>
+                    <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
+                    <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedPayment?.method || 'Verified Channel'}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Reference</div>
+                    <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
+                      {selectedPayment?.reference_number || 'VALIDATED'}
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Reference</div>
-                      <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                        {selectedPayment?.reference_number || 'VALIDATED'}
-                      </div>
-                    </div>
-                 </div>
+                  </div>
+                </div>
               </div>
 
               <div style={{ textAlign: 'center', color: '#666', fontSize: '0.65rem', marginTop: '60px', fontWeight: '300' }}>
@@ -673,19 +713,19 @@ const CustomerBookingDetails = () => {
             </div>
 
             <div className="no-print" style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
-              <button 
+              <button
                 onClick={() => window.print()}
-                style={{ 
-                  flex: 2, padding: '1rem', background: '#000', 
-                  color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', 
-                  cursor: 'pointer', 
-                  textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' 
+                style={{
+                  flex: 2, padding: '1rem', background: '#000',
+                  color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem',
+                  cursor: 'pointer',
+                  textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px'
                 }}
               >
                 <Printer size={20} /> Print Receipt
               </button>
-              <button 
+              <button
                 onClick={() => { setReceiptModal(false); setSelectedPayment(null); }}
                 style={{ flex: 1, padding: '1rem', background: '#fff', color: '#000', border: '1px solid #ddd', borderRadius: '12px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem' }}
               >

@@ -1,34 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { Bell, ShieldCheck, CheckCircle, Clock, CreditCard, AlertCircle, CheckCircle2, MessageCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Bell, CheckCircle, Clock, CreditCard, AlertCircle, CheckCircle2, MessageCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { fetchNotifications, subscribeToNotifications } from '../../services/notificationService';
+import { useUnifiedData } from '../../context/UnifiedContext';
+import { useAuth } from '../../hooks/useAuth';
 import { supabase } from '../../lib/supabase';
+import NotificationDetailsModal from '../NotificationDetailsModal';
 
-const RecentNotifications = ({ userId }) => {
+const RecentNotifications = () => {
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!userId) return;
-
-    const load = async () => {
-      try {
-        const data = await fetchNotifications(userId);
-        setNotifications(data.slice(0, 5)); // Show latest 5
-      } catch (err) {
-        console.error('Notification fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-
-    // Real-time: auto-refresh on new notification
-    const channel = subscribeToNotifications(userId, () => load());
-    return () => { supabase.removeChannel(channel); };
-  }, [userId]);
+  const { notifications: allNotifications, isLoading: loading, refreshData } = useUnifiedData();
+  const { profile } = useAuth();
+  const [selectedNotification, setSelectedNotification] = useState(null);
+  const notifications = (allNotifications || []).slice(0, 5); // Show latest 5
 
   const getIcon = (type) => {
     switch (type) {
@@ -101,9 +85,12 @@ const RecentNotifications = ({ userId }) => {
           notifications.map((notif) => (
             <div
               key={notif.id}
-              onClick={() => {
-                if (notif.action_url) navigate(notif.action_url);
-                else navigate('/customer/notifications');
+              onClick={async () => {
+                setSelectedNotification(notif);
+                if (!notif.is_read) {
+                  await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
+                  if (typeof refreshData === 'function') await refreshData();
+                }
               }}
               style={{
                 padding: '1rem 1.5rem',
@@ -141,6 +128,13 @@ const RecentNotifications = ({ userId }) => {
           ))
         )}
       </div>
+      
+      {/* Notification Details Modal */}
+      <NotificationDetailsModal
+        notification={selectedNotification}
+        onClose={() => setSelectedNotification(null)}
+        profile={profile}
+      />
     </div>
   );
 };

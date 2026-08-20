@@ -57,13 +57,17 @@ export const clearAllNotifications = async (userId) => {
 export const subscribeToNotifications = (userId, callback) => {
   return supabase
     .channel(`notifications-${userId}`)
-    .on('postgres_changes', {
-      event: 'INSERT',
-      schema: 'public',
-      table: 'notifications',
-      filter: `user_id=eq.${userId}`
-    }, callback)
-    .subscribe();
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // Listen to inserts, updates, deletes
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`
+      },
+      callback
+    )
+    .subscribe(); // .subscribe() MUST be at the very end!
 };
 
 export const sendBookingConfirmationEmail = async (bookingId) => {
