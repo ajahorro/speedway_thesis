@@ -102,7 +102,7 @@ const AdminRefunds = () => {
       const { error: bError } = await supabase
         .from('bookings')
         .update({ 
-          refund_status: 'PROCESSED',
+          refund_status: 'PROCESSING',
           refund_notes: state.refundReason,
           status: 'cancelled' 
         })
@@ -110,12 +110,11 @@ const AdminRefunds = () => {
 
       if (bError) throw new Error(`Booking update failed: ${bError.message}`);
 
-      // 2. CRITICAL: Update Original Payments to PAID to resolve 'REFUND_PENDING' ghosting
-      // We must ensure this executes successfully to clear the "Refund Pending" badge in customer UI
+      // 2. Mark the original payment as refunded so it is excluded from gross sales.
       const { data: pUpdateData, error: pUpdateError } = await supabase
         .from('payments')
         .update({ 
-          status: 'PAID',
+          status: 'REFUNDED',
           notes: `REFUND_PROCESSED_ON_${new Date().toLocaleDateString()}` 
         })
         .eq('booking_id', item.id)
@@ -138,6 +137,9 @@ const AdminRefunds = () => {
         });
 
       if (pInsertError) throw new Error(`Refund ledger insertion failed: ${pInsertError.message}`);
+
+      const { error: completeRefundError } = await supabase.from('bookings').update({ refund_status: 'PROCESSED' }).eq('id', item.id);
+      if (completeRefundError) throw new Error(`Refund status update failed: ${completeRefundError.message}`);
 
 
       // 4. MASTER AUDIT LOG (REQ-NFR-15)

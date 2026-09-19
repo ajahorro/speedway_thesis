@@ -198,7 +198,8 @@ const AdminSchedule = () => {
 
           const resData = await res.json().catch(() => ({}));
           if (!res.ok || !resData.success) {
-            throw new Error(resData.error || 'Failed to commit restriction');
+            const conflictIds = (resData.bookings || []).map(booking => `#${booking.id.substring(0, 8).toUpperCase()}`).join(', ');
+            throw new Error(conflictIds ? `${resData.error} Affected bookings: ${conflictIds}.` : (resData.error || 'Failed to commit restriction'));
           }
 
           showToast('Schedule restriction committed', 'success');

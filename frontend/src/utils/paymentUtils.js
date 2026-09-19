@@ -26,6 +26,17 @@ export const calculatePaymentStatus = (booking) => {
   return 'UNPAID';
 };
 
+export const calculateRequiredDownpayment = (totalAmount) => {
+  const total = Number(totalAmount || 0);
+  const percentage = total >= 2000 ? 50 : 30;
+  return {
+    percentage,
+    amount: Math.round(total * (percentage / 100) * 100) / 100
+  };
+};
+
+export const getRequiredDownpayment = (totalAmount) => calculateRequiredDownpayment(totalAmount).amount;
+
 export const getPaymentStatusUI = (status) => {
   switch (status) {
     case 'PAID': 

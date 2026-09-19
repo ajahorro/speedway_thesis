@@ -27,9 +27,9 @@ const AdminSettings = () => {
     business_address: '',
     opening_hour: '',
     closing_hour: '',
-    gcash_number: '',
-    gcash_name: '',
-    gcash_qr_url: '',
+    payment_account_number: '',
+    payment_account_name: '',
+    payment_qr_url: '',
     slots_per_hour: 2
   });
 
@@ -72,6 +72,9 @@ const AdminSettings = () => {
       } else {
         setSettings({
           ...data,
+          payment_account_number: data.payment_account_number || data.gcash_number || '',
+          payment_account_name: data.payment_account_name || data.gcash_name || '',
+          payment_qr_url: data.payment_qr_url || data.gcash_qr_url || '',
           opening_hour: formatForInput(data.opening_hour),
           closing_hour: formatForInput(data.closing_hour)
         });
@@ -103,9 +106,12 @@ const AdminSettings = () => {
           business_address: settings.business_address,
           opening_hour: settings.opening_hour,
           closing_hour: settings.closing_hour,
-          gcash_number: settings.gcash_number,
-          gcash_name: settings.gcash_name,
-          gcash_qr_url: settings.gcash_qr_url,
+          payment_account_number: settings.payment_account_number,
+          payment_account_name: settings.payment_account_name,
+          payment_qr_url: settings.payment_qr_url,
+          gcash_number: settings.payment_account_number,
+          gcash_name: settings.payment_account_name,
+          gcash_qr_url: settings.payment_qr_url,
           slots_per_hour: settings.slots_per_hour,
           updated_at: new Date().toISOString()
         });
@@ -135,14 +141,14 @@ const AdminSettings = () => {
 
     const reader = new FileReader();
     reader.onloadend = () => {
-      setSettings(prev => ({ ...prev, gcash_qr_url: reader.result }));
+      setSettings(prev => ({ ...prev, payment_qr_url: reader.result }));
       toast.success('QR Code loaded. Save to persist.');
     };
     reader.readAsDataURL(file);
   };
 
   const removeQR = () => {
-    setSettings(prev => ({ ...prev, gcash_qr_url: '' }));
+    setSettings(prev => ({ ...prev, payment_qr_url: '' }));
     toast.success('QR Code cleared.');
   };
 
@@ -301,8 +307,8 @@ const AdminSettings = () => {
               <label style={labelStyle}>GCash Number</label>
               <input 
                 type="text" 
-                value={settings.gcash_number}
-                onChange={(e) => setSettings({...settings, gcash_number: e.target.value})}
+                value={settings.payment_account_number}
+                onChange={(e) => setSettings({...settings, payment_account_number: e.target.value})}
                 style={inputStyle} 
               />
             </div>
@@ -310,8 +316,8 @@ const AdminSettings = () => {
               <label style={labelStyle}>Account Name</label>
               <input 
                 type="text" 
-                value={settings.gcash_name}
-                onChange={(e) => setSettings({...settings, gcash_name: e.target.value})}
+                value={settings.payment_account_name}
+                onChange={(e) => setSettings({...settings, payment_account_name: e.target.value})}
                 style={inputStyle} 
               />
             </div>
@@ -319,9 +325,9 @@ const AdminSettings = () => {
 
           <div style={{ marginTop: '0.5rem' }}>
             <label style={labelStyle}>Payment QR Code</label>
-            {settings.gcash_qr_url ? (
+            {settings.payment_qr_url ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center', background: 'var(--admin-bg)', padding: '1.5rem', borderRadius: '4px', border: '1px dashed var(--admin-border)' }}>
-                <img src={settings.gcash_qr_url} alt="GCash QR" style={{ maxWidth: '200px', height: 'auto', borderRadius: '4px' }} />
+                <img src={settings.payment_qr_url} alt="Payment QR" style={{ maxWidth: '200px', height: 'auto', borderRadius: '4px' }} />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <label style={{ padding: '0.6rem 1.25rem', background: 'var(--admin-brand)', color: 'white', borderRadius: '4px', fontSize: '0.7rem', fontWeight: '900', cursor: 'pointer', textTransform: 'uppercase' }}>
                     REPLACE

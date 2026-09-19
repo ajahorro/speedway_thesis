@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { emitEvent, EVENTS } from './eventEngine';
 import { SHOP_CONFIG } from '../config/constants';
+import { getRequiredDownpayment } from '../utils/paymentUtils';
 
 /**
  * bookingService.js
@@ -116,7 +117,7 @@ export const createBooking = async (customerId, bookingData) => {
 
       const { data: { publicUrl } } = supabase.storage.from('payment-receipts').getPublicUrl(filePath);
 
-      const paymentAmount = bookingData.payment.type === 'Full' ? totalAmount : Math.ceil(totalAmount * 0.3);
+      const paymentAmount = bookingData.payment.type === 'Full' ? totalAmount : getRequiredDownpayment(totalAmount);
 
       const { error: payError } = await supabase.from('payments').insert({
         booking_id: booking.id,
@@ -124,6 +125,7 @@ export const createBooking = async (customerId, bookingData) => {
         method: 'GCash',
         status: 'FOR_VERIFICATION',
         receipt_url: publicUrl,
+        notes: 'PAYMENT_DIGITAL',
         reference_number: bookingData.payment?.ocrData?.referenceNo || '' // Transaction Reference
       });
 

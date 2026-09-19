@@ -320,7 +320,7 @@ const AdminBookingDetails = () => {
     const toastId = toast.loading('Verifying payment...');
     try {
       const { data: { user: verifier } } = await supabase.auth.getUser();
-      const { error } = await supabase.from('payments').update({ status: 'PAID', verified_by: verifier?.id, verified_at: new Date().toISOString() }).eq('id', p.id);
+      const { error } = await supabase.from('payments').update({ status: 'PAID', notes: `${p.notes || 'PAYMENT_DIGITAL'} | PAYMENT_DIGITAL_VERIFIED`, verified_by: verifier?.id, verified_at: new Date().toISOString() }).eq('id', p.id);
       if (error) throw error;
       
       await notifyUser(booking.customer_id, 'Payment Verified! 💰', `Your payment of ₱${p.amount.toLocaleString()} has been approved. Thank you!`, 'PAYMENT_APPROVED', `/my-bookings/${id}`);
@@ -435,7 +435,7 @@ const AdminBookingDetails = () => {
         status: 'PAID',
         verified_by: actor?.id,
         verified_at: new Date().toISOString(),
-        notes: 'Manual entry by Admin'
+        notes: 'PAYMENT_CASH | Manual entry by Admin'
       }).select().single();
 
       if (pError) throw pError;

@@ -62,8 +62,11 @@ CREATE OR REPLACE FUNCTION public.handle_booking_status_change()
 RETURNS trigger AS $$
 DECLARE
   project_url TEXT := 'https://nsmytxlaidmndtqxctrw.supabase.co';
-  service_key TEXT := 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zbXl0eGxhaWRtbmR0cXhjdHJ3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODI2MzI5NCwiZXhwIjoyMDkzODM5Mjk0fQ.gphFl_XiXHqBOAFFU9ruNedL8qT1-u5G9LfipFZBNVM'; 
+  service_key TEXT := current_setting('app.supabase_service_role_key', true);
 BEGIN
+  IF service_key IS NULL OR service_key = '' THEN
+    RAISE EXCEPTION 'app.supabase_service_role_key is not configured';
+  END IF;
   -- Only trigger if the status has actually changed (case-insensitive)
   IF (OLD.status IS DISTINCT FROM NEW.status) THEN
     PERFORM

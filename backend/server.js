@@ -7,7 +7,10 @@ const multer = require('multer');
 require('dotenv').config();
 
 const { Resend } = require('resend');
+const { sendBookingConfirmationEmail, sendPasswordResetEmail } = require('./services/emailService');
+const { processReceiptOCR } = require('./services/ocrService');
 const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const RESEND_FROM = process.env.RESEND_FROM || 'Speedway AutoxMoto <bookings@yourdomain.com>';
 
 const app = express();
 app.use(cors());
@@ -26,6 +29,23 @@ const model = genAI.getGenerativeModel({
     { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
   ]
 });
+
+async function getAvailableOCRModel() {
+  const preferredModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(geminiKey)}`);
+    if (!response.ok) throw new Error(`Model listing returned ${response.status}`);
+    const payload = await response.json();
+    const models = payload.models || [];
+    for (const preferred of preferredModels) {
+      const found = models.find(candidate => candidate.name?.includes(preferred) && (candidate.supportedGenerationMethods || []).includes('generateContent'));
+      if (found) return found.name.replace(/^models\//, '');
+    }
+  } catch (error) {
+    console.warn('Model discovery failed, defaulting to gemini-1.5-flash:', error.message);
+  }
+  return 'gemini-1.5-flash';
+}
 
 // 🤖 Model Discovery (Diagnostics)
 (async () => {
@@ -156,6 +176,17 @@ app.post('/api/emails/booking-confirmation', async (req, res) => {
 
     if (cError || !customer) throw new Error('Customer profile not found');
     const vehicles = booking.booking_vehicles || [];
+    const confirmationResult = await sendBookingConfirmationEmail({
+      customerEmail: customer.email,
+      customerName: customer.full_name,
+      bookingId: bookingId.substring(0, 8).toUpperCase(),
+      serviceName: vehicles.flatMap(vehicle => vehicle.booking_vehicle_services || []).map(service => service.service_name).join(', ') || 'Detailing service',
+      scheduledAt: booking.start_datetime,
+      totalAmount: booking.total_amount
+    });
+    if (!confirmationResult.success) throw new Error(confirmationResult.error?.message || confirmationResult.error || 'Booking confirmation email failed');
+    // The legacy template below remains as a compatibility fallback only.
+
     const dateStr = new Date(booking.start_datetime).toLocaleDateString('en-US', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
@@ -169,9 +200,9 @@ app.post('/api/emails/booking-confirmation', async (req, res) => {
       </div>
     `).join('');
 
-    if (resendClient) {
+    if (resendClient && !confirmationResult.success) {
       await resendClient.emails.send({
-        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        from: RESEND_FROM,
         to: customer.email,
         subject: `BOOKING CONFIRMED: ${bookingId.substring(0, 8).toUpperCase()}`,
         html: `
@@ -270,7 +301,7 @@ app.post('/api/emails/payment-receipt', async (req, res) => {
 
     if (resendClient) {
       await resendClient.emails.send({
-        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        from: RESEND_FROM,
         to: customer.email,
         subject: `PAYMENT RECEIPT: ${paymentId.substring(0, 8).toUpperCase()}`,
         attachments,
@@ -333,7 +364,7 @@ app.post('/send-email', async (req, res) => {
 
     if (resendClient) {
       await resendClient.emails.send({
-        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        from: RESEND_FROM,
         to,
         subject,
         html
@@ -388,7 +419,7 @@ app.post('/admin/generate-invite', async (req, res) => {
     if (resendClient) {
       try {
         await resendClient.emails.send({
-          from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+          from: RESEND_FROM,
           to: email,
           subject: 'Speedway Administrative Invitation',
           html: `
@@ -577,7 +608,7 @@ app.post('/customer/register', async (req, res) => {
     }
 
     const emailResponse = await resendClient.emails.send({
-      from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+      from: RESEND_FROM,
       to: email,
       subject: 'WELCOME TO THE FLEET',
       html: `
@@ -621,51 +652,13 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
 
     console.log(`🤖 [AI OCR] SCANNING RECEIPT: ${req.file.originalname} (${req.file.size} bytes)`);
 
-    // Convert buffer to generative AI part
-    const imagePart = {
-      inlineData: {
-        data: req.file.buffer.toString('base64'),
-        mimeType: req.file.mimetype || 'image/jpeg'
-      }
+    const ocrResult = await processReceiptOCR(req.file.buffer, req.file.mimetype || 'image/jpeg');
+    const extractedData = {
+      ...ocrResult,
+      referenceNo: ocrResult.referenceNumber,
+      date: ocrResult.timestamp,
+      isReceipt: ocrResult.isValidReceipt
     };
-
-    const prompt = `
-      You are a financial audit specialist for a high-end car detailing studio. 
-      Extract the following information from this GCash or Bank transaction receipt:
-      1. Transaction Reference Number (Ref No, ID, or Transaction ID)
-      2. Total Amount Paid (PHP value)
-      3. Date and Time of transaction
-
-      Rules:
-      - Return the data in STRICT JSON format.
-      - If you cannot find a specific field, use "N/A".
-      - Be extremely precise with the amount. Return numbers only for amount (e.g., 500 or 1250.50).
-      - Return ONLY the raw JSON object, no markdown formatting or backticks.
-
-      JSON Structure:
-      {
-        "referenceNo": "string",
-        "amount": number,
-        "date": "string",
-        "integrity": number,
-        "isReceipt": boolean
-      }
-    `;
-
-    const result = await model.generateContent([prompt, imagePart]);
-    const response = await result.response;
-    const text = response.text();
-
-    // 🧹 Clean JSON safely
-    const cleanedJson = text.replace(/```json|```/g, '').trim();
-
-    let extractedData = {};
-    try {
-      extractedData = JSON.parse(cleanedJson);
-    } catch (parseError) {
-      console.error('❌ [AI OCR] Failed to parse JSON from AI output:', text);
-      throw new Error('Invalid response structure from AI model');
-    }
 
     console.log(`✅ [AI OCR] EXTRACTION SUCCESSFUL:`, extractedData);
 
@@ -786,9 +779,13 @@ app.post('/api/auth/recover-password', async (req, res) => {
     const recoveryUrl = linkData?.properties?.action_link;
     if (!recoveryUrl) throw new Error('Failed to generate recovery link');
 
-    if (resendClient) {
+    const resetResult = await sendPasswordResetEmail({ customerEmail: email, resetLink: recoveryUrl });
+    if (!resetResult.success) throw new Error(resetResult.error?.message || resetResult.error || 'Password reset email failed');
+    // The legacy template below remains as a compatibility fallback only.
+
+    if (resendClient && !resetResult.success) {
       await resendClient.emails.send({
-        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        from: RESEND_FROM,
         to: email,
         subject: 'Reset Your Speedway Password',
         html: `
@@ -845,7 +842,7 @@ app.post('/api/auth/request-email-change', async (req, res) => {
     // Dispatch OTP to OLD email
     if (resendClient) {
       await resendClient.emails.send({
-        from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+        from: RESEND_FROM,
         to: oldEmail,
         subject: 'Speedway: Authorize Email Change',
         html: `
@@ -1041,7 +1038,7 @@ app.post('/api/admin/broadcast', async (req, res) => {
           if (p.email) {
             try {
               await resendClient.emails.send({
-                from: 'Speedway <notifications@speedway-autoxmoto.com>',
+                from: RESEND_FROM,
                 to: [p.email],
                 subject: 'System Announcement 📣',
                 html: `<div style="font-family: sans-serif; padding: 20px; background: #0A0B0D; color: #ffffff;">
@@ -1443,7 +1440,7 @@ const checkOverdueBookings = async () => {
         if (resendClient && booking.customer?.email) {
           try {
             await resendClient.emails.send({
-              from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+              from: RESEND_FROM,
               to: booking.customer.email,
               subject: 'Booking Expired — No-Show Notification',
               html: `
@@ -1468,7 +1465,7 @@ const checkOverdueBookings = async () => {
         if (resendClient && booking.customer?.email) {
           try {
             await resendClient.emails.send({
-              from: 'Speedway Detail Studio <verify@speedway-autoxmoto.xyz>',
+              from: RESEND_FROM,
               to: booking.customer.email,
               subject: 'URGENT: Your Speedway Slot is Held',
               html: `
@@ -1496,9 +1493,10 @@ const checkOverdueBookings = async () => {
   }
 };
 
-// 🛡️ EMERGENCY DISABLE: Temporarily stopping the audit loop to prevent email spam
-// setInterval(checkOverdueBookings, 5 * 60000);
-// checkOverdueBookings(); 
+// Run the audit worker on a single backend instance in production. The query is
+// status-scoped, so already processed bookings are not handled again.
+setInterval(checkOverdueBookings, 5 * 60000);
+checkOverdueBookings();
 
 /**
  * 🧹 CLEAN SLATE: Purge all booking-related data
@@ -1904,6 +1902,30 @@ app.post('/api/admin/blocked-slots', async (req, res) => {
       }];
     } else {
       return res.status(400).json({ success: false, error: 'Target date or date range is required' });
+    }
+
+    const activeStatuses = ['scheduled', 'confirmed', 'in_progress', 'pending', 'SCHEDULED', 'CONFIRMED', 'IN_PROGRESS', 'PENDING'];
+    const conflicts = new Map();
+    for (const row of rowsToInsert) {
+      const blockStart = new Date(`${row.block_date}T${row.start_time || '00:00:00'}`);
+      const blockEnd = new Date(`${row.block_date}T${row.end_time || '23:59:59'}`);
+      const { data: bookings, error: bookingError } = await supabaseAdmin
+        .from('bookings')
+        .select('id, customer_name, start_datetime, end_datetime, status')
+        .in('status', activeStatuses)
+        .lt('start_datetime', blockEnd.toISOString())
+        .gt('end_datetime', blockStart.toISOString());
+      if (bookingError) throw bookingError;
+      for (const booking of bookings || []) conflicts.set(booking.id, booking);
+    }
+
+    if (conflicts.size > 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'BOOKING_CONFLICT',
+        error: 'This restriction overlaps active bookings. Cancel or reschedule them first.',
+        bookings: Array.from(conflicts.values())
+      });
     }
 
     console.log(`🔒 [ADMIN SCHEDULE] BLOCKING SLOTS: ${rowsToInsert.length} day(s) (${start_time || 'WHOLE DAY'} - ${end_time || 'WHOLE DAY'})`);

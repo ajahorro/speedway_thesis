@@ -11,9 +11,9 @@ export const ConfigProvider = ({ children }) => {
     OPENING_HOUR: SHOP_CONFIG.OPENING_HOUR,
     CLOSING_HOUR: SHOP_CONFIG.CLOSING_HOUR,
     BUSINESS_NAME: 'SPEEDWAY STUDIO',
-    GCASH_NAME: 'SPEEDWAY STUDIO',
-    GCASH_NUMBER: '0912 345 6789',
-    GCASH_QR_URL: null,
+    PAYMENT_ACCOUNT_NAME: 'SPEEDWAY STUDIO',
+    PAYMENT_ACCOUNT_NUMBER: '0912 345 6789',
+    PAYMENT_QR_URL: null,
     loaded: false
   });
 
@@ -52,9 +52,9 @@ export const ConfigProvider = ({ children }) => {
           OPENING_HOUR: parseHour(data.opening_hour, SHOP_CONFIG.OPENING_HOUR),
           CLOSING_HOUR: parseHour(data.closing_hour, SHOP_CONFIG.CLOSING_HOUR),
           BUSINESS_NAME: data.business_name || 'SPEEDWAY STUDIO',
-          GCASH_NAME: data.gcash_name || 'SPEEDWAY STUDIO',
-          GCASH_NUMBER: data.gcash_number || '0912 345 6789',
-          GCASH_QR_URL: data.gcash_qr_url || null,
+          PAYMENT_ACCOUNT_NAME: data.payment_account_name || data.gcash_name || 'SPEEDWAY STUDIO',
+          PAYMENT_ACCOUNT_NUMBER: data.payment_account_number || data.gcash_number || '0912 345 6789',
+          PAYMENT_QR_URL: data.payment_qr_url || data.gcash_qr_url || null,
           loaded: true
         });
       } else {

@@ -21,7 +21,7 @@ const Step3FleetEditing = ({ bookingData, setBookingData, activeVehicleIndex, se
     const currentFleetWeight = vehicles.reduce((sum, v) => sum + getVehicleWeight(v.type || v.vehicleType), 0);
 
     // Fetch existing bookings that overlap with the selected date/time
-    if (bookingData.date && bookingData.startTime) {
+    if (bookingData.date && bookingData.time) {
       const dateStr = bookingData.date; // e.g. '2025-05-15'
       const dayStart = `${dateStr}T00:00:00.000Z`;
       const dayEnd   = `${dateStr}T23:59:59.999Z`;

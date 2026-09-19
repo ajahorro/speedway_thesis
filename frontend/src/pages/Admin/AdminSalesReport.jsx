@@ -58,7 +58,7 @@ const AdminSalesReport = () => {
             )
           )
         `)
-        .eq('status', 'PAID')
+        .in('status', ['PAID', 'REFUNDED'])
         .gte('created_at', startDate.toISOString())
         .order('created_at', { ascending: false });
 
@@ -77,13 +77,14 @@ const AdminSalesReport = () => {
         }
       }
 
-      // 2. Fetch Refunded Volume
+      // 2. Fetch the negative refund ledger entries only. Original payments
+      // are marked REFUNDED and must not inflate gross or refund totals.
       const { data: refundData } = await supabase
-        .from('bookings')
-        .select('total_amount, refund_status')
-        .eq('status', 'cancelled')
-        .eq('refund_status', 'PROCESSED')
-        .gte('updated_at', startDate.toISOString());
+        .from('payments')
+        .select('amount')
+        .eq('status', 'REFUNDED')
+        .lt('amount', 0)
+        .gte('created_at', startDate.toISOString());
 
       const enrichedTransactions = (payments || []).map(p => ({
         ...p,
@@ -92,8 +93,8 @@ const AdminSalesReport = () => {
       }));
 
       // Aggregates Logic
-      const gross = enrichedTransactions.reduce((sum, p) => sum + Number(p.amount), 0);
-      const refunded = (refundData || []).reduce((sum, b) => sum + Number(b.total_amount), 0);
+      const gross = enrichedTransactions.filter(payment => payment.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
+      const refunded = Math.abs((refundData || []).reduce((sum, payment) => sum + Number(payment.amount), 0));
       
       const serviceMap = {};
       enrichedTransactions.forEach(p => {
@@ -114,8 +115,8 @@ const AdminSalesReport = () => {
           grossRevenue: gross,
           refundedAmount: refunded,
           netRevenue: gross - refunded,
-          transactionCount: enrichedTransactions.length,
-          averageTicket: enrichedTransactions.length > 0 ? gross / enrichedTransactions.length : 0,
+          transactionCount: enrichedTransactions.filter(payment => payment.status === 'PAID').length,
+          averageTicket: enrichedTransactions.filter(payment => payment.status === 'PAID').length > 0 ? gross / enrichedTransactions.filter(payment => payment.status === 'PAID').length : 0,
           topServices: Object.entries(serviceMap)
             .map(([name, count]) => ({ name, count }))
             .sort((a,b) => b.count - a.count)

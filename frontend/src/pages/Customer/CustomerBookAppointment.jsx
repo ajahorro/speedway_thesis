@@ -41,7 +41,12 @@ const CustomerBookAppointment = () => {
   const [currentStep, setCurrentStep] = useState(isRebooking ? 2 : 1);
 
   // Global Wizard State
-  const [bookingData, setBookingData] = useState({
+  const [bookingData, setBookingData] = useState(() => {
+    const savedDraft = localStorage.getItem('speedway_booking_draft');
+    if (savedDraft && !prefillData) {
+      try { return JSON.parse(savedDraft); } catch { localStorage.removeItem('speedway_booking_draft'); }
+    }
+    return {
     customerName: profile?.first_name ? `${profile.first_name} ${profile?.last_name || ''}`.trim() : (user?.user_metadata?.first_name ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim() : ''),
     contactNumber: profile?.phone_number || user?.user_metadata?.phone_number || '',
     date: '',
@@ -73,8 +78,13 @@ const CustomerBookAppointment = () => {
       proofOfPayment: null,
       ocrData: null
     },
-    isRebooking // Internal flag
+      isRebooking // Internal flag
+    };
   });
+
+  React.useEffect(() => {
+    if (!isSubmitted) localStorage.setItem('speedway_booking_draft', JSON.stringify(bookingData));
+  }, [bookingData, isSubmitted]);
 
   // Cleanup sessionStorage on mount to ensure fresh start next time
   React.useEffect(() => {
@@ -94,6 +104,7 @@ const CustomerBookAppointment = () => {
     setIsSubmitting(true);
     try {
       await createBooking(user.id, bookingData);
+      localStorage.removeItem('speedway_booking_draft');
       toast.success('Booking submitted successfully!', {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)' }
       });

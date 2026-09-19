@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Upload, CheckCircle2, Wallet, Banknote, ShieldAlert } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useConfig } from '../../context/ConfigContext';
+import { getRequiredDownpayment } from '../../utils/paymentUtils';
+import QRMagnifier from '../QRMagnifier';
 
 const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSubmit, isSubmitting, onCancel }) => {
   const { settings } = useConfig();
@@ -45,7 +47,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
       }));
 
       try {
-        const targetAmount = bookingData.payment.type === 'Full' ? grandTotal : Math.ceil(grandTotal * 0.3);
+        const targetAmount = bookingData.payment.type === 'Full' ? grandTotal : getRequiredDownpayment(grandTotal);
 
         const formData = new FormData();
         formData.append('receipt', file);
@@ -145,7 +147,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
   // Business Logic Constants
   const MIN_DOWNPAYMENT_THRESHOLD = 1000;
   const CASH_DISABLED_THRESHOLD = 1000;
-  const downpaymentAmount = Math.ceil(grandTotal * 0.3);
+  const downpaymentAmount = getRequiredDownpayment(grandTotal);
 
   const canUseCash = grandTotal < CASH_DISABLED_THRESHOLD;
   const canUseDownpayment = grandTotal >= MIN_DOWNPAYMENT_THRESHOLD;
@@ -306,13 +308,13 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                   <div style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>Scan to Pay</div>
                   {settings.loaded ? (
                     <>
-                      {settings.GCASH_QR_URL ? (
-                        <img src={settings.GCASH_QR_URL} alt="GCash QR" style={{ width: '100%', maxWidth: '400px', height: '550px', objectFit: 'contain', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', margin: '1.5rem 0', background: '#fff', padding: '1.5rem', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} />
+                      {settings.PAYMENT_QR_URL ? (
+                        <QRMagnifier qrUrl={settings.PAYMENT_QR_URL} accountName={settings.PAYMENT_ACCOUNT_NAME} accountNumber={settings.PAYMENT_ACCOUNT_NUMBER} />
                       ) : (
                         <div style={{ width: '100%', maxWidth: '400px', height: '550px', margin: '1.5rem auto', background: 'var(--admin-card)', border: '1px dashed var(--admin-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', borderRadius: 'var(--admin-radius-lg)' }}>No QR Configured</div>
                       )}
-                      <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{settings.GCASH_NAME}</div>
-                      <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--admin-brand)', marginTop: '0.25rem' }}>{settings.GCASH_NUMBER}</div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{settings.PAYMENT_ACCOUNT_NAME}</div>
+                      <div style={{ fontSize: '1.15rem', fontWeight: '800', color: 'var(--admin-brand)', marginTop: '0.25rem' }}>{settings.PAYMENT_ACCOUNT_NUMBER}</div>
                     </>
                   ) : (
                     <div style={{ padding: '2rem', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>Loading business settings...</div>

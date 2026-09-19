@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { Send, Image as ImageIcon, Bot } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { emitEventToMany, EVENTS } from '../services/eventEngine';
 
 /**
  * BookingChat — Unified real-time chat per booking.
@@ -113,6 +114,19 @@ const BookingChat = ({ bookingId }) => {
         message_type: 'text'
       });
       if (error) throw error;
+      const { data: booking } = await supabase.from('bookings').select('customer_id').eq('id', bookingId).maybeSingle();
+      const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'ADMIN').eq('is_active', true);
+      const recipients = [...new Set([
+        booking?.customer_id,
+        ...(admins || []).map(admin => admin.id)
+      ].filter(recipientId => recipientId && recipientId !== (user?.id || profile?.id)))];
+      if (recipients.length > 0) {
+        await emitEventToMany(EVENTS.MESSAGE_RECEIVED, {
+          userIds: recipients,
+          bookingId,
+          meta: { bookingRef: bookingId.substring(0, 8).toUpperCase(), senderName: profile?.full_name || profile?.first_name || 'A user' }
+        });
+      }
       toast.success('Message sent securely', { position: 'top-center' });
     } catch (err) {
       console.error('Send error:', err);

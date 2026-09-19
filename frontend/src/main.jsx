@@ -22,6 +22,7 @@ import AdminNotifications from './pages/Admin/AdminNotifications';
 import AdminProfile from './pages/Admin/AdminProfile';
 import AdminAcceptInvite from './pages/Admin/AdminAcceptInvite';
 import AdminSlotManagement from './pages/Admin/AdminSlotManagement';
+import AdminWalkInForm from './pages/Admin/AdminWalkInForm';
 import StaffLayout from './pages/Staff/StaffLayout';
 import StaffDashboard from './pages/Staff/StaffDashboard';
 import StaffActiveJobs from './pages/Staff/StaffActiveJobs';
@@ -77,6 +78,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                   }
                 >
                   <Route index element={<AdminDashboard />} />
+                  <Route path="walk-in" element={<AdminWalkInForm />} />
                   <Route path="bookings" element={<AdminBookings />} />
                   <Route path="bookings/:id" element={<AdminBookingDetails />} />
                   <Route path="schedule" element={<AdminSchedule />} />

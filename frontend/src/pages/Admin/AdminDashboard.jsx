@@ -12,6 +12,7 @@ import PageHeader from '../../components/PageHeader';
 import { logger } from '../../utils/logger';
 import toast from 'react-hot-toast';
 import { calculatePaymentStatus, getPaymentStatusUI } from '../../utils/paymentUtils';
+import { useConfig } from '../../context/ConfigContext';
 
 // MEMOIZED SUB-COMPONENTS: Prevent entire dashboard from re-rendering on single metric change
 const MetricCard = React.memo(({ title, value, icon: Icon, color, subtext, trendIcon: TrendIcon, onClick, gradient }) => (
@@ -69,6 +70,7 @@ const AttentionCard = React.memo(({ count, label, icon: Icon, color, bg, onClick
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
+  const { settings } = useConfig();
 
   // BATCHED STATE
   const [state, setState] = useState({
@@ -84,6 +86,7 @@ const AdminDashboard = () => {
       refundRequests: 0,
       successRate: 0,
       shopLoad: 0
+      ,lifecycle: { pending: 0, inProgress: 0, qualityCheck: 0, completed: 0, activeBays: 0 }
     },
     recentBookings: [],
     priorityItems: []
@@ -120,6 +123,14 @@ const AdminDashboard = () => {
       // 5. Shop Load (Active vs Total assigned)
       const activeUnits = allVehicles?.filter(v => v.status === 'IN_PROGRESS').length || 0;
       const sLoad = Math.round((activeUnits / totalUnits) * 100);
+      const normalizedStatuses = (allVehicles || []).map(vehicle => String(vehicle.status || '').toUpperCase());
+      const lifecycle = {
+        pending: normalizedStatuses.filter(status => ['QUEUED', 'PENDING'].includes(status)).length,
+        inProgress: normalizedStatuses.filter(status => ['IN_PROGRESS', 'ONGOING'].includes(status)).length,
+        qualityCheck: normalizedStatuses.filter(status => ['QUALITY_CHECK', 'READY_FOR_PICKUP', 'FOR_RELEASE'].includes(status)).length,
+        completed: normalizedStatuses.filter(status => ['COMPLETED', 'RELEASED'].includes(status)).length,
+        activeBays: normalizedStatuses.filter(status => ['IN_PROGRESS', 'ONGOING', 'QUALITY_CHECK', 'READY_FOR_PICKUP'].includes(status)).length
+      };
 
       // 4. Needs Attention - Pending Payments
       const { count: pendingPay } = await supabase
@@ -255,7 +266,8 @@ const AdminDashboard = () => {
           overdueServices: overdue || 0,
           refundRequests: refundRequestsCount || 0,
           successRate: sRate,
-          shopLoad: sLoad
+          shopLoad: sLoad,
+          lifecycle
         },
         recentBookings: uniqueBookings,
         priorityItems: pItems
@@ -302,6 +314,33 @@ const AdminDashboard = () => {
         subtitle="Real-time performance metrics and fleet coordination."
         onRefresh={fetchDashboardData}
       />
+
+      <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius)', padding: '1.25rem 1.5rem', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>Speedway Studio Overview</h1>
+          <p style={{ margin: '0.25rem 0 0', fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>Real-time operational status and bay availability</p>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '1.5rem', fontSize: '0.75rem', fontWeight: '800' }}>
+          <span><span style={{ color: 'var(--admin-text-secondary)' }}>Status: </span><strong style={{ color: '#10b981' }}>Open &amp; Active</strong></span>
+          <span><span style={{ color: 'var(--admin-text-secondary)' }}>Active Bays: </span><strong>{state.stats.lifecycle.activeBays} / {settings.MAX_BAYS}</strong></span>
+          <span><span style={{ color: 'var(--admin-text-secondary)' }}>Daily Revenue: </span><strong>₱{state.stats.totalRevenue.toLocaleString()}</strong></span>
+          <span><span style={{ color: 'var(--admin-text-secondary)' }}>Queue: </span><strong>{state.stats.lifecycle.pending}</strong></span>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+        {[
+          { label: '1. Queue / Pending', value: state.stats.lifecycle.pending, color: 'var(--admin-text-primary)' },
+          { label: '2. In Progress', value: state.stats.lifecycle.inProgress, color: '#f59e0b' },
+          { label: '3. Quality Check', value: state.stats.lifecycle.qualityCheck, color: '#3b82f6' },
+          { label: '4. Completed / Released', value: state.stats.lifecycle.completed, color: '#10b981' }
+        ].map(card => (
+          <div key={card.label} style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius)', padding: '1.25rem', boxShadow: 'var(--admin-card-shadow)' }}>
+            <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>{card.label}</div>
+            <div style={{ marginTop: '0.5rem', fontSize: '2rem', lineHeight: 1, fontWeight: '950', color: card.color }}>{card.value}</div>
+          </div>
+        ))}
+      </div>
 
       {/* Hero Metrics */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>

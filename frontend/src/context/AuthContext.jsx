@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 export const AuthContext = createContext({});
 
 export const AuthProvider = ({ children }) => {
+  const LOGIN_ATTEMPT_KEY = 'speedway-login-attempts';
+  const LOGIN_LOCKOUT_MS = 20 * 60 * 1000;
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -147,7 +149,26 @@ export const AuthProvider = ({ children }) => {
 
   const signInWithPassword = async (email, password) => {
     logger.auth('Attempting sign in with credentials...');
-    const result = await supabase.auth.signInWithPassword({ email, password });
+    const normalizedEmail = email.trim().toLowerCase();
+    const attempts = JSON.parse(localStorage.getItem(LOGIN_ATTEMPT_KEY) || '{}');
+    const current = attempts[normalizedEmail];
+    if (current?.lockedUntil && current.lockedUntil > Date.now()) {
+      const minutes = Math.ceil((current.lockedUntil - Date.now()) / 60000);
+      return { data: { user: null }, error: new Error(`Account temporarily locked. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`) };
+    }
+
+    const result = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+    if (result.error) {
+      const failedAttempts = (current?.failedAttempts || 0) + 1;
+      attempts[normalizedEmail] = failedAttempts >= 5
+        ? { failedAttempts: 0, lockedUntil: Date.now() + LOGIN_LOCKOUT_MS }
+        : { failedAttempts, lockedUntil: null };
+      localStorage.setItem(LOGIN_ATTEMPT_KEY, JSON.stringify(attempts));
+      return result;
+    }
+
+    delete attempts[normalizedEmail];
+    localStorage.setItem(LOGIN_ATTEMPT_KEY, JSON.stringify(attempts));
     if (result.data?.user) {
       fetchProfile(result.data.user.id, 'MANUAL_LOGIN');
     }

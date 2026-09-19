@@ -60,6 +60,14 @@ const NotificationPopover = ({ profile, onClose, onRead }) => {
       if (typeof onRead === 'function') await onRead();
     }
 
+    if (n.booking_id) {
+      const rolePrefix = profile?.role?.toUpperCase() === 'ADMIN'
+        ? '/admin'
+        : profile?.role?.toUpperCase() === 'STAFF' ? '/staff' : '/customer';
+      onClose();
+      navigate(`${rolePrefix}/bookings/${n.booking_id}`);
+      return;
+    }
     setSelectedNotification(n);
   };
 
