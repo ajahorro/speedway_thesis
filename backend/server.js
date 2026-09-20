@@ -7,7 +7,7 @@ const multer = require('multer');
 require('dotenv').config();
 
 const { Resend } = require('resend');
-const { sendBookingConfirmationEmail, sendPasswordResetEmail } = require('./services/emailService');
+const { sendBookingConfirmationEmail, sendPasswordResetEmail, sendStatusUpdateEmail, buildInviteFooter } = require('./services/emailService');
 const { processReceiptOCR } = require('./services/ocrService');
 const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const RESEND_FROM = process.env.RESEND_FROM || 'Speedway AutoxMoto <bookings@yourdomain.com>';
@@ -153,6 +153,21 @@ const generateTemplate = (type, data) => {
   return { subject, html };
 };
 
+app.get('/api/auth/check-email', async (req, res) => {
+  const { email } = req.query;
+  if (!email || !supabaseAdmin) return res.json({ exists: false });
+  try {
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', email.trim())
+      .maybeSingle();
+    return res.json({ exists: !!data });
+  } catch (err) {
+    return res.json({ exists: false });
+  }
+});
+
 app.post('/api/emails/booking-confirmation', async (req, res) => {
   const { bookingId } = req.body;
   console.log(`📧 [EMAIL SYSTEM] DISPATCHING BOOKING CONFIRMATION: ${bookingId}`);
@@ -167,80 +182,135 @@ app.post('/api/emails/booking-confirmation', async (req, res) => {
 
     if (bError || !booking) throw new Error('Booking not found');
 
-    // Fetch customer separately for reliability
-    const { data: customer, error: cError } = await supabaseAdmin
-      .from('profiles')
-      .select('full_name, email')
-      .eq('id', booking.customer_id)
-      .single();
+    let customerEmail = booking.guest_email || null;
+    let customerName = (booking.guest_first_name || booking.guest_last_name)
+      ? `${booking.guest_first_name || ''} ${booking.guest_last_name || ''}`.trim()
+      : (booking.customer_name || 'Customer');
 
-    if (cError || !customer) throw new Error('Customer profile not found');
+    // Fetch customer separately if not a walk-in guest or if guest_email not present
+    if (!customerEmail && booking.customer_id) {
+      const { data: customer, error: cError } = await supabaseAdmin
+        .from('profiles')
+        .select('full_name, email')
+        .eq('id', booking.customer_id)
+        .single();
+      if (customer) {
+        customerEmail = customer.email;
+        customerName = customer.full_name;
+      }
+    }
+
+    if (!customerEmail) throw new Error('Recipient email could not be resolved');
+
+    // Check if account already exists for this email
+    let inviteFooterHtml = '';
+    let accountExists = false;
+    if (supabaseAdmin) {
+      const { data: existingProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('email', customerEmail)
+        .maybeSingle();
+      accountExists = !!existingProfile;
+    }
+
+    // Only append "Create Account" invite footer if the account does NOT exist yet
+    if (!accountExists) {
+      inviteFooterHtml = buildInviteFooter({
+        email: customerEmail,
+        firstName: booking.guest_first_name || '',
+        lastName: booking.guest_last_name || '',
+        phone: booking.guest_phone || booking.contact_number || ''
+      });
+    }
+
     const vehicles = booking.booking_vehicles || [];
     const confirmationResult = await sendBookingConfirmationEmail({
-      customerEmail: customer.email,
-      customerName: customer.full_name,
+      customerEmail,
+      customerName,
       bookingId: bookingId.substring(0, 8).toUpperCase(),
       serviceName: vehicles.flatMap(vehicle => vehicle.booking_vehicle_services || []).map(service => service.service_name).join(', ') || 'Detailing service',
       scheduledAt: booking.start_datetime,
-      totalAmount: booking.total_amount
-    });
-    if (!confirmationResult.success) throw new Error(confirmationResult.error?.message || confirmationResult.error || 'Booking confirmation email failed');
-    // The legacy template below remains as a compatibility fallback only.
-
-    const dateStr = new Date(booking.start_datetime).toLocaleDateString('en-US', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      totalAmount: booking.total_amount,
+      inviteFooterHtml
     });
 
-    const vehicleHtml = vehicles.map(v => `
-      <div style="margin-bottom: 15px; padding: 10px; border-left: 4px solid #A91B18; background: #f9f9f9;">
-        <strong style="text-transform: uppercase;">${v.year} ${v.brand} ${v.model}</strong> [${v.plate_number}]
-        <ul style="margin: 5px 0; padding-left: 20px; font-size: 13px;">
-          ${(v.booking_vehicle_services || []).map(s => `<li>${s.service_name} - ₱${s.price}</li>`).join('')}
-        </ul>
-      </div>
-    `).join('');
-
-    if (resendClient && !confirmationResult.success) {
-      await resendClient.emails.send({
-        from: RESEND_FROM,
-        to: customer.email,
-        subject: `BOOKING CONFIRMED: ${bookingId.substring(0, 8).toUpperCase()}`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
-            <h2 style="color: #A91B18; margin-top: 0;">SPEEDWAY DETAIL STUDIO</h2>
-            <h3 style="text-transform: uppercase; border-bottom: 2px solid #eee; padding-bottom: 10px;">Booking Confirmation</h3>
-            
-            <p>Hi <strong>${customer.full_name}</strong>,</p>
-            <p>Your booking has been successfully <strong>APPROVED</strong> and scheduled. We are excited to see you!</p>
-            
-            <div style="background: #111; color: #fff; padding: 15px; border-radius: 4px; margin: 20px 0;">
-              <div style="font-size: 12px; opacity: 0.7; text-transform: uppercase;">Scheduled For</div>
-              <div style="font-size: 18px; font-weight: bold;">${dateStr}</div>
-            </div>
-
-            <h4 style="text-transform: uppercase; color: #666; font-size: 12px; margin-bottom: 10px;">Vehicle & Service Details</h4>
-            ${vehicleHtml}
-
-            <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #eee;">
-              <div style="display: flex; justify-content: space-between;">
-                <span>Total Amount:</span>
-                <strong style="font-size: 18px; color: #A91B18;">₱${booking.total_amount}</strong>
-              </div>
-              <div style="font-size: 12px; color: #666; margin-top: 5px;">Payment Status: ${booking.payment_status}</div>
-            </div>
-
-            <p style="margin-top: 30px; font-size: 12px; color: #888;">
-              Please arrive 15 minutes before your scheduled slot. If you need to reschedule, contact us at +1 (555) SPEEDWAY.
-            </p>
-          </div>
-        `
-      });
-      console.log(`✅ Confirmation email sent to ${customer.email}`);
+    if (!confirmationResult.success) {
+      throw new Error(confirmationResult.error?.message || confirmationResult.error || 'Booking confirmation email failed');
     }
 
+    console.log(`[Email] Email sent successfully to ${customerEmail} for booking ${bookingId.substring(0, 8).toUpperCase()}`);
     return res.json({ success: true });
   } catch (err) {
     console.error('❌ Confirmation Email Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/emails/status-update', async (req, res) => {
+  const { bookingId, status, remarks } = req.body;
+  console.log(`📧 [EMAIL SYSTEM] DISPATCHING STATUS UPDATE: ${bookingId} -> ${status}`);
+
+  try {
+    const { data: booking, error: bError } = await supabaseAdmin
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .single();
+
+    if (bError || !booking) throw new Error('Booking not found');
+
+    let customerEmail = booking.guest_email || null;
+    let customerName = (booking.guest_first_name || booking.guest_last_name)
+      ? `${booking.guest_first_name || ''} ${booking.guest_last_name || ''}`.trim()
+      : (booking.customer_name || 'Customer');
+
+    if (!customerEmail && booking.customer_id) {
+      const { data: customer } = await supabaseAdmin
+        .from('profiles')
+        .select('full_name, email')
+        .eq('id', booking.customer_id)
+        .single();
+      if (customer) {
+        customerEmail = customer.email;
+        customerName = customer.full_name;
+      }
+    }
+
+    if (!customerEmail) return res.json({ success: false, message: 'No email found for booking' });
+
+    let inviteFooterHtml = '';
+    let accountExists = false;
+    if (supabaseAdmin) {
+      const { data: existingProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('email', customerEmail)
+        .maybeSingle();
+      accountExists = !!existingProfile;
+    }
+
+    if (!accountExists) {
+      inviteFooterHtml = buildInviteFooter({
+        email: customerEmail,
+        firstName: booking.guest_first_name || '',
+        lastName: booking.guest_last_name || '',
+        phone: booking.guest_phone || booking.contact_number || ''
+      });
+    }
+
+    const updateResult = await sendStatusUpdateEmail({
+      customerEmail,
+      customerName,
+      bookingId: bookingId.substring(0, 8).toUpperCase(),
+      status: status || booking.status,
+      scheduledAt: booking.start_datetime,
+      inviteFooterHtml
+    });
+
+    return res.json(updateResult);
+  } catch (err) {
+    console.error('❌ Status Email Error:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -1,14 +1,28 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, Phone } from 'lucide-react';
 
-const RegisterForm = ({ onRegister, onSwitchMode, isLoading }) => {
+const RegisterForm = ({ onRegister, onSwitchMode, isLoading, prefillData = null }) => {
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phone: '',
+    firstName: prefillData?.firstName || '',
+    lastName: prefillData?.lastName || '',
+    email: prefillData?.email || '',
+    phone: prefillData?.phone || '',
     password: ''
   });
+
+  React.useEffect(() => {
+    if (prefillData) {
+      setFormData(prev => ({
+        ...prev,
+        firstName: prefillData.firstName ?? prev.firstName,
+        lastName: prefillData.lastName ?? prev.lastName,
+        email: prefillData.email ?? prev.email,
+        phone: prefillData.phone ?? prev.phone
+      }));
+    }
+  }, [prefillData]);
+
+  const isEmailLocked = Boolean(prefillData?.isLockedEmail);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -75,16 +89,30 @@ const RegisterForm = ({ onRegister, onSwitchMode, isLoading }) => {
       </div>
 
       <div style={{ position: 'relative', marginBottom: '1rem' }}>
-        <Mail size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
+        <Mail size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: isEmailLocked ? '38%' : '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
         <input 
           type="email" 
           placeholder="Email Address" 
           required 
+          readOnly={isEmailLocked}
           value={formData.email} 
-          onChange={e => setFormData({ ...formData, email: e.target.value })} 
-          style={inputStyle} 
+          onChange={e => {
+            if (!isEmailLocked) setFormData({ ...formData, email: e.target.value });
+          }} 
+          style={{
+            ...inputStyle,
+            background: isEmailLocked ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
+            border: isEmailLocked ? '1px solid rgba(var(--admin-brand-rgb), 0.3)' : '1px solid var(--admin-border)',
+            cursor: isEmailLocked ? 'not-allowed' : 'text',
+            opacity: isEmailLocked ? 0.9 : 1
+          }} 
           autoComplete="email" 
         />
+        {isEmailLocked && (
+          <div style={{ fontSize: '0.68rem', color: 'var(--admin-brand)', fontWeight: '800', marginTop: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.35rem', paddingLeft: '0.5rem' }}>
+            <Lock size={11} /> Locked to your walk-in booking record
+          </div>
+        )}
       </div>
       
       <div style={{ position: 'relative', marginBottom: '1rem' }}>

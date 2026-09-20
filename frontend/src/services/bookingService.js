@@ -39,7 +39,11 @@ export const createBooking = async (customerId, bookingData) => {
       total_amount: totalAmount,
       notes: bookingData.notes || '',
       contact_number: bookingData.contactNumber,
-      ocr_metadata: bookingData.payment?.ocrData || {} // PERSIST OCR RESULTS
+      ocr_metadata: bookingData.payment?.ocrData || {}, // PERSIST OCR RESULTS
+      guest_first_name: bookingData.guestFirstName || null,
+      guest_last_name: bookingData.guestLastName || null,
+      guest_email: bookingData.guestEmail || null,
+      guest_phone: bookingData.guestPhone || bookingData.contactNumber || null
     })
     .select()
     .single();
@@ -150,6 +154,24 @@ export const createBooking = async (customerId, bookingData) => {
     bookingId: booking.id,
     meta: { bookingRef }
   });
+
+  // SEND CONFIRMATION EMAIL via backend Resend integration
+  try {
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+    const emailRes = await fetch(`${BACKEND_URL}/api/emails/booking-confirmation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId: booking.id })
+    });
+    const emailResult = await emailRes.json();
+    if (emailResult.success) {
+      console.log(`[Email] ✅ Email sent successfully for booking ${bookingRef}`);
+    } else {
+      console.warn(`[Email] ⚠ Email dispatch returned failure for booking ${bookingRef}:`, emailResult.error);
+    }
+  } catch (emailErr) {
+    console.warn(`[Email] Confirmation email dispatch failed (non-fatal):`, emailErr.message);
+  }
 
   return booking;
 };

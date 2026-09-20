@@ -135,7 +135,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
               <Phone size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)' }} />
               <input
                 type="tel"
-                value={bookingData.contactNumber}
+                value={bookingData.contactNumber || ''}
                 onChange={(e) => setBookingData({ ...bookingData, contactNumber: e.target.value })}
                 style={iconInputStyle}
                 placeholder="e.g. 09123456789"

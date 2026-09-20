@@ -22,6 +22,7 @@ const AdminRefunds = () => {
     loading: true,
     searchQuery: '',
     filter: 'PENDING',
+    processedMethodFilter: 'ALL', // 'ALL' | 'DIGITAL' | 'CASH'
     selectedItem: null,
     confirmRefundItem: null,
     refundReason: '',
@@ -79,11 +80,19 @@ const AdminRefunds = () => {
         b.id.toLowerCase().includes(state.searchQuery.toLowerCase());
       
       if (state.filter === 'PENDING') return matchesSearch && b.refundStatus === 'PENDING';
-      if (state.filter === 'PROCESSED') return matchesSearch && b.refundStatus === 'PROCESSED';
+      if (state.filter === 'PROCESSED') {
+        const isProcessed = b.refundStatus === 'PROCESSED';
+        if (!isProcessed) return false;
+        const hasCash = (b.payments || []).some(p => p.method?.toLowerCase() === 'cash');
+        const hasDigital = (b.payments || []).some(p => p.method?.toLowerCase() !== 'cash');
+        if (state.processedMethodFilter === 'DIGITAL') return matchesSearch && hasDigital;
+        if (state.processedMethodFilter === 'CASH') return matchesSearch && hasCash;
+        return matchesSearch;
+      }
       
       return matchesSearch;
     });
-  }, [state.refundItems, state.searchQuery, state.filter]);
+  }, [state.refundItems, state.searchQuery, state.filter, state.processedMethodFilter]);
 
   const handleProcessRefund = async (item) => {
     const toastId = toast.loading('Synchronizing financial reversal...');
@@ -226,6 +235,38 @@ const AdminRefunds = () => {
                 </button>
               ))}
             </div>
+            {state.filter === 'PROCESSED' && (
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', marginTop: '0.25rem', paddingLeft: '0.25rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '0.25rem' }}>
+                  Filter Processed:
+                </span>
+                {[
+                  { key: 'ALL', label: 'All' },
+                  { key: 'DIGITAL', label: 'Digital' },
+                  { key: 'CASH', label: 'Cash' }
+                ].map(m => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setState(prev => ({ ...prev, processedMethodFilter: m.key }))}
+                    style={{
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: 'var(--admin-radius-sm)',
+                      border: `1px solid ${state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
+                      background: state.processedMethodFilter === m.key ? 'rgba(var(--admin-brand-rgb), 0.12)' : 'var(--admin-bg)',
+                      color: state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-text-secondary)',
+                      fontSize: '0.65rem',
+                      fontWeight: '900',
+                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {filteredItems.length === 0 ? (

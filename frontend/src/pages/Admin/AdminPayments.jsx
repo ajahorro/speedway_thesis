@@ -25,6 +25,7 @@ const AdminPayments = () => {
     loading: true,
     searchTerm: location.state?.filter || '',
     filter: 'PENDING',
+    processedMethodFilter: 'ALL', // 'ALL' | 'DIGITAL' | 'CASH'
     selectedItem: null,
     isScanning: false
   });
@@ -51,7 +52,6 @@ const AdminPayments = () => {
             )
           )
         `)
-        .neq('method', 'Cash')
         .order('created_at', { ascending: false });
 
       if (paymentError) throw paymentError;
@@ -99,11 +99,21 @@ const AdminPayments = () => {
       const matchesSearch = searchStr.includes(state.searchTerm.toLowerCase());
       
       if (state.filter === 'PENDING') return matchesSearch && p.status === 'FOR_VERIFICATION';
-      if (state.filter === 'PROCESSED') return matchesSearch && (p.status === 'PAID' || p.status === 'REFUNDED');
+      if (state.filter === 'PROCESSED') {
+        const isProcessed = p.status === 'PAID' || p.status === 'REFUNDED';
+        if (!isProcessed) return false;
+        if (state.processedMethodFilter === 'DIGITAL') {
+          return matchesSearch && p.method?.toLowerCase() !== 'cash';
+        }
+        if (state.processedMethodFilter === 'CASH') {
+          return matchesSearch && p.method?.toLowerCase() === 'cash';
+        }
+        return matchesSearch;
+      }
       
       return matchesSearch;
     });
-  }, [state.payments, state.searchTerm, state.filter]);
+  }, [state.payments, state.searchTerm, state.filter, state.processedMethodFilter]);
 
   const handleVerifyPayment = async (payment) => {
     const toastId = toast.loading('Verifying transaction...');
@@ -301,6 +311,38 @@ const AdminPayments = () => {
                 </button>
               ))}
             </div>
+            {state.filter === 'PROCESSED' && (
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', marginTop: '0.25rem', paddingLeft: '0.25rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '0.25rem' }}>
+                  Filter Processed:
+                </span>
+                {[
+                  { key: 'ALL', label: 'All' },
+                  { key: 'DIGITAL', label: 'Digital' },
+                  { key: 'CASH', label: 'Cash' }
+                ].map(m => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setState(prev => ({ ...prev, processedMethodFilter: m.key }))}
+                    style={{
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: 'var(--admin-radius-sm)',
+                      border: `1px solid ${state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
+                      background: state.processedMethodFilter === m.key ? 'rgba(var(--admin-brand-rgb), 0.12)' : 'var(--admin-bg)',
+                      color: state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-text-secondary)',
+                      fontSize: '0.65rem',
+                      fontWeight: '900',
+                      cursor: 'pointer',
+                      textTransform: 'uppercase',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {state.loading ? (

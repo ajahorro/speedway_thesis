@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { Mail, Lock } from 'lucide-react';
 
-const LoginForm = ({ onLogin, onSwitchMode, isLoading }) => {
-  const [email, setEmail] = useState('');
+const LoginForm = ({ onLogin, onSwitchMode, isLoading, prefillEmail = '' }) => {
+  const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState('');
+
+  React.useEffect(() => {
+    if (prefillEmail) setEmail(prefillEmail);
+  }, [prefillEmail]);
 
   const handleSubmit = (e) => {
     e.preventDefault();

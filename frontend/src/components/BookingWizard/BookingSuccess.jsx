@@ -2,7 +2,7 @@ import React from 'react';
 import { CheckCircle, Calendar, ShieldCheck, MapPin, ArrowRight, Printer, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const BookingSuccess = ({ bookingData }) => {
+const BookingSuccess = ({ bookingData, navigateTo = '/customer/dashboard' }) => {
   const navigate = useNavigate();
   
   const grandTotal = (bookingData.vehicles || []).reduce((sum, v) => 
@@ -174,7 +174,7 @@ const BookingSuccess = ({ bookingData }) => {
             <Printer size={16} /> {isConfirmed ? 'Print Receipt' : 'Verification Pending'}
           </button>
           <button 
-            onClick={() => navigate('/customer/dashboard')}
+            onClick={() => navigate(navigateTo)}
             style={{ flex: 1, padding: '1rem', background: '#000', border: 'none', fontWeight: '900', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
           >
             Dashboard <ArrowRight size={16} />

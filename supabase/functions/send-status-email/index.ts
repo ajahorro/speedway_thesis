@@ -27,12 +27,16 @@ serve(async (req) => {
   try {
     const { bookingId, newStatus, remarks } = await req.json()
 
-    // Fetch booking + customer info
+    // Fetch booking + customer info (including walk-in guest columns)
     const { data: booking, error: bError } = await supabase
       .from('bookings')
       .select(`
         id,
         customer_id,
+        guest_first_name,
+        guest_last_name,
+        guest_email,
+        guest_phone,
         total_amount,
         profiles (
           full_name,
@@ -47,10 +51,51 @@ serve(async (req) => {
     }
 
     const customer = booking.profiles
-    const email = customer?.email
-    const name = customer?.full_name || 'Valued Customer'
+    const email = booking.guest_email || customer?.email
+    const name = (booking.guest_first_name || booking.guest_last_name)
+      ? `${booking.guest_first_name || ''} ${booking.guest_last_name || ''}`.trim()
+      : (customer?.full_name || 'Valued Customer')
     const statusKey = newStatus.toUpperCase()
     
+    if (!email) {
+      return new Response(JSON.stringify({ ok: false, message: 'No recipient email found' }), {
+        headers: { 'Content-Type': 'application/json' },
+        status: 200,
+      })
+    }
+
+    // Check if account already exists for this email
+    let inviteFooterHtml = ''
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle()
+
+    if (!existingProfile) {
+      const frontendUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:5173'
+      const query = new URLSearchParams({
+        invite: 'true',
+        email: email,
+        firstName: booking.guest_first_name || '',
+        lastName: booking.guest_last_name || '',
+        phone: booking.guest_phone || ''
+      }).toString()
+      const inviteLink = `${frontendUrl}/login?${query}`
+
+      inviteFooterHtml = `
+        <div style="margin-top: 30px; padding: 20px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; text-align: center;">
+          <p style="margin: 0 0 8px; font-weight: bold; color: #fff; font-size: 15px;">Haven't created a Speedway account yet?</p>
+          <p style="margin: 0 0 16px; color: #aaa; font-size: 13px; line-height: 1.5;">
+            Track your vehicle's service history, unlock garage features, and enjoy faster check-ins!
+          </p>
+          <a href="${inviteLink}" style="display: inline-block; background-color: #a91b18; color: #ffffff; padding: 10px 22px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 13px;">
+            Create My Account &rarr;
+          </a>
+        </div>
+      `
+    }
+
     const subject = `Speedway Update: Booking #${bookingId.slice(0, 8).toUpperCase()} is now ${statusKey}`
     const content = templates[statusKey] || `Your booking status has been updated to ${newStatus}.`
     
@@ -67,12 +112,13 @@ serve(async (req) => {
           <p>${content}</p>
           ${reasonHtml}
           <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #333; font-size: 14px; color: #888;">
-            <p>Booking ID: ${bookingId}</p>
+            <p>Booking ID: #${bookingId.slice(0, 8).toUpperCase()}</p>
             <p>Total Amount: ₱${booking.total_amount?.toLocaleString()}</p>
           </div>
           <div style="margin-top: 30px; text-align: center;">
             <a href="https://speedway-autoxmoto.com/portal" style="background-color: #a91b18; color: #fff; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">VIEW IN PORTAL</a>
           </div>
+          ${inviteFooterHtml}
         </div>
         <div style="background-color: #0a0a0a; padding: 15px; text-align: center; font-size: 12px; color: #555;">
           &copy; 2024 Speedway AutoxMoto. All Rights Reserved.

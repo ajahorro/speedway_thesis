@@ -54,10 +54,10 @@ export const getAvailableSlots = async (dateStr, requestedDuration = 60) => {
 
     const { data: bookings } = await supabase
       .from('bookings')
-      .select('id, start_datetime, end_datetime, status, vehicles:booking_vehicles(id, status)')
+      .select('id, start_datetime, end_datetime, status, vehicles:booking_vehicles(id, status, vehicle_type)')
       .lte('start_datetime', endOfRange)
       .gte('end_datetime', startOfDay)
-      .neq('status', 'CANCELLED');
+      .not('status', 'in', '(cancelled,CANCELLED,completed,COMPLETED)');
 
     const { data: blocks } = await supabase
       .from('blocked_slots')

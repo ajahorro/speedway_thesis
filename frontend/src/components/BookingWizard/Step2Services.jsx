@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Circle, Info, Warehouse, Plus, Car } from 'lucide-react';
+import { CheckCircle2, Circle, Info, Warehouse, Plus, Car, Trash2, X, ChevronDown, ChevronUp, ShoppingBag } from 'lucide-react';
 import { SERVICES_DATA } from '../../data/servicesCatalog';
 import { fetchUserGarage } from '../../services/garageService';
 import { useAuth } from '../../hooks/useAuth';
@@ -16,6 +16,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
   const [activeCategory, setActiveCategory] = useState(initialCategory);
 
   const [activeTab, setActiveTab] = useState('new'); // 'existing' or 'new'
+  const [isMobileSummaryOpen, setIsMobileSummaryOpen] = useState(false);
 
   // REQ-CST-10: LOAD FROM GARAGE
   const { user } = useAuth();
@@ -151,35 +152,44 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           </label>
 
           <style>{`
-            .garage-desktop { display: none; }
-            .garage-mobile { display: block; }
-            
-            /* Switch to cards only on larger screens */
-            @media (min-width: 800px) {
-              .garage-desktop { display: flex; flex-wrap: wrap; gap: 1rem; }
-              .garage-mobile { display: none; }
+            .garage-grid {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 0.75rem;
+            }
+            .garage-card {
+              padding: 0.85rem 1rem;
+              border-radius: 10px;
+              cursor: pointer;
+              display: flex;
+              align-items: center;
+              gap: 0.75rem;
+              color: var(--admin-text-primary);
+              text-align: left;
+              flex: 1 1 160px;
+              max-width: 260px;
+              min-width: 140px;
+              transition: all 0.2s ease;
             }
           `}</style>
 
-          {/* DESKTOP VIEW: Clickable Cards */}
-          <div className="garage-desktop">
+          {/* Unified Card Grid: Garage vehicles + Add New card */}
+          <div className="garage-grid">
             {garageVehicles.map(v => (
               <button
                 key={v.id}
                 type="button"
                 onClick={() => handleSelectGarageCard(v)}
+                className="garage-card"
                 style={{
-                  padding: '1rem', borderRadius: '10px',
                   border: `2px solid ${activeTab === 'existing' && vehicle?.plateNumber === v.plate_number ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
                   background: activeTab === 'existing' && vehicle?.plateNumber === v.plate_number ? 'rgba(var(--admin-brand-rgb), 0.1)' : 'var(--admin-bg)',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--admin-text-primary)', textAlign: 'left',
-                  flex: '1 1 200px', maxWidth: '300px'
                 }}
               >
                 <Car size={20} color={activeTab === 'existing' && vehicle?.plateNumber === v.plate_number ? 'var(--admin-brand)' : 'var(--admin-text-secondary)'} />
                 <div>
-                  <div style={{ fontWeight: '900', fontSize: '0.9rem' }}>{v.brand} {v.model}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)' }}>{v.plate_number}</div>
+                  <div style={{ fontWeight: '900', fontSize: '0.875rem' }}>{v.brand} {v.model}</div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--admin-text-secondary)', marginTop: '0.1rem' }}>{v.plate_number} &bull; {v.type}</div>
                 </div>
               </button>
             ))}
@@ -187,51 +197,18 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             <button
               type="button"
               onClick={handleAddNewClick}
+              className="garage-card"
               style={{
-                padding: '1rem', borderRadius: '10px',
                 border: `2px solid ${activeTab === 'new' ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
                 background: activeTab === 'new' ? 'rgba(var(--admin-brand-rgb), 0.1)' : 'var(--admin-bg)',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
-                color: activeTab === 'new' ? 'var(--admin-brand)' : 'var(--admin-text-primary)', fontWeight: '900',
-                flex: '1 1 200px', maxWidth: '300px'
+                justifyContent: 'center',
+                color: activeTab === 'new' ? 'var(--admin-brand)' : 'var(--admin-text-secondary)',
+                fontWeight: '900',
               }}
             >
               <Plus size={18} />
               Add New Vehicle
             </button>
-          </div>
-
-          {/* MOBILE VIEW: Unified Native Dropdown */}
-          <div className="garage-mobile">
-            <select
-              value={activeTab === 'new' ? 'new' : vehicle?.plateNumber || 'new'}
-              onChange={(e) => {
-                if (e.target.value === 'new') {
-                  handleAddNewClick();
-                } else {
-                  const selected = garageVehicles.find(v => v.plate_number === e.target.value);
-                  if (selected) handleSelectGarageCard(selected);
-                }
-              }}
-              style={{
-                width: '100%', padding: '1.15rem 1rem', background: 'var(--admin-bg)',
-                border: `2px solid var(--admin-brand)`, borderRadius: '10px',
-                color: 'white', fontWeight: '900', outline: 'none', fontSize: '1rem',
-                appearance: 'none', backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")',
-                backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem top 50%', backgroundSize: '0.65rem auto'
-              }}
-            >
-              <option value="new">Add New Vehicle</option>
-              {garageVehicles.length > 0 && (
-                <optgroup label="Your Garage">
-                  {garageVehicles.map(v => (
-                    <option key={v.id} value={v.plate_number}>
-                      {v.brand} {v.model} ({v.plate_number})
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
           </div>
         </div>
 
@@ -248,7 +225,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                   setBookingData({ ...bookingData, vehicles: updatedVehicles });
                 }}
                 style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none'
+                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none'
                 }}
               >
                 <option value="" disabled>Select Type</option>
@@ -270,7 +247,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                   setBookingData({ ...bookingData, vehicles: updatedVehicles });
                 }}
                 style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none'
+                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none'
                 }}
                 placeholder="e.g. Toyota"
               />
@@ -286,7 +263,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                   setBookingData({ ...bookingData, vehicles: updatedVehicles });
                 }}
                 style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none'
+                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none'
                 }}
                 placeholder="e.g. Camry"
               />
@@ -302,7 +279,7 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
                   setBookingData({ ...bookingData, vehicles: updatedVehicles });
                 }}
                 style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '800', outline: 'none',
+                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none',
                   borderColor: (vehicle?.plateNumber && vehicle.plateNumber.length < 1) ? 'var(--admin-brand)' : 'var(--admin-border)'
                 }}
                 placeholder="e.g. ABC-1234"
@@ -312,23 +289,28 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
         )}
       </div>
 
-      {/* 2. PROGRESSIVE DISCLOSURE: RESPONSIVE SERVICE CATALOG */}
-      <div style={{
-        opacity: isVehicleComplete ? 1 : 0.4,
-        pointerEvents: isVehicleComplete ? 'auto' : 'none',
-        transition: 'all 0.3s ease',
-        width: '100%'
-      }}>
+      {/* 2. PROGRESSIVE DISCLOSURE: THREE-COLUMN UNIT VIEW SERVICE CATALOG */}
+      {isVehicleComplete && (
+        <div style={{ width: '100%', animation: 'fadeInUp 0.35s ease' }}>
 
-        <style>{`
-          /* Mobile First: Accordion is visible, Sidebar is hidden */
+          <style>{`
+          @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+          }
+          /* Mobile View (< 960px): Accordion & bottom summary strip */
           .mobile-accordion { display: flex; flex-direction: column; gap: 1rem; }
-          .desktop-sidebar { display: none; }
+          .unit-view-grid { display: none; }
           
-          /* Desktop Breakpoint: Sidebar is visible, Accordion is hidden */
-          @media (min-width: 800px) {
+          /* Desktop View (>= 960px): True 3-Column Layout */
+          @media (min-width: 960px) {
             .mobile-accordion { display: none; }
-            .desktop-sidebar { display: grid; grid-template-columns: minmax(200px, 1fr) 3fr; gap: 2rem; align-items: start; }
+            .unit-view-grid { 
+              display: grid; 
+              grid-template-columns: 210px minmax(0, 1fr) 300px; 
+              gap: 1.5rem; 
+              align-items: start; 
+            }
           }
           
           /* Smooth Accordion Animation Engine */
@@ -347,141 +329,352 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
           }
         `}</style>
 
-        {!isVehicleComplete && (
-          <div style={{ background: 'var(--admin-bg)', border: '1px dashed var(--admin-border)', padding: '1rem', borderRadius: '8px', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '700', marginBottom: '1.5rem', textAlign: 'center' }}>
-            Complete vehicle information above to unblock service selections.
-          </div>
-        )}
-
-        {/* ========================================= */}
-        {/* DESKTOP VIEW: Sidebar & Active List       */}
-        {/* ========================================= */}
-        <div className="desktop-sidebar">
-          {/* Category Sidebar */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {availableCategories.map(category => (
-              <button
-                key={`desktop-${category}`}
-                onClick={() => setActiveCategory(category)}
-                style={{
-                  padding: '1rem', textAlign: 'left',
-                  background: activeCategory === category ? 'var(--admin-brand)' : 'var(--admin-bg)',
-                  color: activeCategory === category ? '#fff' : 'var(--admin-text-primary)',
-                  border: `1px solid ${activeCategory === category ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                  borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', transition: 'all 0.2s ease', textTransform: 'uppercase', letterSpacing: '0.5px'
-                }}
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-
-          {/* Service List */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {availableCategories.length > 0 && SERVICES_DATA[activeCategory || availableCategories[0]]?.map(service => {
-              const isSelected = currentServices.some(s => s.id === service.id);
-              const price = getPrice(service);
-              if (price === 0) return null;
-
-              return (
-                <div
-                  key={`desktop-srv-${service.id}`}
-                  onClick={() => toggleService(service)}
-                  className="admin-card-hover"
+          {/* ======================================================== */}
+          {/* DESKTOP VIEW: 3-Column Layout (Cat -> Srv -> Unit View) */}
+          {/* ======================================================== */}
+          <div className="unit-view-grid">
+            {/* Column 1: Category Sidebar */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', position: 'sticky', top: '1rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.25rem' }}>
+                Categories
+              </div>
+              {availableCategories.map(category => (
+                <button
+                  key={`desktop-${category}`}
+                  onClick={() => setActiveCategory(category)}
                   style={{
-                    padding: '1.5rem', background: isSelected ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
-                    border: `2px solid ${isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-md)',
-                    cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', transition: 'all 0.2s ease'
+                    padding: '0.85rem 1rem', textAlign: 'left',
+                    background: activeCategory === category ? 'var(--admin-brand)' : 'var(--admin-bg)',
+                    color: activeCategory === category ? '#fff' : 'var(--admin-text-primary)',
+                    border: `1px solid ${activeCategory === category ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
+                    borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', transition: 'all 0.2s ease', textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.78rem'
                   }}
                 >
-                  <div style={{ display: 'flex', gap: '1rem' }}>
-                    <div style={{ marginTop: '0.2rem' }}>
-                      {isSelected ? <CheckCircle2 size={24} color="var(--admin-brand)" /> : <Circle size={24} color="var(--admin-text-secondary)" />}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <div style={{ fontSize: '1.1rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{service.name}</div>
-                      <div style={{ fontSize: '0.85rem', color: 'var(--admin-text-secondary)', lineHeight: 1.5, maxWidth: '400px' }}>{service.desc}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content' }}>
-                        <Info size={12} /> Est. Time: {service.estTime}
+                  {category}
+                </button>
+              ))}
+            </div>
+
+            {/* Column 2: Service List for Selected Category */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  Available Services · {activeCategory || 'Catalog'}
+                </span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>
+                  Click to select/unselect
+                </span>
+              </div>
+
+              {availableCategories.length > 0 && SERVICES_DATA[activeCategory || availableCategories[0]]?.map(service => {
+                const isSelected = currentServices.some(s => s.id === service.id);
+                const price = getPrice(service);
+                if (price === 0) return null;
+
+                return (
+                  <div
+                    key={`desktop-srv-${service.id}`}
+                    onClick={() => toggleService(service)}
+                    className="admin-card-hover"
+                    style={{
+                      padding: '1.25rem',
+                      background: isSelected ? 'rgba(var(--admin-brand-rgb), 0.06)' : 'var(--admin-bg)',
+                      border: `2px solid ${isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
+                      borderRadius: 'var(--admin-radius-md)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: '0.85rem', flex: 1 }}>
+                      <div style={{ marginTop: '0.15rem' }}>
+                        {isSelected ? <CheckCircle2 size={22} color="var(--admin-brand)" /> : <Circle size={22} color="var(--admin-text-secondary)" />}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, paddingRight: '0.5rem' }}>
+                        <div style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{service.name}</div>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', lineHeight: 1.45 }}>{service.desc}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', fontWeight: '800', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content' }}>
+                          <Info size={11} /> Est. Time: {service.estTime}
+                        </div>
                       </div>
                     </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: '950', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap' }}>
+                      ₱{price.toLocaleString()}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>
-                    ₱{price.toLocaleString()}
+                );
+              })}
+            </div>
+
+            {/* Column 3: NEW — Live Selected Services & Unit Overview */}
+            <div style={{
+              background: 'var(--admin-card)',
+              border: '1px solid var(--admin-border)',
+              borderRadius: 'var(--admin-radius-md)',
+              padding: '1.25rem',
+              position: 'sticky',
+              top: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1rem',
+              boxShadow: 'var(--admin-card-shadow)'
+            }}>
+              {/* Unit Header Badge */}
+              <div style={{ borderBottom: '1px solid var(--admin-border)', paddingBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    Unit Overview
+                  </span>
+                  <span style={{
+                    fontSize: '0.65rem',
+                    fontWeight: '900',
+                    color: 'var(--admin-brand)',
+                    background: 'rgba(var(--admin-brand-rgb), 0.1)',
+                    padding: '0.2rem 0.5rem',
+                    borderRadius: '4px',
+                    textTransform: 'uppercase'
+                  }}>
+                    {vehicle?.type || 'Unit'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>
+                  {vehicle?.brand} {vehicle?.model}
+                </div>
+                <div style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--admin-text-secondary)', letterSpacing: '0.5px' }}>
+                  Plate: {vehicle?.plateNumber || 'Pending'}
+                </div>
+              </div>
+
+              {/* Selected Services List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>
+                    Selected Services ({currentServices.length})
+                  </span>
+                </div>
+
+                {currentServices.length === 0 ? (
+                  <div style={{
+                    padding: '1.5rem 0.5rem',
+                    textAlign: 'center',
+                    background: 'var(--admin-bg)',
+                    borderRadius: 'var(--admin-radius-sm)',
+                    border: '1px dashed var(--admin-border)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}>
+                    <ShoppingBag size={24} color="var(--admin-text-secondary)" style={{ opacity: 0.5 }} />
+                    <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>
+                      No services selected yet
+                    </span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', opacity: 0.8 }}>
+                      Choose services from the catalog to build this unit.
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '280px', overflowY: 'auto' }}>
+                    {currentServices.map(s => (
+                      <div
+                        key={s.runtime_uuid || s.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '0.6rem 0.75rem',
+                          background: 'var(--admin-bg)',
+                          borderRadius: 'var(--admin-radius-sm)',
+                          border: '1px solid var(--admin-border)',
+                          gap: '0.5rem'
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {s.name}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-brand)' }}>
+                            ₱{(s.price || 0).toLocaleString()}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleService(s)}
+                          title="Remove service"
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: 'var(--admin-text-secondary)',
+                            cursor: 'pointer',
+                            padding: '0.2rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            borderRadius: '4px',
+                            transition: 'color 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--admin-text-secondary)'}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Unit Subtotal Box */}
+              <div style={{
+                borderTop: '1px solid var(--admin-border)',
+                paddingTop: '0.85rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline'
+              }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>
+                  Unit Subtotal:
+                </span>
+                <span style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-brand)' }}>
+                  ₱{calculateSubtotal().toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* ========================================= */}
+          {/* MOBILE VIEW: Animated Accordion           */}
+          {/* ========================================= */}
+          <div className="mobile-accordion">
+            {availableCategories.map(category => {
+              const isOpen = activeCategory === category;
+
+              return (
+                <div key={`mobile-${category}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => setActiveCategory(isOpen ? '' : category)}
+                    style={{
+                      padding: '1.1rem 1rem', textAlign: 'left',
+                      background: isOpen ? 'var(--admin-brand)' : 'var(--admin-bg)', color: isOpen ? '#fff' : 'var(--admin-text-primary)',
+                      border: `1px solid ${isOpen ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-sm)',
+                      fontWeight: '900', cursor: 'pointer', transition: 'all 0.2s ease', textTransform: 'uppercase', letterSpacing: '0.5px',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                    }}
+                  >
+                    <span>{category}</span>
+                    <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>{isOpen ? '−' : '+'}</span>
+                  </button>
+
+                  <div className={`accordion-content ${isOpen ? 'open' : ''}`}>
+                    <div className="accordion-inner" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingTop: isOpen ? '0.5rem' : '0', paddingBottom: isOpen ? '1rem' : '0' }}>
+                      {SERVICES_DATA[category]?.map(service => {
+                        const isSelected = currentServices.some(s => s.id === service.id);
+                        const price = getPrice(service);
+                        if (price === 0) return null;
+
+                        return (
+                          <div
+                            key={`mobile-srv-${service.id}`}
+                            onClick={() => toggleService(service)}
+                            style={{
+                              padding: '1.1rem', background: isSelected ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
+                              border: `2px solid ${isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-md)',
+                              cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.75rem', transition: 'all 0.2s ease'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                                <div style={{ marginTop: '0.1rem' }}>
+                                  {isSelected ? <CheckCircle2 size={20} color="var(--admin-brand)" /> : <Circle size={20} color="var(--admin-text-secondary)" />}
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                  <div style={{ fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{service.name}</div>
+                                  <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', lineHeight: 1.4 }}>{service.desc}</div>
+                                </div>
+                              </div>
+                              <div style={{ fontSize: '1.05rem', fontWeight: '950', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap' }}>
+                                ₱{price.toLocaleString()}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', fontWeight: '800', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content', marginLeft: '2rem' }}>
+                              <Info size={11} /> Est. Time: {service.estTime}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );
             })}
-          </div>
-        </div>
 
-        {/* ========================================= */}
-        {/* MOBILE VIEW: Animated Accordion           */}
-        {/* ========================================= */}
-        <div className="mobile-accordion">
-          {availableCategories.map(category => {
-            const isOpen = activeCategory === category;
-
-            return (
-              <div key={`mobile-${category}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <button
-                  onClick={() => setActiveCategory(isOpen ? '' : category)}
-                  style={{
-                    padding: '1.25rem 1rem', textAlign: 'left',
-                    background: isOpen ? 'var(--admin-brand)' : 'var(--admin-bg)', color: isOpen ? '#fff' : 'var(--admin-text-primary)',
-                    border: `1px solid ${isOpen ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-sm)',
-                    fontWeight: '900', cursor: 'pointer', transition: 'all 0.2s ease', textTransform: 'uppercase', letterSpacing: '0.5px',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                  }}
-                >
-                  {category}
-                  <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>{isOpen ? '−' : '+'}</span>
-                </button>
-
-                <div className={`accordion-content ${isOpen ? 'open' : ''}`}>
-                  <div className="accordion-inner" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', paddingTop: isOpen ? '0.5rem' : '0', paddingBottom: isOpen ? '1rem' : '0' }}>
-                    {SERVICES_DATA[category]?.map(service => {
-                      const isSelected = currentServices.some(s => s.id === service.id);
-                      const price = getPrice(service);
-                      if (price === 0) return null;
-
-                      return (
-                        <div
-                          key={`mobile-srv-${service.id}`}
-                          onClick={() => toggleService(service)}
-                          style={{
-                            padding: '1.25rem', background: isSelected ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
-                            border: `2px solid ${isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-md)',
-                            cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '1rem', transition: 'all 0.2s ease'
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                            <div style={{ display: 'flex', gap: '0.75rem' }}>
-                              <div style={{ marginTop: '0.1rem' }}>
-                                {isSelected ? <CheckCircle2 size={20} color="var(--admin-brand)" /> : <Circle size={20} color="var(--admin-text-secondary)" />}
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                <div style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{service.name}</div>
-                                <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', lineHeight: 1.4 }}>{service.desc}</div>
-                              </div>
-                            </div>
-                            <div style={{ fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap' }}>
-                              ₱{price.toLocaleString()}
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content', marginLeft: '2.25rem' }}>
-                            <Info size={12} /> Est. Time: {service.estTime}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+            {/* Mobile Bottom Collapsible Summary Strip */}
+            <div style={{
+              background: 'var(--admin-card)',
+              border: '1px solid var(--admin-border)',
+              borderRadius: 'var(--admin-radius-md)',
+              overflow: 'hidden',
+              marginTop: '0.5rem'
+            }}>
+              <button
+                type="button"
+                onClick={() => setIsMobileSummaryOpen(!isMobileSummaryOpen)}
+                style={{
+                  width: '100%',
+                  padding: '1rem',
+                  background: 'var(--admin-bg)',
+                  border: 'none',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  color: 'var(--admin-text-primary)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '900', fontSize: '0.85rem' }}>
+                  <ShoppingBag size={18} color="var(--admin-brand)" />
+                  <span>{currentServices.length} Selected ({vehicle?.type || 'Unit'})</span>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontWeight: '950', color: 'var(--admin-brand)', fontSize: '1rem' }}>
+                    ₱{calculateSubtotal().toLocaleString()}
+                  </span>
+                  {isMobileSummaryOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </div>
+              </button>
+
+              {isMobileSummaryOpen && (
+                <div style={{ padding: '1rem', borderTop: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-secondary)', marginBottom: '0.25rem' }}>
+                    {vehicle?.brand} {vehicle?.model} · Plate: {vehicle?.plateNumber || 'Pending'}
+                  </div>
+                  {currentServices.length === 0 ? (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontStyle: 'italic' }}>
+                      No services selected yet.
+                    </div>
+                  ) : (
+                    currentServices.map(s => (
+                      <div key={s.runtime_uuid || s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', padding: '0.4rem 0', borderBottom: '1px dashed var(--admin-border)' }}>
+                        <span style={{ color: 'var(--admin-text-primary)', fontWeight: '700' }}>{s.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontWeight: '900', color: 'var(--admin-brand)' }}>₱{(s.price || 0).toLocaleString()}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleService(s)}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.1rem' }}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>)}
 
       {/* Footer Subtotal & Actions */}
       <div style={{
@@ -495,17 +688,17 @@ const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
 
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
           {onCancel && (
-            <button 
-              type="button" 
-              onClick={onCancel} 
-              style={{ 
-                background: 'transparent', 
-                border: '1px solid #ef4444', 
-                color: '#ef4444', 
-                padding: '1rem 2rem', 
-                borderRadius: 'var(--admin-radius-md)', 
-                fontWeight: '950', 
-                cursor: 'pointer', 
+            <button
+              type="button"
+              onClick={onCancel}
+              style={{
+                background: 'transparent',
+                border: '1px solid #ef4444',
+                color: '#ef4444',
+                padding: '1rem 2rem',
+                borderRadius: 'var(--admin-radius-md)',
+                fontWeight: '950',
+                cursor: 'pointer',
                 textTransform: 'uppercase',
                 letterSpacing: '1px'
               }}

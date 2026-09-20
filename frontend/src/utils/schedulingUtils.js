@@ -115,13 +115,17 @@ export const calculateOccupancy = (hour, dateStr, activeBookings = [], blocks = 
 };
 
 /**
- * Filters out stale pending sessions.
+ * Filters out stale pending sessions (past scheduled bookings that were never started).
+ * Future scheduled bookings are ALWAYS kept as they occupy bays.
  */
 export const filterActiveBookings = (bookings = [], config = SHOP_CONFIG) => {
   const now = new Date();
   return (bookings || []).filter(b => {
     if (b.status === 'scheduled') {
       const start = new Date(b.start_datetime);
+      // Future bookings always count
+      if (start > now) return true;
+      // Past scheduled bookings: purge if they've been sitting idle too long
       const diffMins = (now - start) / (1000 * 60);
       return diffMins <= config.STALE_SESSION_PURGE_MINUTES;
     }
