@@ -29,56 +29,67 @@ export const EVENTS = {
 };
 
 // ===== EVENT → NOTIFICATION TEMPLATE MAP =====
+const truncateForPreview = (text, maxWords = 3) => {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return { preview: '', hasMore: false };
+  const words = raw.split(' ');
+  if (words.length <= maxWords) return { preview: raw, hasMore: false };
+  return {
+    preview: `${words.slice(0, maxWords).join(' ')} See More`,
+    hasMore: true
+  };
+};
+
 const TEMPLATES = {
   [EVENTS.BOOKING_CREATED]: {
-    title: 'Booking Received ✅',
+    title: 'Booking Received',
     message: (meta) => `Your booking #${meta.bookingRef} has been submitted and is awaiting confirmation.`,
     type: 'BOOKING_CREATED'
   },
   [EVENTS.BOOKING_CONFIRMED]: {
-    title: 'Booking Confirmed 📅',
+    title: 'Booking Confirmed',
     message: (meta) => `Your appointment #${meta.bookingRef} has been confirmed by the admin. See you on ${meta.date || 'your scheduled date'}!`,
     type: 'BOOKING_CONFIRMED'
   },
   [EVENTS.BOOKING_CANCELLED]: {
-    title: 'Booking Cancelled ❌',
+    title: 'Booking Cancelled',
     message: (meta) => `Your booking #${meta.bookingRef} has been cancelled. ${meta.reason || ''}`,
-    type: 'STATUS_UPDATE'
+    type: 'BOOKING_CANCELLED'
   },
   [EVENTS.TECHNICIAN_ASSIGNED]: {
-    title: 'Technician Assigned 🔧',
+    title: 'Technician Assigned',
     message: (meta) => `${meta.technicianName} has been assigned to lead the detailing session for your vehicle.`,
     type: 'TASK_ASSIGNED'
   },
   [EVENTS.PAYMENT_SUBMITTED]: {
-    title: 'Payment Submitted 💳',
+    title: 'Payment Submitted',
     message: (meta) => `A payment of ₱${meta.amount?.toLocaleString()} has been submitted for booking #${meta.bookingRef}. Awaiting verification.`,
     type: 'PAYMENT_SUBMITTED'
   },
   [EVENTS.PAYMENT_VERIFIED]: {
-    title: 'Payment Verified! 💰',
+    title: 'Payment Verified',
     message: (meta) => `Your payment of ₱${meta.amount?.toLocaleString()} has been approved. Thank you!`,
     type: 'PAYMENT_VERIFIED'
   },
   [EVENTS.PAYMENT_REJECTED]: {
-    title: 'Payment Rejected ❌',
+    title: 'Payment Rejected',
     message: (meta) => `Your payment was rejected. Reason: ${meta.reason || 'Not specified'}. Please re-submit your receipt.`,
     type: 'PAYMENT_REJECTED'
   },
   [EVENTS.SERVICE_STARTED]: {
-    title: 'Service In Progress 🚗',
+    title: 'Service In Progress',
     message: (meta) => `Work has begun on your ${meta.vehicleName || 'vehicle'}. Track live progress from your dashboard.`,
-    type: 'STATUS_UPDATE'
+    type: 'SERVICE_STARTED'
   },
   [EVENTS.SERVICE_COMPLETED]: {
-    title: 'Service Completed! ✨',
+    title: 'Service Completed',
     message: (meta) => `All services for booking #${meta.bookingRef} are now complete. Your vehicle is ready for pickup!`,
-    type: 'STATUS_UPDATE'
+    type: 'SERVICE_COMPLETED'
   },
   [EVENTS.VEHICLE_COMPLETED]: {
-    title: 'Unit Ready! 🏁',
+    title: 'Unit Ready',
     message: (meta) => `Your ${meta.vehicleName || 'vehicle'} is now ready for pickup.`,
-    type: 'STATUS_UPDATE'
+    type: 'VEHICLE_COMPLETED'
   },
   [EVENTS.REFUND_PROCESSED]: {
     title: 'Refund Processed 💸',
@@ -87,12 +98,16 @@ const TEMPLATES = {
   },
   [EVENTS.MESSAGE_RECEIVED]: {
     title: 'New Message 💬',
-    message: (meta) => `${meta.senderName || 'Someone'} sent a message on booking #${meta.bookingRef}.`,
+    message: (meta) => {
+      const baseText = meta?.messageText ? `${meta.messageText}` : `${meta.senderName || 'Someone'} sent a message on booking #${meta.bookingRef}.`;
+      const shortened = truncateForPreview(baseText, 3);
+      return shortened.preview || baseText;
+    },
     type: 'MESSAGE_RECEIVED'
   },
   [EVENTS.STATUS_UPDATE]: {
     title: 'Status Updated ℹ️',
-    message: (meta) => `Your booking #${meta.bookingRef} has been updated to: ${meta.status?.toUpperCase()}.`,
+    message: (meta) => meta?.bookingRef ? `Your appointment #${meta.bookingRef} was updated to: ${meta.status?.toUpperCase() || 'a new status'}.` : null,
     type: 'STATUS_UPDATE'
   }
 };
@@ -111,12 +126,25 @@ export const emitEvent = async (eventType, { userId, bookingId, meta = {} }) => 
     return;
   }
 
+  if (eventType === EVENTS.STATUS_UPDATE && (!bookingId || !meta?.bookingRef)) {
+    console.info('[EventEngine] Suppressed generic STATUS_UPDATE notification because it lacks a booking reference.');
+    return;
+  }
+
+  const message = template.message(meta);
+  if (!message) {
+    console.info(`[EventEngine] Suppressed ${eventType} notification because the template resolved to an empty message.`);
+    return;
+  }
+
+  const isChatMessage = eventType === EVENTS.MESSAGE_RECEIVED;
   const notification = {
     user_id: userId,
+    booking_id: bookingId,
     title: template.title,
-    message: template.message(meta),
+    message,
     notification_type: template.type,
-    action_url: bookingId ? `/customer/bookings/${bookingId}` : null,
+    action_url: bookingId ? (isChatMessage ? `/bookings/${bookingId}?chat=open` : `/customer/bookings/${bookingId}`) : null,
     is_read: false
   };
 
@@ -124,20 +152,6 @@ export const emitEvent = async (eventType, { userId, bookingId, meta = {} }) => 
 
   if (error) {
     console.error(`[EventEngine] Failed to emit ${eventType}:`, error);
-  }
-
-  // Also insert a system message into the booking chat thread (if booking-related)
-  if (bookingId && eventType !== EVENTS.MESSAGE_RECEIVED) {
-    try {
-      await supabase.from('booking_messages').insert({
-        booking_id: bookingId,
-        sender_id: userId,
-        message: `[SYSTEM] ${template.title} — ${template.message(meta)}`,
-        message_type: 'system'
-      });
-    } catch (e) {
-      // Silently fail if table doesn't support it or RLS blocks it
-    }
   }
 
   // ===== TASK 3: AUDIT PERSISTENCE =====

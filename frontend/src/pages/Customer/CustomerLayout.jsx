@@ -12,9 +12,10 @@ import { useTheme } from '../../context/ThemeContext';
 import { useUI } from '../../context/UIContext';
 import { useAuth } from '../../hooks/useAuth';
 import { confirmLogout } from '../../utils/logoutConfirm';
+import CustomerSearch from '../../components/CustomerSearch';
 
 const CustomerLayout = () => {
-  const { openModal, closeModal } = useUI(); const { theme } = useTheme();
+  const { openModal, closeModal } = useUI(); const { resolvedTheme } = useTheme();
   const { user, profile, signOut, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -92,13 +93,10 @@ const CustomerLayout = () => {
     });
   };
 
-  const navLinks = [
-    { name: 'Dashboard', path: '/customer', icon: LayoutDashboard, exact: true },
-    { name: 'Book Appointment', path: '/customer/book', icon: PlusCircle },
-    { name: 'My Bookings', path: '/customer/bookings', icon: ClipboardList },
-    { name: 'Transactions & Billing', path: '/customer/billing', icon: CreditCard },
-    { name: 'Vehicle Garage', path: '/customer/garage', icon: Car },
-    { name: 'Notifications', path: '/customer/notifications', icon: Bell },
+  const navSections = [
+    { title: 'Main', links: [{ name: 'Dashboard', path: '/customer', icon: LayoutDashboard, exact: true }] },
+    { title: 'Bookings', links: [{ name: 'Book Appointment', path: '/customer/book', icon: PlusCircle }, { name: 'My Bookings', path: '/customer/bookings', icon: ClipboardList }] },
+    { title: 'Garage & Billing', links: [{ name: 'Transactions & Billing', path: '/customer/billing', icon: CreditCard }, { name: 'Vehicle Garage', path: '/customer/garage', icon: Car }, { name: 'Notifications', path: '/customer/notifications', icon: Bell }] }
   ];
 
   const sidebarStyle = {
@@ -112,7 +110,12 @@ const CustomerLayout = () => {
     top: 0,
     left: isMobile ? (isSidebarOpen ? 0 : '-260px') : 0,
     height: '100vh',
+<<<<<<< HEAD
+    zIndex: isMobile ? 1000 : 30,
+=======
+    flexShrink: 0,
     zIndex: 1000,
+>>>>>>> e23099d5 (Logic inconsistencies still exists)
     transition: 'left 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
   };
 
@@ -129,7 +132,7 @@ const CustomerLayout = () => {
   };
 
   return (
-    <div className="admin-theme" data-theme={theme} style={{ display: 'flex', height: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', position: 'relative', overflow: 'hidden' }}>
+    <div className="admin-theme" data-theme={resolvedTheme} style={{ display: 'flex', width: '100vw', height: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', position: 'relative', overflow: 'hidden' }}>
 
       {/* Mobile Overlay */}
       <div style={overlayStyle} onClick={() => setIsSidebarOpen(false)} />
@@ -152,43 +155,39 @@ const CustomerLayout = () => {
           <span style={{ fontSize: '0.55rem', fontWeight: '950', color: 'var(--admin-text-secondary)', letterSpacing: '2px', textTransform: 'uppercase' }}>Customer Portal</span>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', flex: 1, overflowY: 'auto', padding: '0 0.5rem' }}>
-          <div style={{ padding: '0.75rem 1rem', fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1.5px', opacity: 0.4 }}>My Account</div>
-          {navLinks.map((link) => {
-            const Icon = link.icon;
-            return (
-              <NavLink
-                key={link.name}
-                to={link.path}
-                end={link.exact}
-                style={({ isActive }) => ({
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '0.85rem 1.25rem',
-                  borderRadius: 'var(--admin-radius-sm)',
-                  textDecoration: 'none',
-                  color: isActive ? 'var(--admin-sidebar-active-text)' : 'var(--admin-text-secondary)',
-                  background: isActive ? 'var(--admin-sidebar-active-bg)' : 'transparent',
-                  fontWeight: isActive ? '950' : '800',
-                  fontSize: '0.7rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.8px',
-                  transition: 'all 0.2s',
-                  borderLeft: isActive ? '2px solid var(--admin-brand)' : '2px solid transparent',
-                  marginLeft: '0.25rem'
-                })}
-              >
-                <Icon size={14} strokeWidth={2.5} />
-                {link.name}
-              </NavLink>
-            );
-          })}
+        <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: '0 0.5rem' }}>
+          {navSections.map(section => (
+            <div key={section.title}>
+              <div style={{ padding: '0.75rem 1rem 0.5rem', fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1.5px', opacity: 0.55 }}>{section.title}</div>
+              {section.links.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <NavLink
+                    key={link.name}
+                    to={link.path}
+                    end={link.exact}
+                    className="admin-card-hover"
+                    style={({ isActive }) => ({
+                      display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.85rem 1.25rem', borderRadius: 'var(--admin-radius-sm)', textDecoration: 'none',
+                      color: isActive ? 'var(--admin-sidebar-active-text)' : 'var(--admin-text-secondary)', background: isActive ? 'var(--admin-sidebar-active-bg)' : 'transparent',
+                      fontWeight: isActive ? '950' : '800', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.8px', transition: 'all 0.2s',
+                      borderLeft: isActive ? '2px solid var(--admin-brand)' : '2px solid transparent', marginLeft: '0.25rem'
+                    })}
+                  >
+                    <Icon size={14} strokeWidth={2.5} />
+                    {link.name}
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', padding: '1rem 0.5rem', borderTop: '1px solid var(--admin-border)' }}>
+          <div style={{ padding: '0 1rem 0.5rem', fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1.5px', opacity: 0.55 }}>System</div>
           <NavLink
             to="/customer/settings"
+            className="admin-card-hover"
             style={({ isActive }) => ({
               display: 'flex',
               alignItems: 'center',
@@ -240,7 +239,11 @@ const CustomerLayout = () => {
         </div>
       </aside>
 
-      <div className="admin-main-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1, maxWidth: '100%', marginLeft: isMobile ? 0 : '260px' }}>
+<<<<<<< HEAD
+      <div className="admin-main-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', maxWidth: '100%', marginLeft: isMobile ? 0 : '260px' }}>
+=======
+      <div className="admin-main-wrapper" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1, maxWidth: '100%', height: '100vh', overflow: 'hidden', marginLeft: isMobile ? 0 : '260px' }}>
+>>>>>>> e23099d5 (Logic inconsistencies still exists)
         <header className="no-print" style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -265,6 +268,7 @@ const CustomerLayout = () => {
             >
               Customer Account
             </div>
+            {!isMobile && <CustomerSearch />}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '1rem' : '1.5rem', position: 'relative' }}>
@@ -319,7 +323,13 @@ const CustomerLayout = () => {
           </div>
         </header>
 
-        <main style={{ flex: 1, padding: isMobile ? '1.5rem 1rem' : '2.5rem', overflowY: 'auto', background: 'var(--admin-bg)' }}>
+        {isMobile && (
+          <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--admin-border)', background: 'var(--admin-bg)' }}>
+            <CustomerSearch />
+          </div>
+        )}
+
+        <main style={{ flex: 1, minHeight: 0, padding: isMobile ? '1.5rem 1rem' : '2.5rem', overflowY: 'auto', background: 'var(--admin-bg)' }}>
           <Outlet />
         </main>
       </div>

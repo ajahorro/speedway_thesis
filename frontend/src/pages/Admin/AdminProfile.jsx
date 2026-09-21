@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase';
 
 const AdminProfile = () => {
   const navigate = useNavigate();
-  const { user, profile, updateProfile, verifyPassword, resetPassword } = useAuth();
+  const { user, profile, updateProfile, verifyPassword } = useAuth();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   
   // States
@@ -18,25 +18,6 @@ const AdminProfile = () => {
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // 'profile' or 'password'
 
-  const handleForgotPassword = async () => {
-    const email = profile?.email || user?.email;
-    if (!email) return toast.error('No email address associated with this account');
-    const toastId = toast.loading('Sending password reset instructions...');
-    try {
-      await resetPassword(email);
-      toast.success('Password reset email sent. Check your inbox!', { id: toastId });
-    } catch (err) {
-      if (err.message === 'SMTP_UNAVAILABLE') {
-        toast.error(
-          'Password reset email service is currently unavailable. Please contact an Administrator to reset your password.',
-          { id: toastId, duration: 7000 }
-        );
-      } else {
-        toast.error(err.message || 'Failed to send reset email', { id: toastId });
-      }
-    }
-  };
-  
   const [formData, setFormData] = useState({
     firstName: profile?.first_name || user?.user_metadata?.first_name || '',
     lastName: profile?.last_name || user?.user_metadata?.last_name || '',
@@ -215,7 +196,7 @@ const AdminProfile = () => {
               <div style={{ display: 'flex', gap: '1rem' }}>
                 <button 
                   onClick={() => { setIsEditing(false); setFormData({...formData, firstName: profile.first_name, lastName: profile.last_name}); }}
-                  style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'white', borderRadius: '4px', fontWeight: '950', cursor: 'pointer' }}
+                  style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '4px', fontWeight: '950', cursor: 'pointer' }}
                 >
                   Cancel
                 </button>
@@ -253,24 +234,19 @@ const AdminProfile = () => {
               aria-hidden="true" 
             />
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <div style={{ marginBottom: '0.5rem' }}>
                 <label style={{ ...labelStyle, marginBottom: 0 }}>Current Password</label>
-                <button 
-                  type="button" 
-                  onClick={handleForgotPassword}
-                  style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', padding: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}
-                >
-                  Forgot Password?
-                </button>
               </div>
               <div style={{ position: 'relative' }}>
                 <Lock size={18} style={{ position: 'absolute', left: '1.25rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--admin-text-secondary)' }} />
                 <input 
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete="off"
+                  name="profile-current-password"
                   style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text', paddingLeft: '3.25rem' }} 
                   placeholder="Verify identity"
                   value={formData.currentPassword}
+                  onFocus={() => setFormData(prev => ({ ...prev, currentPassword: '' }))}
                   onChange={e => setFormData({...formData, currentPassword: e.target.value})}
                   required
                 />
@@ -325,8 +301,8 @@ const AdminProfile = () => {
                 marginTop: '0.5rem',
                 width: '100%', 
                 padding: '1rem', 
-                background: isPasswordFormValid && !loading ? 'var(--admin-brand)' : 'rgba(255,255,255,0.08)', 
-                color: isPasswordFormValid && !loading ? 'white' : 'rgba(255,255,255,0.3)', 
+                background: isPasswordFormValid && !loading ? 'var(--admin-brand)' : 'var(--admin-border)', 
+                color: isPasswordFormValid && !loading ? '#fff' : 'var(--admin-text-secondary)', 
                 border: 'none', 
                 borderRadius: 'var(--admin-radius-sm)', 
                 fontWeight: '950', 
@@ -344,15 +320,6 @@ const AdminProfile = () => {
             >
               <Shield size={18} /> {loading ? 'Processing...' : 'Rotate Security Key'}
             </button>
-            <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
-              <button 
-                type="button"
-                onClick={handleForgotPassword}
-                style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
-              >
-                Forgot Password?
-              </button>
-            </div>
           </form>
         </div>
 
@@ -370,15 +337,17 @@ const AdminProfile = () => {
             
             <input 
               type="password"
-              autoComplete="current-password"
+              autoComplete="off"
+              name="profile-verify-current-password"
               placeholder="Current Password"
               value={formData.currentPassword}
+              onFocus={() => setFormData(prev => ({ ...prev, currentPassword: '' }))}
               onChange={e => setFormData({...formData, currentPassword: e.target.value})}
               style={{ ...inputStyle, background: 'var(--admin-bg)', textAlign: 'center', cursor: 'text', marginBottom: '1.5rem' }}
             />
 
             <div style={{ display: 'flex', gap: '1rem' }}>
-              <button type="button" onClick={() => setShowVerifyModal(false)} style={{ flex: 1, padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Cancel</button>
+              <button type="button" onClick={() => setShowVerifyModal(false)} style={{ flex: 1, padding: '0.85rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '4px', color: 'var(--admin-text-primary)', fontWeight: '950', cursor: 'pointer' }}>Cancel</button>
               <button type="submit" style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', border: 'none', borderRadius: '4px', color: 'white', fontWeight: '950', cursor: 'pointer' }}>Verify & Proceed</button>
             </div>
           </form>

@@ -1,731 +1,182 @@
-import React, { useState } from 'react';
-import { CheckCircle2, Circle, Info, Warehouse, Plus, Car, Trash2, X, ChevronDown, ChevronUp, ShoppingBag } from 'lucide-react';
-import { SERVICES_DATA } from '../../data/servicesCatalog';
-import { fetchUserGarage } from '../../services/garageService';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Car, CheckCircle2, Circle, Layers, Lock, Plus, Trash2, X } from 'lucide-react';
+import { getServiceCatalog } from '../../data/servicesCatalog';
+import { fetchUserGarage, fetchFleetGroups } from '../../services/garageService';
+import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 import toast from 'react-hot-toast';
+import { sanitizeVehiclePlate, sanitizeVehicleText, VEHICLE_TYPE_OPTIONS, SHOP_CONFIG } from '../../config/constants';
+import { calculateBayUsage } from '../../utils/schedulingUtils';
 
-const Step2Services = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack, onCancel }) => {
-  const vehicle = bookingData.vehicles[activeVehicleIndex];
-  const vehicleType = vehicle?.type;
-  const currentServices = vehicle?.services || [];
+const newId = () => crypto.randomUUID ? crypto.randomUUID() : `v_${Math.random().toString(36).slice(2)}`;
+const emptyVehicle = (manual = false) => ({ id: newId(), type: '', brand: '', model: '', plateNumber: '', services: [], locked: false, manual });
+const unitSubtotal = (vehicle) => (vehicle.services || []).reduce((total, service) => total + Number(service.price || service.price_at_booking || 0), 0);
+const isMotorcycle = (type) => type === 'Regular' || type === 'Bigbike';
+const inputStyle = { width: '100%', padding: '.75rem', background: 'var(--admin-input-bg)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-input-border)', borderRadius: '6px', fontWeight: '700' };
 
-  // Initialize with a valid category depending on vehicle type
-  const isMotorcycle = vehicleType === 'Regular' || vehicleType === 'Bigbike';
-  const initialCategory = isMotorcycle ? 'Motorcycle Specialist' : 'Exclusive Packages';
-  const [activeCategory, setActiveCategory] = useState(initialCategory);
-
-  const [activeTab, setActiveTab] = useState('new'); // 'existing' or 'new'
-  const [isMobileSummaryOpen, setIsMobileSummaryOpen] = useState(false);
-
-  // REQ-CST-10: LOAD FROM GARAGE
+const Step2Services = ({ bookingData, setBookingData, adminMode = false, onNext, onCancel }) => {
   const { user } = useAuth();
+  const vehicles = bookingData.vehicles || [];
   const [garageVehicles, setGarageVehicles] = useState([]);
-  const [isLoadingGarage, setIsLoadingGarage] = useState(false);
+  const [fleetGroups, setFleetGroups] = useState([]);
+  const [fleetToAddId, setFleetToAddId] = useState('');
+  const [activeCategories, setActiveCategories] = useState({});
+  const [maxBays, setMaxBays] = useState(SHOP_CONFIG.MAX_BAYS);
+  const SERVICE_CATALOG = getServiceCatalog();
 
-  React.useEffect(() => {
-    if (user) {
-      setIsLoadingGarage(true);
-      fetchUserGarage(user.id)
-        .then(data => setGarageVehicles(data))
-        .catch(err => console.error('Failed to load garage:', err))
-        .finally(() => setIsLoadingGarage(false));
-    }
-  }, [user]);
+  useEffect(() => {
+    const ownerId = bookingData.customerId || user?.id;
+    if (!ownerId) return;
+    Promise.all([
+      fetchUserGarage(ownerId),
+      fetchFleetGroups(ownerId),
+      supabase.from('business_config').select('slots_per_hour').maybeSingle()
+    ])
+      .then(([savedVehicles, groups, capacityResult]) => { setGarageVehicles(savedVehicles); setFleetGroups(groups); setMaxBays(Number(capacityResult.data?.slots_per_hour) || SHOP_CONFIG.MAX_BAYS); })
+      .catch((error) => console.error('Failed to load garage:', error));
+  }, [user, bookingData.customerId]);
 
-  const handleSelectGarageCard = (selected) => {
-    setActiveTab('existing');
-    const updatedVehicles = [...bookingData.vehicles];
-    updatedVehicles[activeVehicleIndex] = {
-      ...updatedVehicles[activeVehicleIndex],
-      type: selected.type,
-      brand: selected.brand,
-      model: selected.model,
-      plateNumber: selected.plate_number,
-      services: [] // Clear services as type might have changed
-    };
-    setBookingData({ ...bookingData, vehicles: updatedVehicles });
-    toast.success(`${selected.brand} loaded from garage!`);
-  };
-
-  const handleAddNewClick = () => {
-    setActiveTab('new');
-    const updatedVehicles = [...bookingData.vehicles];
-    updatedVehicles[activeVehicleIndex] = {
-      ...updatedVehicles[activeVehicleIndex],
-      type: '',
-      brand: '',
-      model: '',
-      plateNumber: '',
-      services: []
-    };
-    setBookingData({ ...bookingData, vehicles: updatedVehicles });
-  };
-
-  const isVehicleComplete = Boolean(
-    vehicle?.type &&
-    vehicle?.brand?.trim()?.length >= 1 &&
-    vehicle?.model?.trim()?.length >= 1 &&
-    vehicle?.plateNumber?.trim()?.length >= 1
-  );
-
-  const canProceed = isVehicleComplete && currentServices.length > 0;
-
-  const getDisabledMessage = () => {
-    if (!vehicle?.type) return "Please select a vehicle type";
-    if (!vehicle?.brand?.trim()) return "Please enter the vehicle brand";
-    if (!vehicle?.model?.trim()) return "Please enter the vehicle model";
-    if (!vehicle?.plateNumber?.trim() || vehicle.plateNumber.length < 1) return "Please enter the plate number";
-    if (currentServices.length === 0) return "Please select at least one service";
-    return "";
-  };
-
-  const availableCategories = Object.keys(SERVICES_DATA).filter(category => {
-    const isCategoryForMotorcycle = category === 'Motorcycle Specialist';
-    if (isMotorcycle !== isCategoryForMotorcycle) return false;
-    return SERVICES_DATA[category].some(service => {
-      const price = service.prices[vehicleType];
-      return price && price > 0;
-    });
+  const updateVehicles = (updater) => setBookingData((current) => ({
+    ...current,
+    vehicles: typeof updater === 'function' ? updater(current.vehicles || []) : updater
+  }));
+  const isUntouchedUnit = (vehicle) => !vehicle.type && !vehicle.brand && !vehicle.model && !vehicle.plateNumber && !(vehicle.services || []).length;
+  const garageVehicleToBookingVehicle = (vehicle, fleetUnitKey = null) => ({
+    id: newId(),
+    garageVehicleId: vehicle.id,
+    fleetGroupId: vehicle.fleet_group_id || null,
+    fleetUnitKey,
+    locked: true,
+    type: vehicle.type,
+    brand: vehicle.brand,
+    model: vehicle.model,
+    plateNumber: vehicle.plate_number,
+    services: []
   });
 
-  // Ensure active category is valid (but allow '' for closed mobile accordions)
-  if (activeCategory !== '' && !availableCategories.includes(activeCategory) && availableCategories.length > 0) {
-    setActiveCategory(availableCategories[0]);
-  }
-
-  const getPrice = (service) => {
-    if (!vehicleType || !service.prices[vehicleType]) return 0;
-    return service.prices[vehicleType];
-  };
-
-  const toggleService = (service) => {
-    const price = getPrice(service);
-    const exists = currentServices.find(s => s.id === service.id);
-
-    const updatedVehicles = bookingData.vehicles.map((v, i) => {
-      if (i === activeVehicleIndex) {
-        let newServices;
-        if (exists) {
-          // Remove the service if it is already selected
-          newServices = currentServices.filter(s => s.id !== service.id);
-        } else {
-          // Add the service with a unique runtime ID and snapshotted price
-          const serviceWithIntegrity = {
-            ...service,
-            runtime_uuid: crypto.randomUUID ? crypto.randomUUID() : 'rt_' + Math.random().toString(36).substring(2, 9),
-            price_at_booking: price, // The exact price at the moment of booking
-            price: price // We keep this here so your calculateSubtotal() function doesn't break
-          };
-          newServices = [...currentServices, serviceWithIntegrity];
-        }
-        return { ...v, services: newServices };
-      }
-      return v;
+  // A fleet type is one editor unit, but each original vehicle remains in the
+  // booking so bay usage, service rows, and payment totals remain accurate.
+  const units = useMemo(() => {
+    const map = new Map();
+    vehicles.forEach((vehicle) => {
+      const key = vehicle.fleetUnitKey || vehicle.id;
+      const current = map.get(key) || { id: key, vehicles: [], locked: Boolean(vehicle.locked), type: vehicle.type };
+      current.vehicles.push(vehicle);
+      current.locked = current.locked && Boolean(vehicle.locked);
+      map.set(key, current);
     });
+    return [...map.values()];
+  }, [vehicles]);
 
-    setBookingData({ ...bookingData, vehicles: updatedVehicles });
+  const addGarageVehicle = (savedVehicle) => {
+    if (vehicles.some((vehicle) => vehicle.garageVehicleId === savedVehicle.id)) {
+      toast.error('This saved vehicle is already included in the booking.');
+      return;
+    }
+    const committedVehicles = vehicles.filter((vehicle) => !isUntouchedUnit(vehicle));
+    if (calculateBayUsage([...committedVehicles, savedVehicle]) > maxBays) {
+      toast.error(`This booking cannot exceed the ${maxBays}-bay business limit.`);
+      return;
+    }
+    updateVehicles((current) => current.length === 1 && isUntouchedUnit(current[0])
+      ? [garageVehicleToBookingVehicle(savedVehicle)]
+      : [...current, garageVehicleToBookingVehicle(savedVehicle)]);
+  };
+  const toggleGarageVehicle = (savedVehicle) => {
+    if (isGarageVehicleSelected(savedVehicle)) {
+      updateVehicles((current) => current.length === 1
+        ? [emptyVehicle()]
+        : current.filter((vehicle) => vehicle.garageVehicleId !== savedVehicle.id));
+      return;
+    }
+    addGarageVehicle(savedVehicle);
   };
 
+  const addManualVehicle = () => {
+    const committedVehicles = vehicles.filter((vehicle) => !isUntouchedUnit(vehicle));
+    if (committedVehicles.length && calculateBayUsage([...committedVehicles, { type: 'Sedan' }]) > maxBays) {
+      toast.error(`This booking cannot exceed the ${maxBays}-bay business limit.`);
+      return;
+    }
+    updateVehicles((current) => current.length === 1 && isUntouchedUnit(current[0]) ? [emptyVehicle(true)] : [...current, emptyVehicle(true)]);
+  };
+  const isGarageVehicleSelected = (savedVehicle) => vehicles.some((vehicle) => vehicle.garageVehicleId === savedVehicle.id);
 
-  const calculateSubtotal = () => {
-    return currentServices.reduce((sum, service) => sum + service.price, 0);
+  const addFleet = async (fleetId = fleetToAddId) => {
+    const selectedFleet = fleetGroups.find((group) => group.id === fleetId);
+    const fleetVehicles = selectedFleet?.vehicles || [];
+    if (!fleetId || !fleetVehicles.length) return;
+    const { data: capacityConfig, error } = await supabase.from('business_config').select('slots_per_hour').maybeSingle();
+    const maxBays = Number(capacityConfig?.slots_per_hour);
+    if (error || !Number.isFinite(maxBays) || maxBays <= 0) {
+      toast.error('Fleet capacity is unavailable. Ask an administrator to configure the number of bays.');
+      return;
+    }
+    const committedVehicles = vehicles.filter((vehicle) => !isUntouchedUnit(vehicle));
+    const requiredBays = calculateBayUsage([...committedVehicles, ...fleetVehicles]);
+    if (requiredBays > maxBays) {
+      toast.error(`This fleet needs ${requiredBays} bays, but the business is currently configured for ${maxBays}.`);
+      return;
+    }
+    const existingGarageIds = new Set(vehicles.map((vehicle) => vehicle.garageVehicleId).filter(Boolean));
+    const newFleetVehicles = fleetVehicles.filter((vehicle) => !existingGarageIds.has(vehicle.id));
+    if (!newFleetVehicles.length) return toast.error('Every vehicle in this fleet is already included.');
+    const groupedVehicles = newFleetVehicles.map((vehicle) => garageVehicleToBookingVehicle(vehicle, `fleet:${fleetId}:type:${vehicle.type}`));
+    updateVehicles((current) => current.length === 1 && isUntouchedUnit(current[0]) ? groupedVehicles : [...current, ...groupedVehicles]);
+    setBookingData((current) => ({ ...current, fleetGroupId: fleetId }));
+    toast.success(`${newFleetVehicles.length} fleet vehicle${newFleetVehicles.length === 1 ? '' : 's'} added in ${new Set(newFleetVehicles.map((vehicle) => vehicle.type)).size} service unit${new Set(newFleetVehicles.map((vehicle) => vehicle.type)).size === 1 ? '' : 's'}.`);
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+  const updateUnit = (unit, patch) => updateVehicles((current) => current.map((vehicle) => unit.vehicles.some((member) => member.id === vehicle.id) ? { ...vehicle, ...patch } : vehicle));
+  const removeUnit = (unit) => updateVehicles((current) => current.length === unit.vehicles.length ? [emptyVehicle()] : current.filter((vehicle) => !unit.vehicles.some((member) => member.id === vehicle.id)));
+  const categoriesFor = (vehicle) => Object.entries(SERVICE_CATALOG)
+    .filter(([category, services]) => (category === 'Motorcycle Specialist') === isMotorcycle(vehicle.type) && services.some((service) => Number(service.prices[vehicle.type]) > 0))
+    .map(([category]) => category);
+  const categoryFor = (unit) => { const categories = categoriesFor(unit.vehicles[0]); return categories.includes(activeCategories[unit.id]) ? activeCategories[unit.id] : categories[0] || ''; };
+  const toggleService = (unit, service) => {
+    const selected = unit.vehicles.every((vehicle) => vehicle.services?.some((item) => item.id === service.id));
+    const price = Number(service.prices[unit.type] || 0);
+    updateVehicles((current) => current.map((vehicle) => unit.vehicles.some((member) => member.id === vehicle.id)
+      ? { ...vehicle, services: selected ? vehicle.services.filter((item) => item.id !== service.id) : [...(vehicle.services || []), { ...service, runtime_uuid: newId(), price, price_at_booking: price }] }
+      : vehicle));
+  };
 
-      {/* 1. GARAGE SELECTION UI & VEHICLE FORM */}
-      <div style={{ background: 'rgba(var(--admin-brand-rgb), 0.02)', padding: '1.5rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)', marginBottom: '1.5rem' }}>
+  const hasVehicleSelection = vehicles.some((vehicle) => vehicle.manual || vehicle.garageVehicleId || vehicle.fleetGroupId || Boolean(vehicle.type && vehicle.brand?.trim() && vehicle.model?.trim() && vehicle.plateNumber?.trim()));
+  const hasAdminCustomerDetails = !adminMode || Boolean(bookingData.adminCustomerReady || (bookingData.customerId && bookingData.customerName && bookingData.customerEmail && bookingData.contactNumber));
+  const showServiceConfiguration = hasVehicleSelection && hasAdminCustomerDetails;
+  const validUnits = showServiceConfiguration && vehicles.length > 0 && calculateBayUsage(vehicles) <= maxBays && vehicles.every((vehicle) => vehicle.type && vehicle.brand?.trim() && vehicle.model?.trim() && vehicle.plateNumber?.trim().length >= 4 && vehicle.services?.length);
+  const grandTotal = vehicles.reduce((total, vehicle) => total + unitSubtotal(vehicle), 0);
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase' }}>Vehicle Identification</h3>
-            <p style={{ margin: '0.25rem 0 0 0', color: 'var(--admin-text-secondary)', fontSize: '0.75rem', fontWeight: '600' }}>Select or enter your vehicle to unlock service pricing.</p>
-          </div>
-        </div>
-
-        {/* Top-Level Garage Selection Cards (Responsive) */}
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-brand)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
-            <Warehouse size={12} style={{ marginRight: '0.4rem', verticalAlign: 'middle' }} /> Quick-Load from Your Garage
-          </label>
-
-          <style>{`
-            .garage-grid {
-              display: flex;
-              flex-wrap: wrap;
-              gap: 0.75rem;
-            }
-            .garage-card {
-              padding: 0.85rem 1rem;
-              border-radius: 10px;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              gap: 0.75rem;
-              color: var(--admin-text-primary);
-              text-align: left;
-              flex: 1 1 160px;
-              max-width: 260px;
-              min-width: 140px;
-              transition: all 0.2s ease;
-            }
-          `}</style>
-
-          {/* Unified Card Grid: Garage vehicles + Add New card */}
-          <div className="garage-grid">
-            {garageVehicles.map(v => (
-              <button
-                key={v.id}
-                type="button"
-                onClick={() => handleSelectGarageCard(v)}
-                className="garage-card"
-                style={{
-                  border: `2px solid ${activeTab === 'existing' && vehicle?.plateNumber === v.plate_number ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                  background: activeTab === 'existing' && vehicle?.plateNumber === v.plate_number ? 'rgba(var(--admin-brand-rgb), 0.1)' : 'var(--admin-bg)',
-                }}
-              >
-                <Car size={20} color={activeTab === 'existing' && vehicle?.plateNumber === v.plate_number ? 'var(--admin-brand)' : 'var(--admin-text-secondary)'} />
-                <div>
-                  <div style={{ fontWeight: '900', fontSize: '0.875rem' }}>{v.brand} {v.model}</div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--admin-text-secondary)', marginTop: '0.1rem' }}>{v.plate_number} &bull; {v.type}</div>
-                </div>
-              </button>
-            ))}
-
-            <button
-              type="button"
-              onClick={handleAddNewClick}
-              className="garage-card"
-              style={{
-                border: `2px solid ${activeTab === 'new' ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                background: activeTab === 'new' ? 'rgba(var(--admin-brand-rgb), 0.1)' : 'var(--admin-bg)',
-                justifyContent: 'center',
-                color: activeTab === 'new' ? 'var(--admin-brand)' : 'var(--admin-text-secondary)',
-                fontWeight: '900',
-              }}
-            >
-              <Plus size={18} />
-              Add New Vehicle
-            </button>
-          </div>
-        </div>
-
-        {/* Required Vehicle Information Inputs */}
-        {activeTab === 'new' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginTop: '1rem', paddingTop: '1.5rem', borderTop: '1px dashed var(--admin-border)' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Type</label>
-              <select
-                value={vehicleType || ''}
-                onChange={(e) => {
-                  const updatedVehicles = [...bookingData.vehicles];
-                  updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], type: e.target.value, services: [] };
-                  setBookingData({ ...bookingData, vehicles: updatedVehicles });
-                }}
-                style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none'
-                }}
-              >
-                <option value="" disabled>Select Type</option>
-                <option value="Sedan">Sedan</option>
-                <option value="SUV">SUV</option>
-                <option value="Van/L300">Van/L300</option>
-                <option value="Regular">Motorcycle (Regular)</option>
-                <option value="Bigbike">Motorcycle (Bigbike)</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Brand</label>
-              <input
-                type="text"
-                value={vehicle?.brand || ''}
-                onChange={(e) => {
-                  const updatedVehicles = [...bookingData.vehicles];
-                  updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], brand: e.target.value };
-                  setBookingData({ ...bookingData, vehicles: updatedVehicles });
-                }}
-                style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none'
-                }}
-                placeholder="e.g. Toyota"
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Model</label>
-              <input
-                type="text"
-                value={vehicle?.model || ''}
-                onChange={(e) => {
-                  const updatedVehicles = [...bookingData.vehicles];
-                  updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], model: e.target.value };
-                  setBookingData({ ...bookingData, vehicles: updatedVehicles });
-                }}
-                style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none'
-                }}
-                placeholder="e.g. Camry"
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Plate #</label>
-              <input
-                type="text"
-                value={vehicle?.plateNumber || ''}
-                onChange={(e) => {
-                  const updatedVehicles = [...bookingData.vehicles];
-                  updatedVehicles[activeVehicleIndex] = { ...updatedVehicles[activeVehicleIndex], plateNumber: e.target.value.toUpperCase() };
-                  setBookingData({ ...bookingData, vehicles: updatedVehicles });
-                }}
-                style={{
-                  width: '100%', padding: '0.85rem 1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', outline: 'none',
-                  borderColor: (vehicle?.plateNumber && vehicle.plateNumber.length < 1) ? 'var(--admin-brand)' : 'var(--admin-border)'
-                }}
-                placeholder="e.g. ABC-1234"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 2. PROGRESSIVE DISCLOSURE: THREE-COLUMN UNIT VIEW SERVICE CATALOG */}
-      {isVehicleComplete && (
-        <div style={{ width: '100%', animation: 'fadeInUp 0.35s ease' }}>
-
-          <style>{`
-          @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(10px); }
-            to   { opacity: 1; transform: translateY(0); }
-          }
-          /* Mobile View (< 960px): Accordion & bottom summary strip */
-          .mobile-accordion { display: flex; flex-direction: column; gap: 1rem; }
-          .unit-view-grid { display: none; }
-          
-          /* Desktop View (>= 960px): True 3-Column Layout */
-          @media (min-width: 960px) {
-            .mobile-accordion { display: none; }
-            .unit-view-grid { 
-              display: grid; 
-              grid-template-columns: 210px minmax(0, 1fr) 300px; 
-              gap: 1.5rem; 
-              align-items: start; 
-            }
-          }
-          
-          /* Smooth Accordion Animation Engine */
-          .accordion-content {
-            display: grid;
-            grid-template-rows: 0fr;
-            transition: grid-template-rows 0.3s ease-out, opacity 0.3s ease-out;
-            opacity: 0;
-          }
-          .accordion-content.open {
-            grid-template-rows: 1fr;
-            opacity: 1;
-          }
-          .accordion-inner {
-            overflow: hidden;
-          }
-        `}</style>
-
-          {/* ======================================================== */}
-          {/* DESKTOP VIEW: 3-Column Layout (Cat -> Srv -> Unit View) */}
-          {/* ======================================================== */}
-          <div className="unit-view-grid">
-            {/* Column 1: Category Sidebar */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', position: 'sticky', top: '1rem' }}>
-              <div style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.25rem' }}>
-                Categories
-              </div>
-              {availableCategories.map(category => (
-                <button
-                  key={`desktop-${category}`}
-                  onClick={() => setActiveCategory(category)}
-                  style={{
-                    padding: '0.85rem 1rem', textAlign: 'left',
-                    background: activeCategory === category ? 'var(--admin-brand)' : 'var(--admin-bg)',
-                    color: activeCategory === category ? '#fff' : 'var(--admin-text-primary)',
-                    border: `1px solid ${activeCategory === category ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                    borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', transition: 'all 0.2s ease', textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.78rem'
-                  }}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
-
-            {/* Column 2: Service List for Selected Category */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                  Available Services · {activeCategory || 'Catalog'}
-                </span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>
-                  Click to select/unselect
-                </span>
-              </div>
-
-              {availableCategories.length > 0 && SERVICES_DATA[activeCategory || availableCategories[0]]?.map(service => {
-                const isSelected = currentServices.some(s => s.id === service.id);
-                const price = getPrice(service);
-                if (price === 0) return null;
-
-                return (
-                  <div
-                    key={`desktop-srv-${service.id}`}
-                    onClick={() => toggleService(service)}
-                    className="admin-card-hover"
-                    style={{
-                      padding: '1.25rem',
-                      background: isSelected ? 'rgba(var(--admin-brand-rgb), 0.06)' : 'var(--admin-bg)',
-                      border: `2px solid ${isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                      borderRadius: 'var(--admin-radius-md)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    <div style={{ display: 'flex', gap: '0.85rem', flex: 1 }}>
-                      <div style={{ marginTop: '0.15rem' }}>
-                        {isSelected ? <CheckCircle2 size={22} color="var(--admin-brand)" /> : <Circle size={22} color="var(--admin-text-secondary)" />}
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, paddingRight: '0.5rem' }}>
-                        <div style={{ fontSize: '1rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{service.name}</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', lineHeight: 1.45 }}>{service.desc}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', fontWeight: '800', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content' }}>
-                          <Info size={11} /> Est. Time: {service.estTime}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: '1.15rem', fontWeight: '950', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap' }}>
-                      ₱{price.toLocaleString()}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Column 3: NEW — Live Selected Services & Unit Overview */}
-            <div style={{
-              background: 'var(--admin-card)',
-              border: '1px solid var(--admin-border)',
-              borderRadius: 'var(--admin-radius-md)',
-              padding: '1.25rem',
-              position: 'sticky',
-              top: '1rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '1rem',
-              boxShadow: 'var(--admin-card-shadow)'
-            }}>
-              {/* Unit Header Badge */}
-              <div style={{ borderBottom: '1px solid var(--admin-border)', paddingBottom: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
-                  <span style={{ fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                    Unit Overview
-                  </span>
-                  <span style={{
-                    fontSize: '0.65rem',
-                    fontWeight: '900',
-                    color: 'var(--admin-brand)',
-                    background: 'rgba(var(--admin-brand-rgb), 0.1)',
-                    padding: '0.2rem 0.5rem',
-                    borderRadius: '4px',
-                    textTransform: 'uppercase'
-                  }}>
-                    {vehicle?.type || 'Unit'}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>
-                  {vehicle?.brand} {vehicle?.model}
-                </div>
-                <div style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--admin-text-secondary)', letterSpacing: '0.5px' }}>
-                  Plate: {vehicle?.plateNumber || 'Pending'}
-                </div>
-              </div>
-
-              {/* Selected Services List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>
-                    Selected Services ({currentServices.length})
-                  </span>
-                </div>
-
-                {currentServices.length === 0 ? (
-                  <div style={{
-                    padding: '1.5rem 0.5rem',
-                    textAlign: 'center',
-                    background: 'var(--admin-bg)',
-                    borderRadius: 'var(--admin-radius-sm)',
-                    border: '1px dashed var(--admin-border)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '0.4rem'
-                  }}>
-                    <ShoppingBag size={24} color="var(--admin-text-secondary)" style={{ opacity: 0.5 }} />
-                    <span style={{ fontSize: '0.78rem', fontWeight: '800', color: 'var(--admin-text-secondary)' }}>
-                      No services selected yet
-                    </span>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', opacity: 0.8 }}>
-                      Choose services from the catalog to build this unit.
-                    </span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '280px', overflowY: 'auto' }}>
-                    {currentServices.map(s => (
-                      <div
-                        key={s.runtime_uuid || s.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '0.6rem 0.75rem',
-                          background: 'var(--admin-bg)',
-                          borderRadius: 'var(--admin-radius-sm)',
-                          border: '1px solid var(--admin-border)',
-                          gap: '0.5rem'
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {s.name}
-                          </div>
-                          <div style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-brand)' }}>
-                            ₱{(s.price || 0).toLocaleString()}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => toggleService(s)}
-                          title="Remove service"
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            color: 'var(--admin-text-secondary)',
-                            cursor: 'pointer',
-                            padding: '0.2rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            borderRadius: '4px',
-                            transition: 'color 0.2s ease'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
-                          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--admin-text-secondary)'}
-                        >
-                          <X size={15} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Unit Subtotal Box */}
-              <div style={{
-                borderTop: '1px solid var(--admin-border)',
-                paddingTop: '0.85rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'baseline'
-              }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>
-                  Unit Subtotal:
-                </span>
-                <span style={{ fontSize: '1.25rem', fontWeight: '950', color: 'var(--admin-brand)' }}>
-                  ₱{calculateSubtotal().toLocaleString()}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* ========================================= */}
-          {/* MOBILE VIEW: Animated Accordion           */}
-          {/* ========================================= */}
-          <div className="mobile-accordion">
-            {availableCategories.map(category => {
-              const isOpen = activeCategory === category;
-
-              return (
-                <div key={`mobile-${category}`} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <button
-                    onClick={() => setActiveCategory(isOpen ? '' : category)}
-                    style={{
-                      padding: '1.1rem 1rem', textAlign: 'left',
-                      background: isOpen ? 'var(--admin-brand)' : 'var(--admin-bg)', color: isOpen ? '#fff' : 'var(--admin-text-primary)',
-                      border: `1px solid ${isOpen ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-sm)',
-                      fontWeight: '900', cursor: 'pointer', transition: 'all 0.2s ease', textTransform: 'uppercase', letterSpacing: '0.5px',
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-                    }}
-                  >
-                    <span>{category}</span>
-                    <span style={{ fontSize: '1.2rem', lineHeight: 1 }}>{isOpen ? '−' : '+'}</span>
-                  </button>
-
-                  <div className={`accordion-content ${isOpen ? 'open' : ''}`}>
-                    <div className="accordion-inner" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingTop: isOpen ? '0.5rem' : '0', paddingBottom: isOpen ? '1rem' : '0' }}>
-                      {SERVICES_DATA[category]?.map(service => {
-                        const isSelected = currentServices.some(s => s.id === service.id);
-                        const price = getPrice(service);
-                        if (price === 0) return null;
-
-                        return (
-                          <div
-                            key={`mobile-srv-${service.id}`}
-                            onClick={() => toggleService(service)}
-                            style={{
-                              padding: '1.1rem', background: isSelected ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
-                              border: `2px solid ${isSelected ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-md)',
-                              cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.75rem', transition: 'all 0.2s ease'
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                              <div style={{ display: 'flex', gap: '0.75rem' }}>
-                                <div style={{ marginTop: '0.1rem' }}>
-                                  {isSelected ? <CheckCircle2 size={20} color="var(--admin-brand)" /> : <Circle size={20} color="var(--admin-text-secondary)" />}
-                                </div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                                  <div style={{ fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)' }}>{service.name}</div>
-                                  <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', lineHeight: 1.4 }}>{service.desc}</div>
-                                </div>
-                              </div>
-                              <div style={{ fontSize: '1.05rem', fontWeight: '950', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap' }}>
-                                ₱{price.toLocaleString()}
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', fontWeight: '800', color: 'var(--admin-brand)', background: 'rgba(var(--admin-brand-rgb), 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', width: 'fit-content', marginLeft: '2rem' }}>
-                              <Info size={11} /> Est. Time: {service.estTime}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Mobile Bottom Collapsible Summary Strip */}
-            <div style={{
-              background: 'var(--admin-card)',
-              border: '1px solid var(--admin-border)',
-              borderRadius: 'var(--admin-radius-md)',
-              overflow: 'hidden',
-              marginTop: '0.5rem'
-            }}>
-              <button
-                type="button"
-                onClick={() => setIsMobileSummaryOpen(!isMobileSummaryOpen)}
-                style={{
-                  width: '100%',
-                  padding: '1rem',
-                  background: 'var(--admin-bg)',
-                  border: 'none',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  cursor: 'pointer',
-                  color: 'var(--admin-text-primary)'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '900', fontSize: '0.85rem' }}>
-                  <ShoppingBag size={18} color="var(--admin-brand)" />
-                  <span>{currentServices.length} Selected ({vehicle?.type || 'Unit'})</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ fontWeight: '950', color: 'var(--admin-brand)', fontSize: '1rem' }}>
-                    ₱{calculateSubtotal().toLocaleString()}
-                  </span>
-                  {isMobileSummaryOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                </div>
-              </button>
-
-              {isMobileSummaryOpen && (
-                <div style={{ padding: '1rem', borderTop: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--admin-text-secondary)', marginBottom: '0.25rem' }}>
-                    {vehicle?.brand} {vehicle?.model} · Plate: {vehicle?.plateNumber || 'Pending'}
-                  </div>
-                  {currentServices.length === 0 ? (
-                    <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontStyle: 'italic' }}>
-                      No services selected yet.
-                    </div>
-                  ) : (
-                    currentServices.map(s => (
-                      <div key={s.runtime_uuid || s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', padding: '0.4rem 0', borderBottom: '1px dashed var(--admin-border)' }}>
-                        <span style={{ color: 'var(--admin-text-primary)', fontWeight: '700' }}>{s.name}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ fontWeight: '900', color: 'var(--admin-brand)' }}>₱{(s.price || 0).toLocaleString()}</span>
-                          <button
-                            type="button"
-                            onClick={() => toggleService(s)}
-                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.1rem' }}
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>)}
-
-      {/* Footer Subtotal & Actions */}
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: '1.5rem', justifyContent: 'space-between', alignItems: 'center',
-        borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1.5rem'
-      }}>
-        <div style={{ flex: '1 1 auto' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Current Subtotal</div>
-          <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'var(--admin-brand)' }}>₱{calculateSubtotal().toLocaleString()}</div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          {onCancel && (
-            <button
-              type="button"
-              onClick={onCancel}
-              style={{
-                background: 'transparent',
-                border: '1px solid #ef4444',
-                color: '#ef4444',
-                padding: '1rem 2rem',
-                borderRadius: 'var(--admin-radius-md)',
-                fontWeight: '950',
-                cursor: 'pointer',
-                textTransform: 'uppercase',
-                letterSpacing: '1px'
-              }}
-            >
-              Cancel Booking
-            </button>
-          )}
-
-          <button
-            onClick={onNext}
-            disabled={!canProceed}
-            title={!canProceed ? getDisabledMessage() : ''}
-            style={{
-              flex: '1 1 auto', minWidth: '200px', padding: '1rem 2rem',
-              background: canProceed ? 'var(--admin-brand)' : 'var(--admin-bg)', color: canProceed ? '#fff' : 'var(--admin-text-secondary)',
-              border: `1px solid ${canProceed ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-md)',
-              fontWeight: '950', fontSize: '1rem', cursor: canProceed ? 'pointer' : 'not-allowed', opacity: canProceed ? 1 : 0.5,
-              textTransform: 'uppercase', letterSpacing: '1px', transition: 'all 0.3s ease', textAlign: 'center'
-            }}
-          >
-            Next: Select Schedule
-          </button>
-        </div>
-      </div>
-
-    </div>
-  );
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <style>{`.booking-unit-columns{display:grid;grid-template-columns:1fr}.booking-unit-column{padding:1.25rem;border-top:1px solid var(--admin-border)}.booking-addable-card:hover:not(:disabled){transform:translateY(-4px);border-color:var(--admin-brand)!important;box-shadow:0 10px 20px rgba(var(--admin-brand-rgb),.18)}.booking-addable-card:focus-visible{outline:2px solid var(--admin-brand);outline-offset:2px}@media(min-width:900px){.booking-unit-columns{grid-template-columns:minmax(180px,.75fr) minmax(300px,1.6fr) minmax(220px,.9fr)}.booking-unit-column{border-top:0;border-left:1px solid var(--admin-border)}.booking-unit-column:first-child{border-left:0}}`}</style>
+    <section style={{ padding: '1.25rem', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius)', background: 'rgba(var(--admin-brand-rgb), .025)' }}>
+      <h2 style={{ margin: 0, color: 'var(--admin-text-primary)', fontSize: '1rem', fontWeight: '950', textTransform: 'uppercase' }}>1. Add vehicle units</h2>
+      <p style={{ margin: '.4rem 0 1rem', color: 'var(--admin-text-secondary)', fontSize: '.8rem' }}>Add a saved vehicle, add a fleet, or create a new vehicle. A fleet shares one service unit for every matching vehicle type.</p>
+      {fleetGroups.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem', marginBottom: '1rem' }}><div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}><Layers size={16} color="var(--admin-brand)" /><label style={{ color: 'var(--admin-text-secondary)', fontSize: '.72rem', fontWeight: '900', textTransform: 'uppercase' }}>Fleets</label></div><div style={{ display: 'flex', flexWrap: 'wrap', gap: '.75rem' }}>{fleetGroups.map((group) => <button key={group.id} type="button" onClick={() => { setFleetToAddId(group.id); addFleet(group.id); }} className="booking-addable-card" style={{ padding: '.75rem 1rem', display: 'flex', alignItems: 'center', gap: '.5rem', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', border: `2px solid ${bookingData.fleetGroupId === group.id ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: '6px', cursor: 'pointer', textAlign: 'left' }}><Layers size={16} color="var(--admin-brand)" /><span><strong style={{ display: 'block' }}>{group.name}</strong><small style={{ color: 'var(--admin-text-secondary)' }}>{group.vehicles?.length || 0} vehicle units</small></span></button>)}</div></div>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.75rem' }}>{garageVehicles.map((vehicle) => {
+        const selected = isGarageVehicleSelected(vehicle);
+        return <button key={vehicle.id} type="button" onClick={() => toggleGarageVehicle(vehicle)} title={selected ? `Remove ${vehicle.brand} ${vehicle.model} from this booking` : `Add ${vehicle.brand} ${vehicle.model}`} className="booking-addable-card" style={{ padding: '.75rem 1rem', display: 'flex', alignItems: 'center', gap: '.5rem', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', border: `2px solid ${selected ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: '6px', cursor: 'pointer', textAlign: 'left', opacity: selected ? .9 : 1, transition: 'transform .2s ease, border-color .2s ease, box-shadow .2s ease' }}><Car size={16} color="var(--admin-brand)" /><span><strong style={{ display: 'block' }}>{vehicle.brand} {vehicle.model}</strong><small style={{ color: 'var(--admin-text-secondary)' }}>{selected ? 'Added to booking · click to remove' : `${vehicle.plate_number} · ${vehicle.type}`}</small></span></button>;
+      })}<button type="button" onClick={addManualVehicle} className="booking-addable-card" style={{ padding: '.75rem 1rem', display: 'flex', alignItems: 'center', gap: '.5rem', background: 'transparent', color: 'var(--admin-brand)', border: '1px dashed var(--admin-brand)', borderRadius: '6px', fontWeight: '900', cursor: 'pointer', transition: 'transform .2s ease, border-color .2s ease, box-shadow .2s ease' }}><Plus size={16} /> ADD NEW VEHICLE</button></div>
+    </section>
+    {showServiceConfiguration && <section style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div><h2 style={{ margin: 0, color: 'var(--admin-text-primary)', fontSize: '1rem', fontWeight: '950', textTransform: 'uppercase' }}>2. Configure services by unit</h2><p style={{ margin: '.4rem 0 0', color: 'var(--admin-text-secondary)', fontSize: '.8rem' }}>A fleet unit applies its selected services to all of its same-type vehicles.</p></div>
+      {units.map((unit, index) => {
+        const vehicle = unit.vehicles[0]; const complete = Boolean(vehicle.type && vehicle.brand?.trim() && vehicle.model?.trim() && vehicle.plateNumber?.trim().length >= 4);
+        const category = categoryFor(unit); const categories = categoriesFor(vehicle); const services = SERVICE_CATALOG[category] || [];
+        const selectedServices = vehicle.services || []; const total = unit.vehicles.reduce((sum, member) => sum + unitSubtotal(member), 0);
+        return <article key={unit.id} style={{ overflow: 'hidden', background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius)', boxShadow: 'var(--admin-card-shadow)' }}>
+          <header style={{ padding: '1rem 1.25rem', display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', background: 'var(--admin-sidebar)', borderBottom: '1px solid var(--admin-border)' }}><div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', minWidth: 0 }}><span style={{ background: 'var(--admin-brand)', color: '#fff', padding: '.2rem .45rem', borderRadius: '4px', fontSize: '.68rem', fontWeight: '900' }}>UNIT {index + 1}</span><Car size={17} color="var(--admin-brand)" /><strong style={{ color: 'var(--admin-text-primary)' }}>{unit.locked ? `${unit.vehicles.length} saved ${vehicle.type || 'vehicle'}${unit.vehicles.length === 1 ? '' : 's'}` : (vehicle.brand && vehicle.model ? `${vehicle.brand} ${vehicle.model}` : 'New vehicle details required')}</strong></div><button type="button" onClick={() => removeUnit(unit)} aria-label={`Remove unit ${index + 1}`} style={{ background: 'transparent', color: '#ef4444', border: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '.35rem', fontWeight: '800', fontSize: '.72rem' }}><Trash2 size={15} /> REMOVE</button></header>
+          {unit.locked ? <div style={{ padding: '1rem 1.25rem', background: 'var(--admin-bg)', borderBottom: '1px solid var(--admin-border)' }}><div style={{ display: 'flex', alignItems: 'center', gap: '.45rem', color: 'var(--admin-text-secondary)', fontSize: '.7rem', fontWeight: '900', textTransform: 'uppercase', marginBottom: '.6rem' }}><Lock size={14} /> Saved vehicle details are locked</div>{unit.vehicles.map((member) => <div key={member.id} style={{ color: 'var(--admin-text-primary)', fontSize: '.8rem', lineHeight: 1.7 }}>{member.brand} {member.model} · {member.plateNumber} · {member.type}</div>)}</div> : <div style={{ padding: '1.25rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '.75rem', borderBottom: '1px solid var(--admin-border)' }}><select aria-label="Vehicle type" value={vehicle.type} onChange={(event) => updateUnit(unit, { type: event.target.value, services: [] })} style={inputStyle}><option value="">Vehicle type</option>{VEHICLE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><input aria-label="Vehicle brand" value={vehicle.brand} onChange={(event) => updateUnit(unit, { brand: sanitizeVehicleText(event.target.value) })} placeholder="Brand" style={inputStyle} /><input aria-label="Vehicle model" value={vehicle.model} onChange={(event) => updateUnit(unit, { model: sanitizeVehicleText(event.target.value) })} placeholder="Model" style={inputStyle} /><input aria-label="Vehicle plate number" value={vehicle.plateNumber} onChange={(event) => updateUnit(unit, { plateNumber: sanitizeVehiclePlate(event.target.value) })} placeholder="Plate number" style={inputStyle} /></div>}
+          <div className="booking-unit-columns" style={{ opacity: complete ? 1 : .45, pointerEvents: complete ? 'auto' : 'none' }}>
+            <div className="booking-unit-column"><p style={{ margin: '0 0 .75rem', fontSize: '.68rem', color: 'var(--admin-text-secondary)', fontWeight: '900', textTransform: 'uppercase' }}>A. Service type</p>{categories.map((item) => <button key={item} type="button" onClick={() => setActiveCategories((current) => ({ ...current, [unit.id]: item }))} style={{ width: '100%', marginBottom: '.5rem', padding: '.75rem', textAlign: 'left', borderRadius: '6px', border: `1px solid ${category === item ? 'var(--admin-brand)' : 'var(--admin-border)'}`, background: category === item ? 'var(--admin-brand)' : 'var(--admin-bg)', color: category === item ? '#fff' : 'var(--admin-text-primary)', cursor: 'pointer', fontWeight: '800', fontSize: '.78rem' }}>{item}</button>)}</div>
+            <div className="booking-unit-column"><p style={{ margin: '0 0 .75rem', fontSize: '.68rem', color: 'var(--admin-text-secondary)', fontWeight: '900', textTransform: 'uppercase' }}>B. Select services</p>{services.map((service) => { const price = Number(service.prices[vehicle.type] || 0); const selected = unit.vehicles.every((member) => member.services?.some((item) => item.id === service.id)); return price ? <button key={service.id} type="button" onClick={() => toggleService(unit, service)} style={{ width: '100%', marginBottom: '.6rem', padding: '.85rem', display: 'flex', gap: '.75rem', textAlign: 'left', background: selected ? 'rgba(var(--admin-brand-rgb), .08)' : 'var(--admin-bg)', color: 'var(--admin-text-primary)', border: `1px solid ${selected ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: '6px', cursor: 'pointer' }}><span>{selected ? <CheckCircle2 size={19} color="var(--admin-brand)" /> : <Circle size={19} color="var(--admin-text-secondary)" />}</span><span style={{ flex: 1 }}><strong style={{ display: 'block', fontSize: '.85rem' }}>{service.name}</strong><small style={{ display: 'block', marginTop: '.2rem', color: 'var(--admin-text-secondary)', lineHeight: 1.4 }}>{service.desc}</small></span><strong style={{ color: 'var(--admin-brand)', whiteSpace: 'nowrap' }}>₱{price.toLocaleString()}</strong></button> : null; })}</div>
+            <aside className="booking-unit-column" style={{ background: 'rgba(var(--admin-brand-rgb), .025)', display: 'flex', flexDirection: 'column' }}><p style={{ margin: '0 0 .75rem', fontSize: '.68rem', color: 'var(--admin-text-secondary)', fontWeight: '900', textTransform: 'uppercase' }}>C. Unit summary</p><strong style={{ color: 'var(--admin-text-primary)', fontSize: '.85rem' }}>{unit.locked ? `${unit.vehicles.length} ${vehicle.type} vehicle${unit.vehicles.length === 1 ? '' : 's'}` : `${vehicle.brand} ${vehicle.model}`}</strong><small style={{ color: 'var(--admin-text-secondary)', marginBottom: '1rem' }}>{unit.locked ? 'The selected services apply to every listed vehicle.' : `${vehicle.plateNumber} · ${vehicle.type}`}</small><div style={{ display: 'flex', flexDirection: 'column', gap: '.55rem', flex: 1 }}>{selectedServices.length ? selectedServices.map((service) => <div key={service.id} style={{ display: 'flex', gap: '.5rem', justifyContent: 'space-between', color: 'var(--admin-text-primary)', fontSize: '.78rem' }}><span>{service.name}{unit.vehicles.length > 1 ? ` × ${unit.vehicles.length}` : ''}</span><button type="button" onClick={() => toggleService(unit, service)} aria-label={`Remove ${service.name}`} style={{ color: '#ef4444', background: 'none', border: 0, cursor: 'pointer' }}><X size={15} /></button></div>) : <small style={{ color: 'var(--admin-text-secondary)' }}>No services selected yet.</small>}</div><div style={{ marginTop: '1rem', paddingTop: '.85rem', borderTop: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><span style={{ fontSize: '.7rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Unit subtotal</span><strong style={{ color: 'var(--admin-brand)', fontSize: '1.2rem' }}>₱{total.toLocaleString()}</strong></div></aside>
+          </div>{!complete && <p style={{ margin: 0, padding: '.75rem 1.25rem', color: 'var(--admin-text-secondary)', fontSize: '.75rem', background: 'var(--admin-bg)' }}>Complete this vehicle's details to unlock its services.</p>}
+        </article>;
+      })}
+    </section>}
+    <footer style={{ padding: '1.25rem', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', background: 'var(--admin-sidebar)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius)' }}><div><span style={{ color: 'var(--admin-text-secondary)', fontWeight: '800', fontSize: '.72rem', textTransform: 'uppercase' }}>Booking estimate · {vehicles.length} vehicle{vehicles.length === 1 ? '' : 's'} in {units.length} unit{units.length === 1 ? '' : 's'}</span><strong style={{ display: 'block', color: 'var(--admin-brand)', fontSize: '1.6rem' }}>₱{grandTotal.toLocaleString()}</strong></div><div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap' }}>{onCancel && <button type="button" onClick={onCancel} style={{ padding: '.9rem 1.25rem', background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', borderRadius: '6px', fontWeight: '900', cursor: 'pointer' }}>CANCEL BOOKING</button>}<button type="button" disabled={!validUnits} title={!validUnits ? 'Complete every vehicle unit and select at least one service for each.' : ''} onClick={onNext} style={{ padding: '.9rem 1.25rem', background: validUnits ? 'var(--admin-brand)' : 'var(--admin-bg)', color: validUnits ? '#fff' : 'var(--admin-text-secondary)', border: `1px solid ${validUnits ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: '6px', fontWeight: '900', cursor: validUnits ? 'pointer' : 'not-allowed', opacity: validUnits ? 1 : .5 }}>PROCEED TO SCHEDULE</button></div></footer>
+  </div>;
 };
 
 export default Step2Services;

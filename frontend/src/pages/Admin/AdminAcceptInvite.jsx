@@ -29,7 +29,7 @@ const AdminAcceptInvite = () => {
 
     const validateToken = async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/invite/validate?token=${token}`);
+        const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'}/invite/validate?token=${token}`);
         const data = await response.json();
         if (data.success) {
           setInviteData(data);
@@ -57,7 +57,7 @@ const AdminAcceptInvite = () => {
 
     setSubmitting(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/invite/accept`, {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000'}/invite/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

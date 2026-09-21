@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Search, ChevronRight, Car, RotateCw } from 'lucide-react';
+import { Calendar, Search, ChevronRight, Car, RotateCw, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useBookings } from '../../hooks/useBookings';
@@ -15,7 +15,7 @@ const CustomerMyBookings = () => {
     const matchesFilter =
       filter === 'ALL' ||
       (filter === 'UPCOMING' && ['scheduled', 'confirmed', 'ongoing', 'in_progress'].includes(b.status?.toLowerCase())) ||
-      (filter === 'PAST' && ['completed', 'cancelled', 'flagged_noshow'].includes(b.status?.toLowerCase()));
+      (filter === 'PAST' && ['completed', 'released', 'cancelled', 'flagged_noshow'].includes(b.status?.toLowerCase()));
 
     const searchStr = `${b.id} ${b.vehicles?.map(v => `${v.brand} ${v.model} ${v.plate_number}`).join(' ') || ''}`.toLowerCase();
     const matchesSearch = searchStr.includes(searchTerm.toLowerCase());
@@ -46,7 +46,11 @@ const CustomerMyBookings = () => {
 
   const confirmRebook = () => {
     if (selectedRebook) {
-      sessionStorage.setItem('speedway_rebook_data', JSON.stringify(selectedRebook));
+      const canReschedule = ['scheduled', 'confirmed'].includes(selectedRebook.status?.toLowerCase());
+      sessionStorage.setItem('speedway_rebook_data', JSON.stringify({
+        ...selectedRebook,
+        reschedule: canReschedule
+      }));
       setShowRebookModal(false);
       navigate('/customer/book');
     }
@@ -57,21 +61,26 @@ const CustomerMyBookings = () => {
       
       {/* Rebook Confirmation Modal */}
       {showRebookModal && (
-        <div className="hero-toast-overlay" onClick={() => setShowRebookModal(false)}>
-          <div className="hero-toast-content" onClick={(e) => e.stopPropagation()}>
+        <div className="hero-toast-overlay">
+          <div className="hero-toast-content" style={{ position: 'relative' }}>
+            <button onClick={() => setShowRebookModal(false)} aria-label="Close confirmation" style={{ position: 'absolute', top: '1rem', right: '1rem', background: 'transparent', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer' }}>
+              <X size={20} />
+            </button>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
               <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <RotateCw size={32} color="var(--admin-brand)" />
               </div>
             </div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '950', color: 'white', margin: '0 0 0.5rem 0', textTransform: 'uppercase' }}>Fast-Track Rebook?</h2>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)', margin: '0 0 0.5rem 0', textTransform: 'uppercase' }}>{['scheduled', 'confirmed'].includes(selectedRebook?.status?.toLowerCase()) ? 'Reschedule Booking?' : 'Fast-Track Rebook?'}</h2>
             <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem', margin: '0 0 2rem 0', fontWeight: '600' }}>
-              Copying services and vehicle details. You will jump directly to the <strong>Schedule Selection</strong> step.
+              {['scheduled', 'confirmed'].includes(selectedRebook?.status?.toLowerCase())
+                ? 'Your existing booking will return to Scheduled, release its staff allocation, and keep its payment history.'
+                : <>Copying services and vehicle details. You will jump directly to the <strong>Schedule Selection</strong> step.</>}
             </p>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <button 
                 onClick={() => setShowRebookModal(false)}
-                style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'white', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', textTransform: 'uppercase' }}
+                style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: '8px', fontWeight: '900', cursor: 'pointer', textTransform: 'uppercase' }}
               >
                 Cancel
               </button>
@@ -91,7 +100,7 @@ const CustomerMyBookings = () => {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'white', letterSpacing: '-1.5px' }}>My Bookings</h1>
+          <h1 style={{ fontSize: 'clamp(1.8rem, 5vw, 2.5rem)', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'var(--admin-text-primary)', letterSpacing: '-1.5px' }}>My Bookings</h1>
           <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.95rem', fontWeight: '600', opacity: 0.8 }}>
             Track and manage all your past and upcoming service appointments.
           </p>
@@ -226,7 +235,7 @@ const CustomerMyBookings = () => {
                   </div>
                   
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {(b.status === 'completed' || b.status === 'cancelled') && (
+                    {['scheduled', 'confirmed', 'completed', 'cancelled'].includes(b.status?.toLowerCase()) && (
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
@@ -237,7 +246,7 @@ const CustomerMyBookings = () => {
                           border: '1px solid var(--admin-brand)', display: 'flex', alignItems: 'center', 
                           justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' 
                         }}
-                        title="Book Again"
+                        title={['scheduled', 'confirmed'].includes(b.status?.toLowerCase()) ? 'Reschedule Booking' : 'Book Again'}
                       >
                         <RotateCw size={18} color="var(--admin-brand)" />
                       </button>

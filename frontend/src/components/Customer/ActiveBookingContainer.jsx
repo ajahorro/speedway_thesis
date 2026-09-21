@@ -162,6 +162,29 @@ const ActiveBookingContainer = ({ booking, loading }) => {
           </div>
         </div>
 
+        {/* Vehicle-specific services for mixed fleets */}
+        <div>
+          <div style={sectionHeaderStyle}>Services by Vehicle</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '0.75rem' }}>
+            {vehicles.map(vehicle => (
+              <div key={vehicle.id} style={{ padding: '1rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-md)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: 'var(--admin-text-primary)', fontSize: '0.9rem', fontWeight: '900', overflowWrap: 'anywhere' }}>{vehicle.brand} {vehicle.model}</div>
+                    <div style={{ color: 'var(--admin-text-secondary)', fontSize: '0.7rem', fontWeight: '800', marginTop: '0.2rem' }}>{vehicle.vehicle_type || vehicle.type} · {vehicle.plate_number || vehicle.plateNumber}</div>
+                  </div>
+                  <Car size={16} color="var(--admin-brand)" />
+                </div>
+                {(vehicle.services || []).length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    {vehicle.services.map(service => <div key={service.id || service.runtime_uuid || service.service_name} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', color: 'var(--admin-text-primary)', fontSize: '0.78rem', fontWeight: '700' }}><span>{service.service_name || service.name}</span><span style={{ color: 'var(--admin-brand)', whiteSpace: 'nowrap' }}>PHP {Number(service.price || 0).toLocaleString()}</span></div>)}
+                  </div>
+                ) : <div style={{ color: 'var(--admin-text-secondary)', fontSize: '0.75rem', fontWeight: '600' }}>No services selected.</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Quick Actions */}
         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
           <button

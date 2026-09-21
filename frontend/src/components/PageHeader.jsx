@@ -3,14 +3,14 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 
 const PageHeader = ({ badge, title, subtitle, onRefresh, showBack, onBack, actionLabel, onAction, actionIcon, children, titleStyle = {} }) => (
   <div
-    className="stack-on-mobile"
+    className="page-header stack-on-mobile"
     style={{
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'flex-start', // Changed from flex-end so text aligns top when stacked
       gap: '1rem', // Ensures spacing when the layout wraps on mobile
       flexWrap: 'wrap', // The magic property that allows it to stack on small screens
-      marginBottom: '1rem'
+      marginBottom: 0
     }}
   >
     {/* Left Side: Titles and Back Button */}

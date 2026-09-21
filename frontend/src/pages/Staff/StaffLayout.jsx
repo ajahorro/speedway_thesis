@@ -121,7 +121,11 @@ const StaffLayout = () => {
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#0A0B0D', color: 'white', fontFamily: 'Inter, system-ui, sans-serif' }}>
+<<<<<<< HEAD
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0A0B0D', color: 'white', fontFamily: 'Inter, system-ui, sans-serif' }}>
+=======
+    <div style={{ display: 'flex', width: '100vw', height: '100vh', background: '#0A0B0D', color: 'white', fontFamily: 'Inter, system-ui, sans-serif', overflow: 'hidden' }}>
+>>>>>>> e23099d5 (Logic inconsistencies still exists)
 
       {/* Mobile Backdrop */}
       {isMobile && isSidebarOpen && (
@@ -140,6 +144,7 @@ const StaffLayout = () => {
         flexDirection: 'column',
         position: isMobile ? 'fixed' : 'relative',
         height: '100vh',
+        flexShrink: 0,
         zIndex: 50,
         transform: isMobile && !isSidebarOpen ? 'translateX(-100%)' : 'translateX(0)',
         transition: 'transform 0.3s ease'
@@ -153,7 +158,7 @@ const StaffLayout = () => {
           </p>
         </div>
 
-        <nav style={{ flex: 1, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <nav style={{ flex: 1, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', overflowY: 'auto', overscrollBehavior: 'contain' }}>
           {menuItems.map((item) => (
             <Link key={item.path} to={item.path} className="admin-card-hover" style={navItemStyle(item.path)} onClick={() => isMobile && setIsSidebarOpen(false)}>
               <item.icon size={18} />
@@ -193,6 +198,7 @@ const StaffLayout = () => {
 
           <Link
             to="/staff/settings"
+            className="admin-card-hover"
             onClick={() => isMobile && setIsSidebarOpen(false)}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.75rem',
@@ -223,7 +229,7 @@ const StaffLayout = () => {
       </aside>
 
       {/* Main Content */}
-      <main style={{ flex: 1, height: '100vh', overflowY: 'auto', position: 'relative', background: '#0A0B0D' }}>
+      <main style={{ flex: 1, minWidth: 0, height: '100vh', overflowY: 'auto', position: 'relative', background: '#0A0B0D' }}>
         {/* Top Header */}
         <header style={{
           height: '70px', background: 'rgba(21, 23, 26, 0.8)', backdropFilter: 'blur(10px)',
@@ -276,7 +282,7 @@ const StaffLayout = () => {
           </div>
         </header>
 
-        <div style={{ padding: isMobile ? '1.5rem' : '2.5rem', maxWidth: '1400px', margin: '0 auto' }}>
+        <div style={{ padding: isMobile ? '1.5rem' : '2.5rem', maxWidth: '1400px', margin: '0 auto', minHeight: 0, overflow: 'hidden' }}>
           <Outlet />
         </div>
       </main>

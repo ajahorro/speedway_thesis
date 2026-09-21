@@ -87,7 +87,7 @@ const CustomCalendar = ({ selectedDate, onDateSelect }) => {
   }
 
   return (
-    <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-md)', padding: '1.5rem' }}>
+    <div style={{ background: 'transparent', padding: '0.25rem 0' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <button 

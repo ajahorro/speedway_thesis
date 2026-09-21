@@ -2,12 +2,12 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const multer = require('multer');
 require('dotenv').config();
 
+const { normalizeStatus, shouldRestoreGraceWindow } = require('./noShowRestoreLogic');
 const { Resend } = require('resend');
-const { sendBookingConfirmationEmail, sendPasswordResetEmail, sendStatusUpdateEmail, buildInviteFooter } = require('./services/emailService');
+const { buildEmailShell, sendBookingConfirmationEmail, sendPasswordResetEmail, sendAccountInviteEmail } = require('./services/emailService');
 const { processReceiptOCR } = require('./services/ocrService');
 const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const RESEND_FROM = process.env.RESEND_FROM || 'Speedway AutoxMoto <bookings@yourdomain.com>';
@@ -15,51 +15,6 @@ const RESEND_FROM = process.env.RESEND_FROM || 'Speedway AutoxMoto <bookings@you
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-
-// Initialize Gemini AI (Defaulting to production v1 for stability)
-const geminiKey = process.env.GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(geminiKey);
-// Configuration: Using gemini-1.5-flash with safety overrides for financial auditing
-const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash",
-  safetySettings: [
-    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-  ]
-});
-
-async function getAvailableOCRModel() {
-  const preferredModels = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-  try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(geminiKey)}`);
-    if (!response.ok) throw new Error(`Model listing returned ${response.status}`);
-    const payload = await response.json();
-    const models = payload.models || [];
-    for (const preferred of preferredModels) {
-      const found = models.find(candidate => candidate.name?.includes(preferred) && (candidate.supportedGenerationMethods || []).includes('generateContent'));
-      if (found) return found.name.replace(/^models\//, '');
-    }
-  } catch (error) {
-    console.warn('Model discovery failed, defaulting to gemini-1.5-flash:', error.message);
-  }
-  return 'gemini-1.5-flash';
-}
-
-// 🤖 Model Discovery (Diagnostics)
-(async () => {
-  try {
-    const resendKey = process.env.RESEND_API_KEY || '';
-    console.log(`📧 [Email] API KEY MASK: ${resendKey.substring(0, 10)}...`);
-    console.log(`🤖 [AI] API KEY MASK: ${geminiKey.substring(0, 8)}...`);
-    // Note: listModels might not be available in all SDK versions, 
-    // but we'll try to help debug the 404 issue.
-    console.log(`🤖 [AI] ATTEMPTING TO USE: models/gemini-1.5-flash`);
-  } catch (e) {
-    console.warn('Could not list models, continuing with default.');
-  }
-})();
 
 // Configure Multer for memory storage
 const upload = multer({ storage: multer.memoryStorage() });
@@ -136,15 +91,17 @@ const generateTemplate = (type, data) => {
   switch (type) {
     case 'VERIFICATION_CODE':
       subject = 'Verify Your Speedway Account';
-      html = `
-        <div style="font-family: sans-serif; padding: 20px; color: #333;">
-          <h2 style="color: #A91B18;">SPEEDWAY AUTOXMOTO</h2>
-          <p>Your verification code is:</p>
-          <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; padding: 10px; background: #f4f4f4; border-radius: 5px; display: inline-block;">
-            ${data.otp}
-          </div>
-          <p>This code will expire in 10 minutes.</p>
-        </div>`;
+      html = buildEmailShell({
+        title: 'Verify Your Account',
+        eyebrow: 'SECURITY CHECK',
+        bodyHtml: `
+          <p style="margin: 0 0 16px; font-size: 15px; color: #1f2937;">Your verification code is:</p>
+          <div style="font-size: 32px; font-weight: 900; letter-spacing: 5px; padding: 16px 18px; background: #f5f5f4; border-radius: 12px; color: #111827; display: inline-block; margin-bottom: 16px;">${data.otp}</div>
+          <p style="margin: 0; font-size: 15px; color: #374151; line-height: 1.7;">This code expires in 10 minutes. Use it to complete your sign-in or account creation flow.</p>
+        `,
+        ctaLink: null,
+        footerNote: 'Speedway Detail Studio | 39 Hunters ROTC, Barangay San Juan, Cainta, 1900 Rizal'
+      });
       break;
     default:
       subject = 'Speedway AutoxMoto Update';
@@ -153,20 +110,164 @@ const generateTemplate = (type, data) => {
   return { subject, html };
 };
 
-app.get('/api/auth/check-email', async (req, res) => {
-  const { email } = req.query;
-  if (!email || !supabaseAdmin) return res.json({ exists: false });
-  try {
-    const { data } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('email', email.trim())
-      .maybeSingle();
-    return res.json({ exists: !!data });
-  } catch (err) {
-    return res.json({ exists: false });
-  }
-});
+const formatCurrency = (value) => new Intl.NumberFormat('en-PH', {
+  style: 'currency',
+  currency: 'PHP',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+}).format(Number(value || 0));
+
+const escapePdfText = (value = '') => String(value).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+
+const buildReceiptPdfBuffer = ({ receiptNumber, customerName, bookingReference, issuedAt, paymentMethod, processedBy, customerContact, customerAddress, customerTaxId, items = [], subtotal = 0, discountAmount = 0, vatRate = 0.12 }) => {
+  const safeSubtotal = Number(subtotal || 0);
+  const safeDiscount = Number(discountAmount || 0);
+  const vatableSales = Math.max(0, safeSubtotal - safeDiscount);
+  const vatAmount = Math.max(0, vatableSales * vatRate);
+  const totalDue = safeSubtotal - safeDiscount + vatAmount;
+  const dateString = issuedAt ? new Date(issuedAt).toLocaleString() : new Date().toLocaleString();
+
+  const lines = [
+    'SPEEDWAY',
+    'AutoxMoto Detail Studio',
+    '',
+    `Receipt No.: ${receiptNumber || 'AUTO'}`,
+    `Issued: ${dateString}`,
+    `Booking Reference: ${bookingReference || 'N/A'}`,
+    `Payment Method: ${paymentMethod || 'Digital / Online Payment'}`,
+    `Customer: ${customerName || 'Customer'}`,
+    `Contact: ${customerContact || 'N/A'}`,
+    `Address: ${customerAddress || '-'}`,
+    `Processed By: ${processedBy || 'System Admin'}`,
+    `Customer Tax ID: ${customerTaxId || '-'}`,
+    '',
+    'Vehicle / Service                          Qty   Unit Price   Line Total',
+    ...items.map((item) => {
+      const label = (item.vehicle || 'Vehicle Unit').substring(0, 26);
+      const service = (item.service || 'Service').substring(0, 20);
+      const qty = item.qty ?? 1;
+      const unitPrice = Number(item.unitPrice ?? item.lineTotal ?? 0);
+      const lineTotal = Number(item.lineTotal ?? item.unitPrice ?? 0);
+      return `${label} ${service} ${qty} ${formatCurrency(unitPrice)} ${formatCurrency(lineTotal)}`;
+    }),
+    '',
+    `Subtotal: ${formatCurrency(safeSubtotal)}`,
+    `Discount / Promo: -${formatCurrency(safeDiscount)}`,
+    `Vatable Sales: ${formatCurrency(vatableSales)}`,
+    `VAT (12%): ${formatCurrency(vatAmount)}`,
+    `Total Amount Due: ${formatCurrency(totalDue)}`,
+    '',
+    'This receipt is valid for tax and audit purposes.'
+  ];
+
+  const content = lines.map((line, index) => `BT\n/F1 11 Tf\n72 ${760 - index * 18} Td\n(${escapePdfText(line)}) Tj\nET`).join('\n');
+
+  let pdf = '%PDF-1.4\n';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(content, 'utf8')} >>\nstream\n${content}\nendstream`
+  ];
+
+  const offsets = [0];
+  objects.forEach((obj, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${obj}\nendobj\n`;
+  });
+
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+
+  return Buffer.from(pdf, 'binary');
+};
+
+const buildReceiptEmailHtml = ({ customerName, bookingReference, receiptNumber, paidAmount, paymentMethod, issuedAt, items, subtotal, discountAmount, vatAmount, totalDue }) => {
+  const itemRows = (items || []).map((item) => `
+    <tr>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top;">
+        <div style="font-size: 13px; font-weight: 700; color: #111827;">${item.vehicle || 'Vehicle / Service'}</div>
+        <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">${item.service || 'Service'}</div>
+      </td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 12px; color: #111827; font-feature-settings: 'tnum' 1; font-variant-numeric: tabular-nums;">${item.qty ?? 1}</td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; font-size: 12px; color: #111827; font-feature-settings: 'tnum' 1; font-variant-numeric: tabular-nums;">${formatCurrency(item.unitPrice ?? item.lineTotal ?? 0)}</td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: right; font-size: 12px; color: #111827; font-weight: 700; font-feature-settings: 'tnum' 1; font-variant-numeric: tabular-nums;">${formatCurrency(item.lineTotal ?? item.unitPrice ?? 0)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div style="font-family: Inter, system-ui, sans-serif; max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; color: #111827;">
+      <div style="background: #111827; color: #f9fafb; padding: 16px 20px; border-bottom: 1px solid #262626;">
+        <div style="font-size: 18px; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase; text-align: center;">SPEEDWAY</div>
+        <div style="font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; text-align: center; color: #d1d5db; margin-top: 6px;">AutoxMoto Detail Studio</div>
+      </div>
+      <div style="padding: 24px 24px 12px;">
+        <div style="display: flex; justify-content: space-between; gap: 16px; margin-bottom: 16px;">
+          <div>
+            <div style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.12em;">Receipt No.</div>
+            <div style="font-size: 14px; font-weight: 700; color: #111827; margin-top: 4px;">${receiptNumber || 'AUTO'}</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.12em;">Issued</div>
+            <div style="font-size: 14px; font-weight: 700; color: #111827; margin-top: 4px;">${issuedAt ? new Date(issuedAt).toLocaleString() : new Date().toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 18px;">
+          <div>
+            <div style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">Business Details</div>
+            <div style="font-size: 14px; font-weight: 700; color: #111827;">AutoxMoto Detail Studio</div>
+            <div style="font-size: 12px; color: #4b5563; margin-top: 4px;">123 Auto Avenue, Mandaluyong City</div>
+            <div style="font-size: 12px; color: #4b5563;">+63 917 123 4567 | hello@speedwaystudio.ph</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">Booking Reference</div>
+            <div style="font-size: 14px; font-weight: 700; color: #111827;">${bookingReference || 'N/A'}</div>
+            <div style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.12em; margin-top: 10px; margin-bottom: 6px;">Payment Method</div>
+            <div style="font-size: 14px; font-weight: 700; color: #111827;">${paymentMethod}</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 18px;">
+          <div style="font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">Customer</div>
+          <div style="font-size: 14px; font-weight: 700; color: #111827;">${customerName}</div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
+          <thead>
+            <tr>
+              <th style="padding: 10px 12px; background: #f9fafb; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 11px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.12em;">Vehicle / Service</th>
+              <th style="padding: 10px 12px; background: #f9fafb; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; text-align: center; font-size: 11px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.12em;">Qty</th>
+              <th style="padding: 10px 12px; background: #f9fafb; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; text-align: right; font-size: 11px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.12em;">Unit Price</th>
+              <th style="padding: 10px 12px; background: #f9fafb; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; text-align: right; font-size: 11px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: 0.12em;">Line Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemRows}
+          </tbody>
+        </table>
+
+        <div style="max-width: 260px; margin-left: auto; border-top: 2px solid #111827; padding-top: 12px;">
+          <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: #4b5563;"><span>Subtotal</span><span>${formatCurrency(subtotal)}</span></div>
+          <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: #4b5563;"><span>Discount / Promo</span><span>- ${formatCurrency(discountAmount)}</span></div>
+          <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: #4b5563;"><span>Vatable Sales</span><span>${formatCurrency(subtotal - discountAmount)}</span></div>
+          <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: #4b5563;"><span>VAT (12%)</span><span>${formatCurrency(vatAmount)}</span></div>
+          <div style="display: flex; justify-content: space-between; padding-top: 8px; font-size: 18px; font-weight: 800; color: #111827;"><span>Total Amount Due</span><span>${formatCurrency(totalDue)}</span></div>
+        </div>
+      </div>
+      <div style="padding: 0 24px 24px; font-size: 12px; color: #4b5563; line-height: 1.6;">
+        <p style="margin: 0;">Hi ${customerName},</p>
+        <p style="margin: 10px 0 0;">Thank you for your payment. Your transaction has been processed successfully and the receipt is attached below for your records.</p>
+      </div>
+    </div>
+  `;
+};
 
 app.post('/api/emails/booking-confirmation', async (req, res) => {
   const { bookingId } = req.body;
@@ -182,47 +283,22 @@ app.post('/api/emails/booking-confirmation', async (req, res) => {
 
     if (bError || !booking) throw new Error('Booking not found');
 
-    let customerEmail = booking.guest_email || null;
-    let customerName = (booking.guest_first_name || booking.guest_last_name)
-      ? `${booking.guest_first_name || ''} ${booking.guest_last_name || ''}`.trim()
-      : (booking.customer_name || 'Customer');
-
-    // Fetch customer separately if not a walk-in guest or if guest_email not present
-    if (!customerEmail && booking.customer_id) {
-      const { data: customer, error: cError } = await supabaseAdmin
+    // Fetch customer separately for reliability. Walk-in bookings may not have a profile row.
+    let customer = null;
+    if (booking.customer_id) {
+      const { data, error: cError } = await supabaseAdmin
         .from('profiles')
         .select('full_name, email')
         .eq('id', booking.customer_id)
-        .single();
-      if (customer) {
-        customerEmail = customer.email;
-        customerName = customer.full_name;
-      }
-    }
-
-    if (!customerEmail) throw new Error('Recipient email could not be resolved');
-
-    // Check if account already exists for this email
-    let inviteFooterHtml = '';
-    let accountExists = false;
-    if (supabaseAdmin) {
-      const { data: existingProfile } = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('email', customerEmail)
         .maybeSingle();
-      accountExists = !!existingProfile;
+
+      customer = data;
+      if (cError) throw new Error(cError.message || 'Customer profile lookup failed');
     }
 
-    // Only append "Create Account" invite footer if the account does NOT exist yet
-    if (!accountExists) {
-      inviteFooterHtml = buildInviteFooter({
-        email: customerEmail,
-        firstName: booking.guest_first_name || '',
-        lastName: booking.guest_last_name || '',
-        phone: booking.guest_phone || booking.contact_number || ''
-      });
-    }
+    const customerEmail = customer?.email || booking.customer_email;
+    const customerName = customer?.full_name || booking.customer_name || 'Customer';
+    if (!customerEmail) throw new Error('Customer email not found for confirmation email');
 
     const vehicles = booking.booking_vehicles || [];
     const confirmationResult = await sendBookingConfirmationEmail({
@@ -231,86 +307,65 @@ app.post('/api/emails/booking-confirmation', async (req, res) => {
       bookingId: bookingId.substring(0, 8).toUpperCase(),
       serviceName: vehicles.flatMap(vehicle => vehicle.booking_vehicle_services || []).map(service => service.service_name).join(', ') || 'Detailing service',
       scheduledAt: booking.start_datetime,
-      totalAmount: booking.total_amount,
-      inviteFooterHtml
+      totalAmount: booking.total_amount
+    });
+    if (!confirmationResult.success) throw new Error(confirmationResult.error?.message || confirmationResult.error || 'Booking confirmation email failed');
+    // The legacy template below remains as a compatibility fallback only.
+
+    const dateStr = new Date(booking.start_datetime).toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
 
-    if (!confirmationResult.success) {
-      throw new Error(confirmationResult.error?.message || confirmationResult.error || 'Booking confirmation email failed');
+    const vehicleHtml = vehicles.map(v => `
+      <div style="margin-bottom: 15px; padding: 10px; border-left: 4px solid #A91B18; background: #f9f9f9;">
+        <strong style="text-transform: uppercase;">${v.year} ${v.brand} ${v.model}</strong> [${v.plate_number}]
+        <ul style="margin: 5px 0; padding-left: 20px; font-size: 13px;">
+          ${(v.booking_vehicle_services || []).map(s => `<li>${s.service_name} - ₱${s.price}</li>`).join('')}
+        </ul>
+      </div>
+    `).join('');
+
+    if (resendClient && !confirmationResult.success) {
+      await resendClient.emails.send({
+        from: RESEND_FROM,
+        to: customer.email,
+        subject: `BOOKING CONFIRMED: ${bookingId.substring(0, 8).toUpperCase()}`,
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
+            <h2 style="color: #A91B18; margin-top: 0;">SPEEDWAY DETAIL STUDIO</h2>
+            <h3 style="text-transform: uppercase; border-bottom: 2px solid #eee; padding-bottom: 10px;">Booking Confirmation</h3>
+            
+            <p>Hi <strong>${customer.full_name}</strong>,</p>
+            <p>Your booking has been successfully <strong>APPROVED</strong> and scheduled. We are excited to see you!</p>
+            
+            <div style="background: #111; color: #fff; padding: 15px; border-radius: 4px; margin: 20px 0;">
+              <div style="font-size: 12px; opacity: 0.7; text-transform: uppercase;">Scheduled For</div>
+              <div style="font-size: 18px; font-weight: bold;">${dateStr}</div>
+            </div>
+
+            <h4 style="text-transform: uppercase; color: #666; font-size: 12px; margin-bottom: 10px;">Vehicle & Service Details</h4>
+            ${vehicleHtml}
+
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #eee;">
+              <div style="display: flex; justify-content: space-between;">
+                <span>Total Amount:</span>
+                <strong style="font-size: 18px; color: #A91B18;">₱${booking.total_amount}</strong>
+              </div>
+              <div style="font-size: 12px; color: #666; margin-top: 5px;">Payment Status: ${booking.payment_status}</div>
+            </div>
+
+            <p style="margin-top: 30px; font-size: 12px; color: #888;">
+              Please arrive 15 minutes before your scheduled slot. If you need to reschedule, contact us at +1 (555) SPEEDWAY.
+            </p>
+          </div>
+        `
+      });
+      console.log(`✅ Confirmation email sent to ${customer.email}`);
     }
 
-    console.log(`[Email] Email sent successfully to ${customerEmail} for booking ${bookingId.substring(0, 8).toUpperCase()}`);
     return res.json({ success: true });
   } catch (err) {
     console.error('❌ Confirmation Email Error:', err.message);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/emails/status-update', async (req, res) => {
-  const { bookingId, status, remarks } = req.body;
-  console.log(`📧 [EMAIL SYSTEM] DISPATCHING STATUS UPDATE: ${bookingId} -> ${status}`);
-
-  try {
-    const { data: booking, error: bError } = await supabaseAdmin
-      .from('bookings')
-      .select('*')
-      .eq('id', bookingId)
-      .single();
-
-    if (bError || !booking) throw new Error('Booking not found');
-
-    let customerEmail = booking.guest_email || null;
-    let customerName = (booking.guest_first_name || booking.guest_last_name)
-      ? `${booking.guest_first_name || ''} ${booking.guest_last_name || ''}`.trim()
-      : (booking.customer_name || 'Customer');
-
-    if (!customerEmail && booking.customer_id) {
-      const { data: customer } = await supabaseAdmin
-        .from('profiles')
-        .select('full_name, email')
-        .eq('id', booking.customer_id)
-        .single();
-      if (customer) {
-        customerEmail = customer.email;
-        customerName = customer.full_name;
-      }
-    }
-
-    if (!customerEmail) return res.json({ success: false, message: 'No email found for booking' });
-
-    let inviteFooterHtml = '';
-    let accountExists = false;
-    if (supabaseAdmin) {
-      const { data: existingProfile } = await supabaseAdmin
-        .from('profiles')
-        .select('id')
-        .eq('email', customerEmail)
-        .maybeSingle();
-      accountExists = !!existingProfile;
-    }
-
-    if (!accountExists) {
-      inviteFooterHtml = buildInviteFooter({
-        email: customerEmail,
-        firstName: booking.guest_first_name || '',
-        lastName: booking.guest_last_name || '',
-        phone: booking.guest_phone || booking.contact_number || ''
-      });
-    }
-
-    const updateResult = await sendStatusUpdateEmail({
-      customerEmail,
-      customerName,
-      bookingId: bookingId.substring(0, 8).toUpperCase(),
-      status: status || booking.status,
-      scheduledAt: booking.start_datetime,
-      inviteFooterHtml
-    });
-
-    return res.json(updateResult);
-  } catch (err) {
-    console.error('❌ Status Email Error:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -320,7 +375,6 @@ app.post('/api/emails/payment-receipt', async (req, res) => {
   console.log(`📧 [EMAIL SYSTEM] DISPATCHING PAYMENT RECEIPT: ${paymentId} for Booking ${bookingId}`);
 
   try {
-    // 1. Fetch booking and specific payment
     const { data: booking, error: bError } = await supabaseAdmin
       .from('bookings')
       .select('*')
@@ -335,82 +389,116 @@ app.post('/api/emails/payment-receipt', async (req, res) => {
 
     if (bError || pError || !booking || !payment) throw new Error('Booking or Payment records missing');
 
-    // Fetch customer separately
-    const { data: customer, error: cError } = await supabaseAdmin
-      .from('profiles')
-      .select('full_name, email')
-      .eq('id', booking.customer_id)
-      .single();
+    let customer = null;
+    if (booking.customer_id) {
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('full_name, email, phone')
+        .eq('id', booking.customer_id)
+        .maybeSingle();
+      customer = data;
+    }
 
-    if (cError || !customer) throw new Error('Customer profile not found');
-    const dateStr = new Date(payment.created_at).toLocaleString();
+    const customerEmail = customer?.email || booking.customer_email;
+    if (!customerEmail) throw new Error('Customer email not found');
 
-    let attachments = [];
-    if (payment.evidence_url) {
+    const customerName = customer?.full_name || booking.customer_name || 'Customer';
+    const customerContact = customer?.phone || booking.customer_phone || booking.customer_contact || 'N/A';
+    const customerAddress = booking.customer_address || 'N/A';
+    const customerTaxId = booking.customer_tax_id || 'N/A';
+    const receiptNumber = payment.reference_number || `INV-${String(paymentId || bookingId).slice(0, 8).toUpperCase()}`;
+    const issuedAt = payment.created_at || booking.created_at;
+    const subtotal = Number(payment.amount || booking.total_amount || 0);
+    const discountAmount = Number(payment.discount_amount || 0);
+    const vatRate = 0.12;
+    const vatAmount = Math.max(0, (subtotal - discountAmount) * vatRate);
+    const totalDue = subtotal - discountAmount + vatAmount;
+
+    const items = booking.booking_vehicles?.flatMap((vehicle) => (vehicle.booking_vehicle_services || []).map((service) => ({
+      vehicle: `${vehicle.brand || ''} ${vehicle.model || ''}`.trim() || 'Vehicle Unit',
+      service: service.service_name || service.name || 'Service',
+      qty: 1,
+      unitPrice: Number(service.price || service.price_snapshot || 0),
+      lineTotal: Number(service.price || service.price_snapshot || 0),
+    }))) || [{
+      vehicle: 'Booking Summary',
+      service: 'Booking Service Summary',
+      qty: 1,
+      unitPrice: subtotal,
+      lineTotal: subtotal,
+    }];
+
+    const receiptHtml = buildReceiptEmailHtml({
+      customerName,
+      bookingReference: booking.booking_id || bookingId,
+      receiptNumber,
+      paidAmount: subtotal,
+      paymentMethod: payment.method || booking.payment_method || 'Digital / Online Payment',
+      issuedAt,
+      items,
+      subtotal,
+      discountAmount,
+      vatAmount,
+      totalDue,
+    });
+
+    const pdfBuffer = buildReceiptPdfBuffer({
+      receiptNumber,
+      customerName,
+      bookingReference: booking.booking_id || bookingId,
+      issuedAt,
+      paymentMethod: payment.method || booking.payment_method || 'Digital / Online Payment',
+      processedBy: 'System Admin',
+      customerContact,
+      customerAddress,
+      customerTaxId,
+      items,
+      subtotal,
+      discountAmount,
+      vatRate,
+    });
+
+    const attachments = [{
+      content: pdfBuffer,
+      filename: `Receipt-${String(receiptNumber).replace(/\s+/g, '-').toUpperCase()}.pdf`
+    }];
+
+    if (payment.receipt_url) {
       try {
-        // Fetch the file from Supabase storage
-        const pathParts = payment.evidence_url.split('/');
-        const bucket = 'receipts'; // Unified bucket name
-        const filePath = pathParts[pathParts.length - 1];
+        const bucket = 'payment-receipts';
+        const marker = '/payment-receipts/';
+        const filePath = payment.receipt_url.includes(marker)
+          ? decodeURIComponent(payment.receipt_url.split(marker)[1])
+          : payment.receipt_url;
 
-        const { data: fileData, error: fileError } = await supabaseAdmin.storage
+        const { data: fileData } = await supabaseAdmin.storage
           .from(bucket)
           .download(filePath);
 
         if (fileData) {
-          const buffer = Buffer.from(await fileData.arrayBuffer());
+          const imageBuffer = Buffer.from(await fileData.arrayBuffer());
           attachments.push({
-            content: buffer,
-            filename: `receipt_${paymentId.substring(0, 8)}.png`
+            content: imageBuffer,
+            filename: `receipt_${String(paymentId || bookingId).slice(0, 8)}.png`
           });
         }
       } catch (fErr) {
-        console.warn('Could not attach receipt image:', fErr.message);
+        console.warn('Could not attach legacy receipt image:', fErr.message);
       }
     }
 
     if (resendClient) {
       await resendClient.emails.send({
         from: RESEND_FROM,
-        to: customer.email,
-        subject: `PAYMENT RECEIPT: ${paymentId.substring(0, 8).toUpperCase()}`,
+        to: customerEmail,
+        subject: `OFFICIAL RECEIPT: ${String(receiptNumber).slice(0, 12).toUpperCase()}`,
         attachments,
-        html: `
-          <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; padding: 20px;">
-            <div style="text-align: right; color: #888; font-size: 12px;">Official Receipt</div>
-            <h2 style="color: #A91B18; margin-top: 0;">SPEEDWAY DETAIL STUDIO</h2>
-            
-            <p>Hi <strong>${customer.full_name}</strong>,</p>
-            <p>Your payment has been <strong>VERIFIED</strong>. Thank you for your transaction.</p>
-            
-            <div style="background: #f9f9f9; padding: 20px; border-radius: 4px; margin: 20px 0; border: 1px solid #eee;">
-              <table style="width: 100%; font-size: 14px;">
-                <tr><td style="color: #666;">Transaction ID:</td><td style="text-align: right; font-weight: bold;">${paymentId}</td></tr>
-                <tr><td style="color: #666;">Date:</td><td style="text-align: right;">${dateStr}</td></tr>
-                <tr><td style="color: #666;">Payment Method:</td><td style="text-align: right;">${payment.method}</td></tr>
-                <tr style="font-size: 18px; border-top: 2px solid #eee;">
-                  <td style="padding-top: 10px; font-weight: bold;">Amount Paid:</td>
-                  <td style="padding-top: 10px; text-align: right; font-weight: bold; color: #A91B18;">₱${payment.amount}</td>
-                </tr>
-              </table>
-            </div>
-
-            <p style="font-size: 13px; color: #666;">
-              This payment has been applied to Booking <strong>#${bookingId.substring(0, 8).toUpperCase()}</strong>.
-            </p>
-
-            ${attachments.length > 0 ? '<p style="font-size: 11px; color: #10b981;">✔ Your payment evidence has been attached to this email.</p>' : ''}
-
-            <div style="margin-top: 40px; text-align: center; font-size: 11px; color: #aaa;">
-              Speedway Detail Studio | 39 Hunters ROTC, Barangay San Juan, Cainta, 1900 Rizal
-            </div>
-          </div>
-        `
+        html: receiptHtml,
       });
-      console.log(`✅ Payment receipt email sent to ${customer.email}`);
+      console.log(`✅ Payment receipt email sent to ${customerEmail}`);
     }
 
-    return res.json({ success: true });
+    return res.json({ success: true, attachmentName: attachments[0]?.filename || null });
   } catch (err) {
     console.error('❌ Payment Receipt Email Error:', err.message);
     return res.status(500).json({ success: false, error: err.message });
@@ -458,7 +546,7 @@ const crypto = require('crypto');
 app.post('/admin/generate-invite', async (req, res) => {
   const { email, role } = req.body;
 
-  if (!email || !['ADMIN', 'STAFF'].includes(role)) {
+  if (!email || !['ADMIN', 'STAFF', 'CUSTOMER'].includes(role)) {
     console.error(`❌ [INVITE SYSTEM] REJECTED: Invalid email (${email}) or role (${role})`);
     return res.status(400).json({ success: false, error: 'Invalid invitation parameters' });
   }
@@ -488,21 +576,23 @@ app.post('/admin/generate-invite', async (req, res) => {
     // Send Email
     if (resendClient) {
       try {
-        await resendClient.emails.send({
+        if (role === 'CUSTOMER') {
+          await sendAccountInviteEmail({ customerEmail: email, customerName: 'Guest', inviteLink });
+        } else await resendClient.emails.send({
           from: RESEND_FROM,
           to: email,
           subject: 'Speedway Administrative Invitation',
-          html: `
-            <div style="font-family: sans-serif; padding: 20px; color: #333; max-width: 600px; border: 1px solid #eee;">
-              <h2 style="color: #A91B18;">SPEEDWAY DETAIL STUDIO</h2>
-              <p>You have been invited to join the team as an <strong>${role}</strong>.</p>
-              <p>Click the button below to activate your account and set your password:</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${inviteLink}" style="background-color: #A91B18; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">CONFIRM EMAIL ADDRESS</a>
-              </div>
-              <p style="font-size: 11px; color: #888;">Link expires in 48 hours.</p>
-            </div>
-          `
+          html: buildEmailShell({
+            title: 'Team Invitation',
+            eyebrow: 'SPEEDWAY TEAM ACCESS',
+            bodyHtml: `
+              <p style="margin: 0 0 16px; font-size: 15px; color: #1f2937;">You have been invited to join the team as an <strong>${role}</strong>.</p>
+              <p style="margin: 0 0 16px; font-size: 15px; color: #374151; line-height: 1.7;">Use the secure link below to activate your account and set your password. The invitation is valid for 48 hours.</p>
+            `,
+            ctaLink: inviteLink,
+            ctaLabel: 'Confirm Email Address',
+            footerNote: 'Link expires in 48 hours. If you were not expecting this invitation, please ignore it.'
+          })
         });
         console.log(`✅ Invitation delivered to ${email}`);
       } catch (mailErr) {
@@ -529,6 +619,7 @@ app.get('/invite/validate', async (req, res) => {
       .select('*')
       .eq('token', token)
       .eq('used', false)
+      .gt('expires_at', new Date().toISOString())
       .gt('expires_at', new Date().toISOString())
       .single();
 
@@ -570,7 +661,7 @@ app.post('/invite/accept', async (req, res) => {
     const { data: userData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: invite.email,
       password: password,
-      email_confirm: false,
+      email_confirm: true,
       user_metadata: { first_name, last_name, role: invite.role }
     });
 
@@ -629,7 +720,7 @@ app.post('/invite/accept', async (req, res) => {
     if (updateError) console.warn('⚠️ Could not mark invite as used:', updateError.message);
 
     console.log(`🎉 SUCCESS: Account activated for ${invite.email}`);
-    return res.json({ success: true, message: 'Account activated successfully' });
+    return res.json({ success: true, message: 'Account activated successfully', role: invite.role });
 
   } catch (err) {
     console.error(`❌ Activation Final Error: ${err.message}`);
@@ -738,33 +829,72 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     const extractedAmount = parseFloat(rawAmountString) || 0;
     const requiredAmount = parseFloat(req.body.requiredAmount) || 0;
     const bookingId = req.body.bookingId;
+    const paymentId = req.body.paymentId;
+    const referenceNo = String(extractedData.referenceNo || '').trim();
 
     // Check for mismatch (handling minor precision differences)
-    const isMatch = Math.abs(extractedAmount - requiredAmount) < 1.0;
+    const isAmountMatch = Math.abs(extractedAmount - requiredAmount) < 1.0;
 
-    // THESIS FLOW: Mismatches are 'Flagged for Review', Matches are 'Confirmed'
-    const finalStatus = isMatch ? 'Confirmed' : 'Flagged for Review';
+    // A payment reference is single-use. Check this before accepting the
+    // receipt so the same transfer cannot be attached to another booking.
+    let isDuplicate = false;
+    if (referenceNo && supabaseAdmin) {
+      let duplicateQuery = supabaseAdmin
+        .from('payments')
+        .select('id')
+        .eq('reference_number', referenceNo)
+        .limit(1);
+
+      // A rescanned existing payment must not be considered a duplicate of
+      // itself. Initial booking scans have no payment ID yet.
+      if (paymentId) duplicateQuery = duplicateQuery.neq('id', paymentId);
+
+      const { data: existingPayment, error: duplicateCheckError } = await duplicateQuery.maybeSingle();
+      if (duplicateCheckError) {
+        throw new Error(`REFERENCE_CHECK_FAILED: ${duplicateCheckError.message}`);
+      }
+      isDuplicate = Boolean(existingPayment);
+    }
+
+    // Duplicates are rejected immediately; amount or receipt-validity issues
+    // remain available for staff review rather than being silently accepted.
+    const finalStatus = isDuplicate
+      ? 'REJECTED_DUPLICATE'
+      : (!isAmountMatch || !extractedData.isReceipt ? 'Flagged for Review' : 'Confirmed');
 
     console.log(`🔍 [AUDIT] Comparison: Extracted ₱${extractedAmount} vs Required ₱${requiredAmount}`);
-    console.log(`📊 [AUDIT] Result: ${isMatch ? '✅ MATCH' : '⚠️ MISMATCH'} -> Status: ${finalStatus}`);
+    console.log(`📊 [AUDIT] Result: amountMatch=${isAmountMatch}; duplicate=${isDuplicate} -> Status: ${finalStatus}`);
 
-    // Update the booking in Supabase ONLY IF it already exists (Post-creation flow)
+    // Persist booking and payment OCR data atomically after the booking exists.
     if (bookingId && bookingId !== 'PENDING' && typeof supabaseAdmin !== 'undefined') {
-      const { error: updateError } = await supabaseAdmin
-        .from('bookings')
-        .update({
-          payment_status: finalStatus,
-          ocr_metadata: {
-            ...extractedData,
-            requiredAmount,
-            isMatch,
-            auditedAt: new Date().toISOString()
-          }
-        })
-        .eq('id', bookingId);
+      if (!paymentId) {
+        return res.status(500).json({
+          success: false,
+          error: 'OCR_PERSISTENCE_FAILED: Payment ID is required for persistence.'
+        });
+      }
 
-      if (updateError) {
-        console.error('⚠️ Supabase update failed:', updateError.message);
+      const { error: persistenceError } = await supabaseAdmin.rpc('persist_ocr_result', {
+        p_booking_id: bookingId,
+        p_payment_id: paymentId,
+        p_detected_amount: extractedAmount,
+        p_detected_ref: referenceNo || null,
+        p_payment_status: finalStatus,
+        p_ocr_metadata: {
+          ...extractedData,
+          requiredAmount,
+          isAmountMatch,
+          isDuplicate,
+          auditedAt: new Date().toISOString()
+        }
+      });
+
+      if (persistenceError) {
+        console.error('⚠️ Atomic OCR persistence failed:', persistenceError.message);
+        return res.status(500).json({
+          success: false,
+          error: 'OCR_PERSISTENCE_FAILED: Could not save detected data.'
+        });
       }
 
       // Record in Master Audit Log
@@ -774,7 +904,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
           action_type: 'AI_VERIFICATION_COMPLETE',
           actor_name: 'AI_AUDITOR',
           actor_role: 'SYSTEM',
-          details: `AI extraction complete. Reference: ${extractedData.referenceNo || 'N/A'}. Amount: ₱${extractedAmount}. Match: ${isMatch}.`
+          details: `AI extraction complete. Reference: ${referenceNo || 'N/A'}. Amount: ₱${extractedAmount}. Amount match: ${isAmountMatch}. Duplicate: ${isDuplicate}.`
         });
       } catch (logErr) {
         console.warn('⚠️ Audit logging failed, but booking was updated.');
@@ -786,7 +916,11 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     return res.json({
       success: true,
       status: finalStatus,
-      isMatch: isMatch,
+      isAmountMatch,
+      // Retain the old property until all existing frontend consumers have
+      // migrated to isAmountMatch.
+      isMatch: isAmountMatch,
+      isDuplicate,
       data: {
         ...extractedData,
         amount: extractedAmount
@@ -797,7 +931,7 @@ app.post('/api/ocr/verify-receipt', upload.single('receipt'), async (req, res) =
     console.error('❌ [AI OCR Error]:', error);
     return res.status(500).json({
       success: false,
-      error: "AI analysis service is temporarily offline for maintenance. Our system will transition to manual verification to ensure your booking proceeds. Please continue."
+      error: `AI OCR failed: ${error.message}`
     });
   }
 });
@@ -1299,7 +1433,10 @@ app.post('/api/bookings/cancel', async (req, res) => {
       .from('bookings')
       .update({
         status: 'CANCELLED',
+        staff_id: null,
+        bay_id: null,
         cancellation_reason: reason,
+        refund_status: 'QUEUED',
         updated_at: new Date().toISOString()
       })
       .eq('id', bookingId);
@@ -1334,22 +1471,30 @@ app.post('/api/bookings/cancel', async (req, res) => {
 
 app.post('/admin/verify-payment-ocr', async (req, res) => {
   const { receiptUrl } = req.body;
-  console.log(`🤖 [ADMIN AI] SIMULATING SCAN FOR: ${receiptUrl?.substring(0, 50)}...`);
+  try {
+    if (!receiptUrl) throw new Error('Receipt URL is required');
+    const receiptResponse = await fetch(receiptUrl);
+    if (!receiptResponse.ok) throw new Error(`Receipt download failed with ${receiptResponse.status}`);
 
-  // Simulate AI Processing Latency
-  await new Promise(resolve => setTimeout(resolve, 2000));
+    const receiptBuffer = Buffer.from(await receiptResponse.arrayBuffer());
+    const ocrResult = await processReceiptOCR(receiptBuffer, receiptResponse.headers.get('content-type') || 'image/jpeg');
+    const extractedAmount = Number(ocrResult.amount || 0);
+    const requiredAmount = Number(req.body.requiredAmount || 0);
 
-  const mockRef = Math.random().toString().slice(2, 11);
-
-  res.json({
-    success: true,
-    data: {
-      referenceNumber: `GC-${mockRef}`,
-      confidence: 0.98,
-      isMatch: true,
-      isSimulation: true
-    }
-  });
+    return res.json({
+      success: true,
+      status: requiredAmount > 0 && Math.abs(extractedAmount - requiredAmount) >= 1 ? 'Flagged for Review' : 'Confirmed',
+      isMatch: requiredAmount <= 0 || Math.abs(extractedAmount - requiredAmount) < 1,
+      data: {
+        ...ocrResult,
+        referenceNumber: ocrResult.referenceNumber,
+        amount: extractedAmount
+      }
+    });
+  } catch (err) {
+    console.error('❌ Admin OCR Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 /**
@@ -1417,7 +1562,7 @@ app.post('/api/garage/sync', async (req, res) => {
     }
 
     // 2. Insert new vehicle
-    const { error: insertError } = await supabaseAdmin
+    const { data: insertedVehicle, error: insertError } = await supabaseAdmin
       .from('vehicles')
       .insert({
         owner_id: customerId,
@@ -1425,11 +1570,21 @@ app.post('/api/garage/sync', async (req, res) => {
         brand: vehicle.brand,
         model: vehicle.model,
         plate_number: plate,
+        fleet_group_id: vehicle.fleetGroupId || null,
         is_primary: false,
         updated_at: new Date().toISOString()
-      });
+      })
+      .select('id')
+      .single();
 
     if (insertError) throw insertError;
+
+    if (vehicle.fleetGroupId) {
+      const { error: membershipError } = await supabaseAdmin
+        .from('fleet_group_vehicles')
+        .upsert({ fleet_group_id: vehicle.fleetGroupId, vehicle_id: insertedVehicle.id }, { onConflict: 'fleet_group_id,vehicle_id' });
+      if (membershipError) throw membershipError;
+    }
 
     console.log(`✅ [GARAGE] SUCCESSFULLY REGISTERED: ${plate}`);
     return res.json({ success: true, message: 'Vehicle registered in garage' });
@@ -1442,37 +1597,43 @@ app.post('/api/garage/sync', async (req, res) => {
 
 /**
  * 🛡️ REQ-ADM-02, REQ-SYS-02: No-Show Detection Engine
- * NOSHOW_GRACE_MINUTES = 30 (mirrors SHOP_CONFIG.STALE_SESSION_PURGE_MINUTES)
- * URGENT_REMINDER_MINUTES = 15
+ * NOSHOW_GRACE_MINUTES = 60
+ * REMINDER_LEAD_MINUTES = 60
  * Identifies bookings past start time and transitions to FLAGGED_NOSHOW.
  */
-const NOSHOW_GRACE_MINUTES = 30;
-const URGENT_REMINDER_MINUTES = 15;
+const NOSHOW_GRACE_MINUTES = 60;
+const REMINDER_LEAD_MINUTES = 60;
 
 const checkOverdueBookings = async () => {
   if (!supabaseAdmin) return;
 
   const now = new Date();
   const overdueThreshold = new Date(now.getTime() - NOSHOW_GRACE_MINUTES * 60000);
-  const reminderThreshold = new Date(now.getTime() - URGENT_REMINDER_MINUTES * 60000);
+  const reminderThreshold = new Date(now.getTime() + REMINDER_LEAD_MINUTES * 60000);
 
   console.log(`🕒 [SYSTEM] RUNNING NO-SHOW AUDIT: ${now.toISOString()}`);
 
   try {
-    // Case-tolerant: catches 'scheduled', 'confirmed', 'PENDING', 'CONFIRMED'
+    // Case-tolerant: catches scheduled, confirmed, and reinstated pending_confirmation bookings that have passed their grace window.
     const { data: bookings, error } = await supabaseAdmin
       .from('bookings')
       .select('*, customer:profiles!bookings_customer_id_fkey(email, full_name), payments(id, amount, status)')
-      .in('status', ['scheduled', 'confirmed', 'pending', 'PENDING', 'CONFIRMED']);
+      .in('status', ['scheduled', 'confirmed', 'pending', 'PENDING', 'CONFIRMED', 'pending_confirmation']);
 
     if (error) throw error;
 
     for (const booking of (bookings || [])) {
+      const status = normalizeStatus(booking.status);
       const startTime = new Date(booking.start_datetime);
+      const graceWindowExpired = shouldRestoreGraceWindow(booking.status, booking.grace_period_until, now);
+
+      if (status === 'pending_confirmation' && !graceWindowExpired) {
+        continue;
+      }
 
       // A. NO-SHOW FLAG (30 MINS) → FLAGGED_NOSHOW
-      if (startTime < overdueThreshold) {
-        console.log(`⚠️ [FLAGGED_NOSHOW] Booking ${booking.id} flagged (30m+ No-Show)`);
+      if (startTime < overdueThreshold || graceWindowExpired) {
+        console.log(`⚠️ [FLAGGED_NOSHOW] Booking ${booking.id} flagged (30m+ No-Show or expired grace window)`);
 
         // Check if booking has verified payments for refund auto-flag
         const hasPaidPayments = (booking.payments || []).some(p => p.status === 'PAID');
@@ -1490,7 +1651,7 @@ const checkOverdueBookings = async () => {
 
         const { error: updateError } = await supabaseAdmin
           .from('bookings')
-          .update(updatePayload)
+          .update({ ...updatePayload, staff_id: null, grace_period_until: null })
           .eq('id', booking.id);
 
         if (updateError) {
@@ -1506,22 +1667,33 @@ const checkOverdueBookings = async () => {
           details: `Booking automatically flagged as No-Show (${NOSHOW_GRACE_MINUTES}m threshold).${hasPaidPayments ? ' Refund auto-queued.' : ''}`
         });
 
-        // Send No-Show notification email
-        if (resendClient && booking.customer?.email) {
+        if (booking.customer_id) {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: booking.customer_id,
+            booking_id: booking.id,
+            action_url: `/customer/bookings/${booking.id}`,
+            title: 'Booking Flagged as No-Show',
+            message: `Booking #${booking.id.substring(0, 8).toUpperCase()} was flagged after the one-hour arrival window.`,
+            notification_type: 'BOOKING_FLAGGED_NOSHOW',
+            is_read: false
+          });
+        }
+
+        // Send No-Show notification through the shared lifecycle email template.
+        if (booking.customer?.email) {
           try {
-            await resendClient.emails.send({
-              from: RESEND_FROM,
-              to: booking.customer.email,
-              subject: 'Booking Expired — No-Show Notification',
-              html: `
-                <div style="font-family: sans-serif; padding: 20px; color: #333;">
-                  <h2 style="color: #E61E2A;">Booking Expired</h2>
-                  <p>Hi ${booking.customer.full_name || 'Valued Customer'},</p>
-                  <p>Your scheduled slot at Speedway Detail Studio has expired due to non-arrival within the ${NOSHOW_GRACE_MINUTES}-minute window.</p>
-                  ${hasPaidPayments ? '<p><strong>Since a payment was detected, a refund request has been automatically filed.</strong> Our team will process it shortly.</p>' : ''}
-                  <p>Please contact us if you have any questions.</p>
-                </div>`
+            const projectUrl = process.env.SUPABASE_URL;
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            const noShowResponse = await fetch(`${projectUrl}/functions/v1/send-status-email`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+              body: JSON.stringify({
+                bookingId: booking.id,
+                newStatus: 'FLAGGED_NOSHOW',
+                remarks: hasPaidPayments ? 'A refund request has been automatically filed because a payment was detected.' : ''
+              })
             });
+            if (!noShowResponse.ok) throw new Error(await noShowResponse.text());
           } catch (emailErr) {
             console.warn('📧 No-Show email failed:', emailErr.message);
           }
@@ -1529,24 +1701,19 @@ const checkOverdueBookings = async () => {
       }
 
       // B. URGENT REMINDER (15 MINS) - REQ-SYS-02
-      else if (startTime < reminderThreshold && !booking.reminder_sent) {
-        console.log(`📧 [REMINDER] Triggering urgent reminder for ${booking.customer?.email}`);
+      else if (booking.status?.toLowerCase() === 'confirmed' && startTime <= reminderThreshold && startTime > now && !booking.reminder_sent) {
+        console.log(`📧 [REMINDER] Triggering one-hour reminder for ${booking.customer?.email}`);
 
-        if (resendClient && booking.customer?.email) {
+        if (booking.customer?.email) {
           try {
-            await resendClient.emails.send({
-              from: RESEND_FROM,
-              to: booking.customer.email,
-              subject: 'URGENT: Your Speedway Slot is Held',
-              html: `
-                <div style="font-family: sans-serif; padding: 20px; color: #333;">
-                  <h2 style="color: #E61E2A;">URGENT NOTIFICATION</h2>
-                  <p>Hi ${booking.customer.full_name || 'Valued Customer'},</p>
-                  <p>Your scheduled slot at Speedway Detail Studio was set to begin ${URGENT_REMINDER_MINUTES} minutes ago.</p>
-                  <p><strong>We are holding your slot for ${NOSHOW_GRACE_MINUTES - URGENT_REMINDER_MINUTES} more minutes.</strong> If you do not arrive within this window, your booking will be flagged as a No-Show and may be cancelled.</p>
-                  <p>Please contact us immediately if you are on your way.</p>
-                </div>`
+            const projectUrl = process.env.SUPABASE_URL;
+            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            const reminderResponse = await fetch(`${projectUrl}/functions/v1/send-status-email`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+              body: JSON.stringify({ bookingId: booking.id, newStatus: 'CONFIRMED', reminder: true })
             });
+            if (!reminderResponse.ok) throw new Error(await reminderResponse.text());
           } catch (emailErr) {
             console.warn('📧 Reminder email failed:', emailErr.message);
           }
@@ -1635,6 +1802,8 @@ app.post('/api/bookings/admin-cancel', async (req, res) => {
       .from('bookings')
       .update({
         status: 'CANCELLED',
+        staff_id: null,
+        bay_id: null,
         cancellation_reason: reason,
         cancellation_type: reason === 'No-Show' ? 'NO_SHOW' : 'ADMIN_MANUAL',
         needs_attention: false,
@@ -1659,6 +1828,208 @@ app.post('/api/bookings/admin-cancel', async (req, res) => {
   }
 });
 
+app.post('/api/bookings/undo-no-show', async (req, res) => {
+  const { bookingId, actorName, adminId, pendingRefund } = req.body || {};
+
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: 'Booking ID is required.' });
+  }
+
+  try {
+    const { data: booking, error: bookingError } = await supabaseAdmin
+      .from('bookings')
+      .select('id, status, bay_id, customer_id, start_datetime, end_datetime, refund_status, staff_id, needs_attention, payment_status, grace_period_until')
+      .eq('id', bookingId)
+      .single();
+
+    if (bookingError) throw bookingError;
+
+    const normalizedBookingStatus = normalizeStatus(booking.status);
+    if (!['flagged_noshow', 'no_show'].includes(normalizedBookingStatus)) {
+      return res.status(409).json({ success: false, error: 'Booking is not currently flagged as no-show.' });
+    }
+
+    const { data: payments, error: paymentError } = await supabaseAdmin
+      .from('payments')
+      .select('id, status, payment_status, method, amount')
+      .eq('booking_id', bookingId);
+
+    if (paymentError) throw paymentError;
+
+    const normalizedPaymentStatuses = (payments || []).map(payment => String(payment.payment_status || payment.status || '').trim().toLowerCase().replace(/[_\s-]+/g, '_'));
+    const hasCompletedRefund = ['refunded', 'refund_processed', 'refundprocessed'].some(value => normalizedPaymentStatuses.includes(value))
+      || ['refunded', 'refund_processed', 'refundprocessed'].includes(String(booking.payment_status || booking.refund_status || '').trim().toLowerCase().replace(/[_\s-]+/g, '_'))
+      || (payments || []).some(payment => {
+          const status = String(payment.status || '').trim().toLowerCase().replace(/[_\s-]+/g, '_');
+          const method = String(payment.method || '').trim().toLowerCase();
+          return ['refunded', 'refund_processed', 'refundprocessed'].includes(status)
+            || (method === 'system_refund' && Number(payment.amount || 0) < 0);
+        });
+
+    if (hasCompletedRefund) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot undo no-show status: Payment refund has already been completed.'
+      });
+    }
+
+    const refundPendingStates = ['refund_pending', 'flagged_for_refund', 'flaggedforrefund', 'refundpending'];
+    const hasPendingRefund = Boolean(pendingRefund)
+      || ['pending', 'queued', 'processing', 'email_pending'].some(state => String(booking.refund_status || '').toLowerCase().includes(state))
+      || normalizedPaymentStatuses.some(status => refundPendingStates.includes(status))
+      || (payments || []).some(payment => {
+          const status = String(payment.status || '').trim().toLowerCase().replace(/[_\s-]+/g, '_');
+          return ['refund_pending', 'flagged_for_refund', 'flaggedforrefund', 'refundpending'].includes(status)
+            || ['refund_pending', 'flagged_for_refund', 'flaggedforrefund', 'refundpending'].includes(String(payment.payment_status || '').trim().toLowerCase().replace(/[_\s-]+/g, '_'));
+        });
+
+    const restorePayload = {
+      status: 'pending_confirmation',
+      staff_id: null,
+      bay_id: booking.bay_id || null,
+      needs_attention: false,
+      refund_status: hasPendingRefund ? null : booking.refund_status,
+      payment_status: hasPendingRefund ? 'approved' : booking.payment_status || 'pending',
+      updated_at: new Date().toISOString(),
+      reminder_sent: false,
+      grace_period_until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
+    };
+
+    const { error: updateError } = await supabaseAdmin
+      .from('bookings')
+      .update(restorePayload)
+      .eq('id', bookingId);
+
+    if (updateError) throw updateError;
+
+    if (hasPendingRefund) {
+      const pendingPaymentIds = (payments || [])
+        .filter(payment => {
+          const status = String(payment.status || '').trim().toLowerCase().replace(/[_\s-]+/g, '_');
+          const paymentStatus = String(payment.payment_status || '').trim().toLowerCase().replace(/[_\s-]+/g, '_');
+          return ['refund_pending', 'flagged_for_refund', 'flaggedforrefund', 'refundpending', 'pending', 'queued', 'processing', 'email_pending'].includes(status)
+            || ['refund_pending', 'flagged_for_refund', 'flaggedforrefund', 'refundpending'].includes(paymentStatus);
+        })
+        .map(payment => payment.id);
+
+      if (pendingPaymentIds.length > 0) {
+        const { error: paymentUpdateError } = await supabaseAdmin
+          .from('payments')
+          .update({
+            status: 'PAID',
+            payment_status: 'approved'
+          })
+          .in('id', pendingPaymentIds);
+
+        if (paymentUpdateError) throw paymentUpdateError;
+      }
+    }
+
+    const { error: vehicleError } = await supabaseAdmin
+      .from('booking_vehicles')
+      .update({ status: 'SCHEDULED', started_at: null, completed_at: null })
+      .eq('booking_id', bookingId);
+
+    if (vehicleError) {
+      console.warn('Non-fatal vehicle-state restore warning:', vehicleError.message);
+    }
+
+    await supabaseAdmin.from('audit_logs').insert({
+      booking_id: bookingId,
+      action_type: 'UNDO_NO_SHOW',
+      actor_name: actorName || 'ADMIN',
+      actor_role: 'ADMIN',
+      actor_id: adminId || null,
+      details: `Admin reverted no-show for booking ${bookingId}. ${hasPendingRefund ? 'Pending refund request intercepted and cancelled.' : 'No refund request was pending.'}`
+    });
+
+    return res.json({
+      success: true,
+      message: 'No-show was reverted successfully and pending refund requests were intercepted.',
+      bookingStatus: 'pending_confirmation',
+      gracePeriodUntil: restorePayload.grace_period_until
+    });
+  } catch (err) {
+    console.error('❌ Undo No-Show Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message || 'Unable to restore the booking.' });
+  }
+});
+
+app.post('/api/bookings/release', async (req, res) => {
+  const { bookingId } = req.body;
+  if (!bookingId) return res.status(400).json({ success: false, error: 'Booking ID is required.' });
+
+  try {
+    const { data: booking, error: fetchError } = await supabaseAdmin
+      .from('bookings')
+      .select('id, status, customer_id, total_amount')
+      .eq('id', bookingId)
+      .single();
+    if (fetchError) throw fetchError;
+
+    const [{ data: vehicles, error: vehiclesError }, { data: payments, error: paymentsError }] = await Promise.all([
+      supabaseAdmin.from('booking_vehicles').select('status').eq('booking_id', bookingId),
+      supabaseAdmin.from('payments').select('amount, status').eq('booking_id', bookingId)
+    ]);
+    if (vehiclesError) throw vehiclesError;
+    if (paymentsError) throw paymentsError;
+
+    const bookingStatus = booking.status?.toLowerCase();
+    const allVehiclesFinished = (vehicles || []).length > 0
+      && vehicles.every(vehicle => ['COMPLETED', 'CANCELLED'].includes(String(vehicle.status || '').toUpperCase()));
+    const totalPaid = (payments || [])
+      .filter(payment => String(payment.status || '').toUpperCase() === 'PAID')
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const isSettled = Number(booking.total_amount || 0) <= 0 || totalPaid >= Number(booking.total_amount || 0);
+    if (bookingStatus !== 'completed' && !(allVehiclesFinished && isSettled)) {
+      return res.status(409).json({ success: false, error: 'Only completed bookings can be released.' });
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from('bookings')
+      .update({ status: 'RELEASED', staff_id: null, bay_id: null, updated_at: new Date().toISOString() })
+      .eq('id', bookingId);
+    if (updateError) throw updateError;
+
+    await supabaseAdmin.from('audit_logs').insert({
+      booking_id: bookingId,
+      action_type: 'BOOKING_RELEASED',
+      actor_name: 'ADMIN',
+      actor_role: 'ADMIN',
+      details: 'Booking released after customer vehicle pickup; staff allocation cleared.'
+    });
+
+    if (booking.customer_id) {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: booking.customer_id,
+        booking_id: bookingId,
+        action_url: `/customer/bookings/${bookingId}`,
+        title: 'Booking Released',
+        message: `Booking #${bookingId.substring(0, 8).toUpperCase()} has been released. Thank you for choosing Speedway!`,
+        notification_type: 'BOOKING_RELEASED',
+        is_read: false
+      });
+    }
+
+    try {
+      const projectUrl = process.env.SUPABASE_URL;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      await fetch(`${projectUrl}/functions/v1/send-status-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ bookingId, newStatus: 'RELEASED' })
+      });
+    } catch (emailError) {
+      console.warn('Released email failed:', emailError.message);
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Release booking error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ─── MASTER STATUS PROPAGATOR & NOTIFICATION CONTROLLER ──────────────────
 // REQ-SYS-02: Transactional Integrity for Booking Lifecycle
 app.post('/api/bookings/update-status', async (req, res) => {
@@ -1672,12 +2043,35 @@ app.post('/api/bookings/update-status', async (req, res) => {
     // 0. Fetch Master Booking first for context
     const { data: masterBooking, error: masterFetchError } = await supabaseAdmin
       .from('bookings')
-      .select('status, customer_id, total_amount')
+      .select('status, customer_id, total_amount, staff_id, start_datetime')
       .eq('id', bookingId)
       .single();
 
     if (masterFetchError) throw masterFetchError;
     const currentMaster = masterBooking.status?.toLowerCase();
+
+    if (newStatus.toUpperCase() === 'IN_PROGRESS') {
+      const scheduledDate = new Date(masterBooking.start_datetime);
+      const nowDate = new Date();
+      const isScheduledDate = scheduledDate.toDateString() === nowDate.toDateString();
+      if (currentMaster !== 'confirmed' || !masterBooking.staff_id || !isScheduledDate) {
+        return res.status(409).json({ success: false, error: 'Service can only start on the scheduled date after confirmation and staff assignment.' });
+      }
+    }
+
+    if (newStatus.toUpperCase() === 'COMPLETED') {
+      const { data: completionPayments, error: completionPaymentError } = await supabaseAdmin
+        .from('payments')
+        .select('amount, status')
+        .eq('booking_id', bookingId);
+      if (completionPaymentError) throw completionPaymentError;
+      const totalPaidBeforeCompletion = (completionPayments || [])
+        .filter(payment => payment.status === 'PAID')
+        .reduce((sum, payment) => sum + Number(payment.amount), 0);
+      if (Number(masterBooking.total_amount || 0) > 0 && totalPaidBeforeCompletion < Number(masterBooking.total_amount)) {
+        return res.status(409).json({ success: false, error: 'Final payment is required before completing the service.' });
+      }
+    }
 
     // 1. Update the specific vehicle unit
     const { error: unitError } = await supabaseAdmin
@@ -1744,6 +2138,8 @@ app.post('/api/bookings/update-status', async (req, res) => {
       try {
         await supabaseAdmin.from('notifications').insert({
           user_id: masterBooking.customer_id,
+          booking_id: bookingId,
+          action_url: `/customer/bookings/${bookingId}`,
           title: `Booking ${targetMasterStatus.toUpperCase()}`,
           message: targetMasterStatus === 'completed'
             ? `Your service for Booking #${bookingId.substring(0, 8).toUpperCase()} is now complete. Thank you for choosing Speedway!`

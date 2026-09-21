@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Check, CheckCircle } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { createBooking } from '../../services/bookingService';
+import { createBooking, rescheduleBooking } from '../../services/bookingService';
 import toast from 'react-hot-toast';
 import Step1Schedule from '../../components/BookingWizard/Step1Schedule';
 import Step2Services from '../../components/BookingWizard/Step2Services';
@@ -23,7 +23,20 @@ const getCatalogServiceByName = (name, type) => {
   return null;
 };
 
-const CustomerBookAppointment = () => {
+const hasMeaningfulBookingInput = (data) => {
+  if (!data) return false;
+  const hasVehicleInput = (data.vehicles || []).some(vehicle => Boolean(
+    vehicle?.manual || vehicle?.garageVehicleId || vehicle?.fleetGroupId || vehicle?.type ||
+    vehicle?.brand?.trim() || vehicle?.model?.trim() || vehicle?.plateNumber?.trim() || vehicle?.services?.length
+  ));
+  return Boolean(
+    data.date || data.time || data.notes?.trim() || data.customerEmail?.trim() ||
+    data.adminCustomerReady || data.fleetGroupId || hasVehicleInput ||
+    data.payment?.proofOfPayment
+  );
+};
+
+const CustomerBookAppointment = ({ adminMode = false, renderAdminPanel, onAdminSubmit }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile } = useAuth();
@@ -31,20 +44,28 @@ const CustomerBookAppointment = () => {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubTaskActive, setIsSubTaskActive] = useState(false); // Tracks nested views (like Adding a Vehicle)
+  const [hasDraftChanges, setHasDraftChanges] = useState(false);
+  const [pendingLeave, setPendingLeave] = useState(null);
+  const [customerDetailsLocked, setCustomerDetailsLocked] = useState(false);
 
   // REBOOKING LOGIC: Pull from sessionStorage for persistence
   const rebookDataRaw = sessionStorage.getItem('speedway_rebook_data');
   const prefillData = rebookDataRaw ? JSON.parse(rebookDataRaw) : null;
-  const isRebooking = !!prefillData;
+  const isRescheduling = Boolean(prefillData?.reschedule && prefillData?.id);
+  const isRebooking = Boolean(prefillData && !isRescheduling);
 
   // LANDING LOGIC: If rebooking, skip directly to schedule (Step 2)
-  const [currentStep, setCurrentStep] = useState(isRebooking ? 2 : 1);
+  const [currentStep, setCurrentStep] = useState(isRebooking || isRescheduling ? 2 : 1);
 
   // Global Wizard State
   const [bookingData, setBookingData] = useState(() => {
     const savedDraft = localStorage.getItem('speedway_booking_draft');
     if (savedDraft && !prefillData) {
-      try { return JSON.parse(savedDraft); } catch { localStorage.removeItem('speedway_booking_draft'); }
+      try {
+        const parsedDraft = JSON.parse(savedDraft);
+        if (hasMeaningfulBookingInput(parsedDraft)) return parsedDraft;
+        localStorage.removeItem('speedway_booking_draft');
+      } catch { localStorage.removeItem('speedway_booking_draft'); }
     }
     return {
     customerName: profile?.first_name ? `${profile.first_name} ${profile?.last_name || ''}`.trim() : (user?.user_metadata?.first_name ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim() : ''),
@@ -83,28 +104,83 @@ const CustomerBookAppointment = () => {
   });
 
   React.useEffect(() => {
-    if (!isSubmitted) localStorage.setItem('speedway_booking_draft', JSON.stringify(bookingData));
-  }, [bookingData, isSubmitted]);
+    if (!hasDraftChanges && !hasMeaningfulBookingInput(bookingData)) return;
+    if (!isSubmitted) setHasDraftChanges(true);
+  }, [bookingData, hasDraftChanges, isSubmitted]);
+
+  const updateBookingData = updater => {
+    setHasDraftChanges(true);
+    setBookingData(updater);
+  };
+
+  const requestLeave = action => {
+    if (!hasDraftChanges || isSubmitted) {
+      action();
+      return;
+    }
+    setPendingLeave(() => action);
+  };
+
+  React.useEffect(() => {
+    if (!isSubmitted && hasDraftChanges) {
+      localStorage.setItem('speedway_booking_draft', JSON.stringify(bookingData));
+    }
+  }, [bookingData, hasDraftChanges, isSubmitted]);
+
+  React.useEffect(() => {
+    if (!hasDraftChanges || isSubmitted) return undefined;
+    const handleBeforeUnload = event => { event.preventDefault(); event.returnValue = ''; };
+    const handleNavigationClick = event => {
+      const link = event.target.closest?.('a[href]');
+      if (!link || link.target === '_blank' || link.href === window.location.href) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const destination = `${new URL(link.href).pathname}${new URL(link.href).search}${new URL(link.href).hash}`;
+        requestLeave(() => navigate(destination));
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('click', handleNavigationClick, true);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('click', handleNavigationClick, true);
+    };
+  }, [hasDraftChanges, isSubmitted, navigate]);
 
   // Cleanup sessionStorage on mount to ensure fresh start next time
   React.useEffect(() => {
-    if (isRebooking) {
+    if (isRebooking || isRescheduling) {
       sessionStorage.removeItem('speedway_rebook_data');
-      toast.success('Fast-Track Rebooking Active!', {
-        icon: '🔄',
+      toast.success(isRescheduling ? 'Rescheduling Active!' : 'Fast-Track Rebooking Active!', {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)' }
       });
     }
   }, [isRebooking]);
 
-  const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
+  const nextStep = () => {
+    if (adminMode && currentStep === 1 && !bookingData.adminCustomerReady) {
+      toast.error('Complete the customer first name, last name, email, and phone before continuing.');
+      return;
+    }
+    if (currentStep === 1) setCustomerDetailsLocked(true);
+    setCurrentStep(prev => Math.min(prev + 1, 4));
+  };
   const prevStep = () => setCurrentStep((prev) => Math.max(prev - 1, 1));
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
-      await createBooking(user.id, bookingData);
+      if (adminMode && !bookingData.adminCustomerReady) {
+        throw new Error('Complete the customer first name, last name, email, and phone before continuing.');
+      }
+      if (isRescheduling && prefillData?.id) {
+        await rescheduleBooking(prefillData.id, bookingData);
+        sessionStorage.removeItem('speedway_rebook_data');
+      } else {
+        if (adminMode && onAdminSubmit) await onAdminSubmit(bookingData);
+        else await createBooking(user.id, bookingData);
+      }
       localStorage.removeItem('speedway_booking_draft');
+      setHasDraftChanges(false);
       toast.success('Booking submitted successfully!', {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)' }
       });
@@ -126,7 +202,7 @@ const CustomerBookAppointment = () => {
     { num: 4, title: 'Review & Pay' }
   ];
 
-  const handleCancelBooking = () => {
+  const resetBookingData = () => {
     // 1. Wipe the state back to default
     setBookingData({
       customerName: profile?.first_name ? `${profile.first_name} ${profile?.last_name || ''}`.trim() : (user?.user_metadata?.first_name ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim() : ''),
@@ -143,8 +219,14 @@ const CustomerBookAppointment = () => {
       }
     });
     
-    // 2. Redirect to the dashboard
-    navigate('/customer/dashboard');
+  };
+
+  const handleCancelBooking = () => {
+    requestLeave(() => {
+      resetBookingData();
+      setHasDraftChanges(false);
+      navigate(adminMode ? '/admin' : '/customer/dashboard');
+    });
   };
 
   if (isSubmitted) {
@@ -173,21 +255,21 @@ const CustomerBookAppointment = () => {
             } else if (currentStep > 1) {
               setCurrentStep(currentStep - 1);
             } else {
-              navigate('/customer/dashboard');
+              requestLeave(() => navigate(adminMode ? '/admin' : '/customer'));
             }
           }}
           className="admin-card-hover"
           style={{ 
             background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', 
-            padding: '0.75rem', borderRadius: '50%', color: 'white', cursor: 'pointer',
+            padding: '0.75rem', borderRadius: '50%', color: 'var(--admin-text-primary)', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}
         >
           <ArrowLeft size={24} />
         </button>
         <div>
-          <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '-1.5px' }}>Book Appointment</h1>
-          {isRebooking && <div className="pulse-animation" style={{ fontSize: '0.75rem', color: 'var(--admin-brand)', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.2rem' }}>🔄 Fast-Track Rebooking Active</div>}
+          <h1 style={{ margin: 0, fontSize: 'clamp(1.8rem, 5vw, 2.5rem)', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase', letterSpacing: '-1.5px' }}>Book Appointment</h1>
+          {isRebooking && <div className="pulse-animation" style={{ fontSize: '0.75rem', color: 'var(--admin-brand)', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '0.2rem' }}>Fast-Track Rebooking Active</div>}
         </div>
       </div>
 
@@ -212,12 +294,12 @@ const CustomerBookAppointment = () => {
             <div style={{ 
               width: '40px', height: '40px', borderRadius: '50%', background: step.num === currentStep ? 'var(--admin-brand)' : (step.num < currentStep ? 'var(--admin-brand)' : 'var(--admin-card)'),
               border: `2px solid ${step.num <= currentStep ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: '900',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', color: step.num <= currentStep ? '#fff' : 'var(--admin-text-primary)', fontWeight: '900',
               boxShadow: step.num === currentStep ? '0 0 15px rgba(var(--admin-brand-rgb), 0.5)' : 'none'
             }}>
               {step.num < currentStep ? <CheckCircle size={20} /> : step.num}
             </div>
-            <span className="step-title" style={{ fontSize: '0.7rem', fontWeight: '800', color: step.num === currentStep ? 'white' : 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
+            <span className="step-title" style={{ fontSize: '0.7rem', fontWeight: '800', color: step.num === currentStep ? 'var(--admin-text-primary)' : 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>
               {step.title}
             </span>
           </div>
@@ -225,13 +307,14 @@ const CustomerBookAppointment = () => {
       </div>
 
       {/* Step Content */}
+      {adminMode && renderAdminPanel?.({ bookingData, setBookingData: updateBookingData, isCustomerDetailsLocked: customerDetailsLocked })}
       <div style={{ background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', padding: '2rem', boxShadow: 'var(--admin-card-shadow)' }}>
-        {currentStep === 1 && <Step2Services bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onCancel={handleCancelBooking} />}
-        {currentStep === 2 && <Step1Schedule bookingData={bookingData} setBookingData={setBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onBack={prevStep} onCancel={handleCancelBooking} />}
+        {currentStep === 1 && <Step2Services bookingData={bookingData} setBookingData={updateBookingData} adminMode={adminMode} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onCancel={handleCancelBooking} />}
+        {currentStep === 2 && <Step1Schedule bookingData={bookingData} setBookingData={updateBookingData} activeVehicleIndex={activeVehicleIndex} onNext={nextStep} onBack={prevStep} onCancel={handleCancelBooking} customerDetailsLocked={customerDetailsLocked} />}
         {currentStep === 3 && (
           <Step3FleetEditing 
             bookingData={bookingData} 
-            setBookingData={setBookingData} 
+            setBookingData={updateBookingData} 
             activeVehicleIndex={activeVehicleIndex} 
             setActiveVehicleIndex={setActiveVehicleIndex} 
             setCurrentStep={setCurrentStep} 
@@ -242,8 +325,18 @@ const CustomerBookAppointment = () => {
             onCancel={handleCancelBooking}
           />
         )}
-        {currentStep === 4 && <Step4ReviewPayment bookingData={bookingData} setBookingData={setBookingData} onSubmit={handleSubmit} onBack={prevStep} isSubmitting={isSubmitting} onCancel={handleCancelBooking} />}
+        {currentStep === 4 && <Step4ReviewPayment bookingData={bookingData} setBookingData={updateBookingData} adminMode={adminMode} onSubmit={handleSubmit} onBack={prevStep} isSubmitting={isSubmitting} onCancel={handleCancelBooking} />}
       </div>
+      {pendingLeave && <div role="dialog" aria-modal="true" aria-labelledby="leave-booking-title" style={{ position: 'fixed', inset: 0, zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', background: 'rgba(0, 0, 0, .72)', backdropFilter: 'blur(6px)' }}>
+        <div style={{ width: 'min(100%, 420px)', background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', padding: 'clamp(1.25rem, 5vw, 2rem)', boxShadow: '0 24px 70px rgba(0, 0, 0, .45)' }}>
+          <h2 id="leave-booking-title" style={{ margin: 0, fontSize: '1.15rem', fontWeight: '950' }}>Leave booking page?</h2>
+          <p style={{ margin: '.75rem 0 1.25rem', color: 'var(--admin-text-secondary)', lineHeight: 1.5 }}>Your unsaved booking changes will be lost.</p>
+          <div style={{ display: 'flex', gap: '.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => setPendingLeave(null)} style={{ minWidth: '110px', padding: '.75rem 1rem', background: 'transparent', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer' }}>STAY</button>
+            <button type="button" onClick={() => { const action = pendingLeave; setPendingLeave(null); setHasDraftChanges(false); localStorage.removeItem('speedway_booking_draft'); action?.(); }} style={{ minWidth: '110px', padding: '.75rem 1rem', background: 'var(--admin-brand)', color: '#fff', border: '1px solid var(--admin-brand)', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer' }}>LEAVE</button>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 };

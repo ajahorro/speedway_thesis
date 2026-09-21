@@ -149,45 +149,98 @@ export const AuthProvider = ({ children }) => {
 
   const signInWithPassword = async (email, password) => {
     logger.auth('Attempting sign in with credentials...');
-    const normalizedEmail = email.trim().toLowerCase();
-    const attempts = JSON.parse(localStorage.getItem(LOGIN_ATTEMPT_KEY) || '{}');
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    if (!normalizedEmail || typeof password !== 'string' || !password) {
+      return {
+        data: { user: null },
+        error: new Error('Enter both your email address and password.')
+      };
+    }
+
+    let attempts = {};
+    try {
+      attempts = JSON.parse(localStorage.getItem(LOGIN_ATTEMPT_KEY) || '{}');
+    } catch {
+      localStorage.removeItem(LOGIN_ATTEMPT_KEY);
+    }
     const current = attempts[normalizedEmail];
     if (current?.lockedUntil && current.lockedUntil > Date.now()) {
       const minutes = Math.ceil((current.lockedUntil - Date.now()) / 60000);
       return { data: { user: null }, error: new Error(`Account temporarily locked. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`) };
     }
 
-    const result = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
-    if (result.error) {
-      const failedAttempts = (current?.failedAttempts || 0) + 1;
-      attempts[normalizedEmail] = failedAttempts >= 5
+    const recordFailure = (authError) => {
+      let latestAttempts = {};
+      try {
+        latestAttempts = JSON.parse(localStorage.getItem(LOGIN_ATTEMPT_KEY) || '{}');
+      } catch {
+        localStorage.removeItem(LOGIN_ATTEMPT_KEY);
+      }
+      const latest = latestAttempts[normalizedEmail];
+      const failedAttempts = (latest?.failedAttempts || 0) + 1;
+      const isLocked = failedAttempts >= 5;
+      latestAttempts[normalizedEmail] = isLocked
         ? { failedAttempts: 0, lockedUntil: Date.now() + LOGIN_LOCKOUT_MS }
         : { failedAttempts, lockedUntil: null };
-      localStorage.setItem(LOGIN_ATTEMPT_KEY, JSON.stringify(attempts));
-      return result;
-    }
+      localStorage.setItem(LOGIN_ATTEMPT_KEY, JSON.stringify(latestAttempts));
 
-    delete attempts[normalizedEmail];
-    localStorage.setItem(LOGIN_ATTEMPT_KEY, JSON.stringify(attempts));
-    if (result.data?.user) {
-      fetchProfile(result.data.user.id, 'MANUAL_LOGIN');
+      return isLocked
+        ? new Error('Too many failed login attempts. Account locked for 20 minutes.')
+        : new Error(`Invalid login credentials. Attempt ${failedAttempts} of 5.`);
+    };
+
+    try {
+      logger.auth('Submitting login credentials', {
+        email: normalizedEmail,
+        passwordPresent: true
+      });
+      const result = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+      if (result.error) throw result.error;
+
+      delete attempts[normalizedEmail];
+      localStorage.setItem(LOGIN_ATTEMPT_KEY, JSON.stringify(attempts));
+      if (result.data?.user) {
+        fetchProfile(result.data.user.id, 'MANUAL_LOGIN');
+      }
+      return result;
+    } catch (authError) {
+      logger.auth('Login failed', {
+        email: normalizedEmail,
+        status: authError?.status,
+        code: authError?.code,
+        message: authError?.message
+      });
+      return {
+        data: { user: null },
+        error: recordFailure(authError)
+      };
     }
-    return result;
   };
 
-  const resetPassword = async (email) => {
+  const requestPasswordReset = async (email) => {
     logger.auth('Requesting password reset for:', email);
     const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/login?reset=true`,
     });
     if (error) {
-      // Supabase 500 errors typically mean SMTP is misconfigured on the server
       const isServerError = error.status >= 500 || error.message?.toLowerCase().includes('internal');
       if (isServerError) {
         throw new Error('SMTP_UNAVAILABLE');
       }
       throw new Error(error.message || 'Failed to send reset email');
     }
+    return data;
+  };
+
+  const resetPassword = requestPasswordReset;
+
+  const changePassword = async (newPassword) => {
+    if (!user) {
+      throw new Error('You must be logged in to change your password from the profile view.');
+    }
+
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
     return data;
   };
 
@@ -326,7 +379,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, loading, isInitialized, signInWithPassword, signOut, resetPassword,
+      user, profile, loading, isInitialized, signInWithPassword, signOut, resetPassword, requestPasswordReset, changePassword,
       updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount, recoverAccount, fetchProfile, setProfile,
       toggleShift
     }}>

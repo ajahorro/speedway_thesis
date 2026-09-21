@@ -8,7 +8,10 @@ import { supabase } from '../lib/supabase';
 export const fetchUserGarage = async (userId) => {
   const { data, error } = await supabase
     .from('vehicles')
-    .select('*')
+    // Do not embed the legacy fleet_groups relationship here: vehicles now
+    // also connect to groups through fleet_group_vehicles, which otherwise
+    // makes PostgREST report an ambiguous relationship (PGRST201).
+    .select('*, memberships:fleet_group_vehicles(fleet_group_id)')
     .eq('owner_id', userId)
     .order('is_primary', { ascending: false })
     .order('created_at', { ascending: false });
@@ -20,7 +23,44 @@ export const fetchUserGarage = async (userId) => {
     }
     throw error;
   }
-  return data || [];
+  return (data || []).map(vehicle => ({
+    ...vehicle,
+    fleet_group_ids: (vehicle.memberships || []).map(membership => membership.fleet_group_id)
+  }));
+};
+
+export const fetchFleetGroups = async (ownerId) => {
+  const { data, error } = await supabase
+    .from('fleet_groups')
+    .select('*, memberships:fleet_group_vehicles(vehicle:vehicles(*))')
+    .eq('owner_id', ownerId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(group => ({
+    ...group,
+    vehicles: (group.memberships || []).map(membership => membership.vehicle).filter(Boolean)
+  }));
+};
+
+export const createFleetGroup = async (ownerId, name) => {
+  const { data, error } = await supabase
+    .from('fleet_groups')
+    .insert({ owner_id: ownerId, name: name.trim() })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const updateFleetGroup = async (groupId, name) => {
+  const { data, error } = await supabase
+    .from('fleet_groups')
+    .update({ name: name.trim() })
+    .eq('id', groupId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 };
 
 export const addVehicleToGarage = async (userId, vehicle) => {
@@ -60,6 +100,21 @@ export const updateGarageVehicle = async (vehicleId, updates) => {
 
   if (error) throw error;
   return data;
+};
+
+export const addVehicleToFleet = async (fleetGroupId, vehicleId) => {
+  const { error } = await supabase
+    .from('fleet_group_vehicles')
+    .upsert({ fleet_group_id: fleetGroupId, vehicle_id: vehicleId }, { onConflict: 'fleet_group_id,vehicle_id' });
+  if (error) throw error;
+};
+
+export const setFleetVehicles = async (fleetGroupId, vehicleIds) => {
+  const { error: deleteError } = await supabase.from('fleet_group_vehicles').delete().eq('fleet_group_id', fleetGroupId);
+  if (deleteError) throw deleteError;
+  if (!vehicleIds.length) return;
+  const { error: insertError } = await supabase.from('fleet_group_vehicles').insert(vehicleIds.map(vehicleId => ({ fleet_group_id: fleetGroupId, vehicle_id: vehicleId })));
+  if (insertError) throw insertError;
 };
 
 export const deleteGarageVehicle = async (vehicleId) => {

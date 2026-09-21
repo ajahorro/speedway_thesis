@@ -17,7 +17,7 @@ import { useTheme } from '../../context/ThemeContext';
 import BrandLogo from '../../components/BrandLogo';
 
 const AdminLayout = () => {
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -98,18 +98,33 @@ const AdminLayout = () => {
     });
   };
 
-  const navLinks = [
-    { name: 'Dashboard', path: '/admin', icon: LayoutDashboard, exact: true },
-    { name: 'Booking Management', path: '/admin/bookings', icon: ClipboardList },
-    { name: 'New Walk-In', path: '/admin/walk-in', icon: UserPlus },
-    { name: 'Payment Verification', path: '/admin/payments', icon: CheckSquare },
-    { name: 'Schedule', path: '/admin/schedule', icon: Calendar },
-    { name: 'Refund Hub', path: '/admin/refunds', icon: Undo },
-    { name: 'Analytics', path: '/admin/analytics', icon: BarChart2 },
-    { name: 'Audit Logs', path: '/admin/audit-logs', icon: History },
-    { name: 'Accounts Management', path: '/admin/accounts', icon: Users },
-    { name: 'Users', path: '/admin/users', icon: User },
-    { name: 'Notifications', path: '/admin/notifications', icon: Bell },
+  const navGroups = [
+    {
+      name: 'Core Operations',
+      links: [
+        { name: 'Dashboard', path: '/admin', icon: LayoutDashboard, exact: true },
+        { name: 'Booking Management', path: '/admin/bookings', icon: ClipboardList },
+        { name: 'Calendar', path: '/admin/schedule', icon: Calendar },
+        { name: 'New Walk-In', path: '/admin/walk-in', icon: UserPlus }
+      ]
+    },
+    {
+      name: 'Finance',
+      links: [
+        { name: 'Payment Verification', path: '/admin/payments', icon: CheckSquare },
+        { name: 'Refund Hub', path: '/admin/refunds', icon: Undo },
+        { name: 'Analytics', path: '/admin/analytics', icon: BarChart2 }
+      ]
+    },
+    {
+      name: 'System & Admin',
+      links: [
+        { name: 'Audit Logs', path: '/admin/audit-logs', icon: History },
+        { name: 'Staff Roles', path: '/admin/accounts', icon: Users },
+        { name: 'Client Directory', path: '/admin/users', icon: User },
+        { name: 'Notifications', path: '/admin/notifications', icon: Bell }
+      ]
+    }
   ];
 
   const bottomLinks = [
@@ -142,6 +157,7 @@ const AdminLayout = () => {
     top: 0,
     left: isMobile ? (isSidebarOpen ? 0 : '-260px') : 0,
     height: '100vh',
+    flexShrink: 0,
     zIndex: 1000,
     transition: 'left 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
   };
@@ -159,7 +175,7 @@ const AdminLayout = () => {
   };
 
   return (
-    <div className="admin-theme" data-theme={theme} style={{ display: 'flex', height: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', position: 'relative', overflow: 'hidden' }}>
+    <div className="admin-theme" data-theme={resolvedTheme} style={{ display: 'flex', width: '100vw', height: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', position: 'relative', overflow: 'hidden' }}>
 
       {/* Mobile Overlay */}
       <div style={overlayStyle} onClick={() => setIsSidebarOpen(false)} />
@@ -186,40 +202,44 @@ const AdminLayout = () => {
           </p>
         </div>
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', flex: 1, overflowY: 'auto', padding: '0 0.5rem' }}>
-          <div style={{ padding: '0.75rem 1rem', fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '1.5px', opacity: 0.4 }}>Command Center</div>
-          {navLinks.map((link) => {
-            const Icon = link.icon;
-            if (link.name === 'Settings') return null;
-            return (
-              <NavLink
-                key={link.name}
-                to={link.path}
-                end={link.exact}
-                className="admin-card-hover"
-                style={({ isActive }) => ({
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '0.85rem 1.25rem',
-                  borderRadius: 'var(--admin-radius-sm)',
-                  textDecoration: 'none',
-                  color: isActive ? 'var(--admin-sidebar-active-text)' : 'var(--admin-text-secondary)',
-                  background: isActive ? 'var(--admin-sidebar-active-bg)' : 'transparent',
-                  fontWeight: isActive ? '950' : '800',
-                  fontSize: '0.7rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.8px',
-                  transition: 'all 0.2s',
-                  borderLeft: isActive ? '3px solid var(--admin-brand)' : '3px solid transparent',
-                  marginLeft: '0'
-                })}
-              >
-                <Icon size={14} strokeWidth={2.5} />
-                {link.name}
-              </NavLink>
-            );
-          })}
+        <nav style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: '0 0.5rem' }}>
+          {navGroups.map((group, groupIndex) => (
+            <div key={group.name} style={{ marginTop: groupIndex === 0 ? 0 : '1rem' }}>
+              <div style={{ padding: '0.5rem 1rem', color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '700', letterSpacing: '0.04em', opacity: 0.75 }}>
+                {group.name}
+              </div>
+              {group.links.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <NavLink
+                    key={link.name}
+                    to={link.path}
+                    end={link.exact}
+                    className="admin-card-hover"
+                    style={({ isActive }) => ({
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.85rem',
+                      padding: '0.7rem 1.25rem',
+                      borderRadius: 'var(--admin-radius-sm)',
+                      textDecoration: 'none',
+                      color: isActive ? 'var(--admin-sidebar-active-text)' : 'var(--admin-text-secondary)',
+                      background: isActive ? 'var(--admin-sidebar-active-bg)' : 'transparent',
+                      fontWeight: isActive ? '800' : '600',
+                      fontSize: '0.8rem',
+                      letterSpacing: 0,
+                      transition: 'all 0.2s',
+                      borderLeft: isActive ? '3px solid var(--admin-brand)' : '3px solid transparent',
+                      marginLeft: '0'
+                    })}
+                  >
+                    <Icon size={16} strokeWidth={2.25} />
+                    {link.name}
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', padding: '1rem 0.5rem', borderTop: '1px solid var(--admin-border)' }}>
@@ -234,10 +254,9 @@ const AdminLayout = () => {
               textDecoration: 'none',
               color: isActive ? 'var(--admin-sidebar-active-text)' : 'var(--admin-text-secondary)',
               background: isActive ? 'var(--admin-sidebar-active-bg)' : 'transparent',
-              fontWeight: isActive ? '950' : '800',
-              fontSize: '0.7rem',
-              textTransform: 'uppercase',
-              letterSpacing: '0.8px',
+              fontWeight: isActive ? '800' : '600',
+              fontSize: '0.8rem',
+              letterSpacing: 0,
               borderLeft: isActive ? '3px solid var(--admin-brand)' : '3px solid transparent',
               marginLeft: '0'
             })}
@@ -255,16 +274,15 @@ const AdminLayout = () => {
               padding: '0.85rem 1.25rem',
               borderRadius: 'var(--admin-radius-sm)',
               color: 'var(--admin-text-secondary)',
-              fontWeight: '950',
-              fontSize: '0.7rem',
+              fontWeight: '600',
+              fontSize: '0.8rem',
               width: '100%',
               textAlign: 'left',
               cursor: 'pointer',
               transition: 'all 0.2s',
               background: 'transparent',
               border: 'none',
-              textTransform: 'uppercase',
-              letterSpacing: '0.8px',
+              letterSpacing: 0,
               marginLeft: '0.25rem'
             }}
             onMouseEnter={(e) => e.currentTarget.style.color = 'var(--admin-brand)'}
@@ -276,7 +294,7 @@ const AdminLayout = () => {
         </div>
       </aside>
 
-      <div className="admin-main-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1, maxWidth: '100%', marginLeft: isMobile ? 0 : '260px' }}>
+      <div className="admin-main-wrapper" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1, maxWidth: '100%', height: '100vh', overflow: 'hidden', marginLeft: isMobile ? 0 : '260px' }}>
         <header className="no-print" style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -362,7 +380,7 @@ const AdminLayout = () => {
           </div>
         )}
 
-        <main style={{ flex: 1, padding: isMobile ? '1.5rem 1rem' : '2.5rem', overflowY: 'auto', background: 'var(--admin-bg)' }}>
+        <main style={{ flex: 1, minHeight: 0, padding: isMobile ? '1.5rem 1rem' : '2.5rem', overflowY: 'auto', background: 'var(--admin-bg)' }}>
           <Outlet />
         </main>
       </div>

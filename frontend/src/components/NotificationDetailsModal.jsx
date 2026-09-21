@@ -31,8 +31,9 @@ const NotificationDetailsModal = ({ notification, onClose, onMarkRead, profile }
       e.preventDefault();
     }
 
-    if (notification.booking_id) {
-      const targetUrl = `${rolePrefix}/bookings/${notification.booking_id}`;
+    const bookingTarget = notification.booking_id || notification.message?.match(/#([A-Za-z0-9_-]{8})/)?.[1];
+    if (bookingTarget) {
+      const targetUrl = `${rolePrefix}/bookings/${bookingTarget}${notification.notification_type === 'MESSAGE_RECEIVED' || notification.title?.toLowerCase().includes('new message') ? '?chat=open' : ''}`;
       onClose();
       navigate(targetUrl);
     } else {
@@ -44,9 +45,10 @@ const NotificationDetailsModal = ({ notification, onClose, onMarkRead, profile }
   const renderFormattedMessage = (message) => {
     if (!message) return '';
     const parts = message.split(/(#[A-Za-z0-9_-]+)/g);
+    const hasBookingReference = parts.some(part => /^#[A-Za-z0-9_-]+$/.test(part));
     return parts.map((part, index) => {
       if (part.startsWith('#')) {
-        if (notification.booking_id) {
+        if (notification.booking_id || hasBookingReference) {
           return (
             <span
               key={index}
@@ -74,7 +76,19 @@ const NotificationDetailsModal = ({ notification, onClose, onMarkRead, profile }
         );
       }
       return part;
-    });
+    }).concat(notification.booking_id && !hasBookingReference ? [
+      <span key="booking-reference" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.35rem' }}>
+        <span aria-hidden="true">·</span>
+        <button
+          type="button"
+          onClick={handleViewBooking}
+          style={{ background: 'none', border: 'none', padding: 0, color: 'var(--admin-brand)', fontWeight: '950', textDecoration: 'underline', cursor: 'pointer', font: 'inherit' }}
+        >
+          #{String(notification.booking_id).slice(0, 8).toUpperCase()}
+          <ExternalLink size={12} style={{ verticalAlign: 'middle', marginLeft: '0.2rem' }} />
+        </button>
+      </span>
+    ] : []);
   };
 
   return (
@@ -147,7 +161,7 @@ const NotificationDetailsModal = ({ notification, onClose, onMarkRead, profile }
 
         {/* Modal Actions */}
         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          {notification.booking_id && (
+          {(notification.booking_id || notification.message?.match(/#[A-Za-z0-9_-]{8}/)) && (
             <button
               onClick={handleViewBooking}
               style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-brand)', border: 'none', borderRadius: 'var(--admin-radius-sm)', color: 'white', fontWeight: '950', fontSize: '0.75rem', textTransform: 'uppercase', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}

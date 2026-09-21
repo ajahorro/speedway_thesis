@@ -51,14 +51,17 @@ const AdminSearch = () => {
         const filteredPages = pages.filter(p => p.name.toLowerCase().includes(query.toLowerCase()));
 
         // 2. Search Bookings
-        const { data: bookings } = await supabase
+        const bookingSearch = supabase
           .from('bookings')
-          .select(`id, customer:profiles!bookings_customer_id_fkey(full_name)`)
-          .or(`id.ilike.%${query}%`)
+          .select('id, customer_name, customer:profiles!bookings_customer_id_fkey(full_name)')
           .limit(3);
+        const uuidQuery = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(query.trim());
+        const { data: bookings } = uuidQuery
+          ? await bookingSearch.eq('id', query.trim())
+          : await bookingSearch.ilike('customer_name', `%${query}%`);
 
         const bookingResults = (bookings || []).map(b => ({
-          name: `Booking #${b.id.slice(0, 8)} - ${b.customer?.full_name || 'Customer'}`,
+          name: `Booking #${b.id.slice(0, 8)} - ${b.customer?.full_name || b.customer_name || 'Customer'}`,
           path: `/admin/bookings/${b.id}`,
           icon: FileText,
           category: 'Recent Bookings'
@@ -107,8 +110,8 @@ const AdminSearch = () => {
         style={{ 
           padding: '0.65rem 1rem 0.65rem 2.75rem', 
           borderRadius: 'var(--admin-radius-sm)', 
-          background: '#1A1A1A', 
-          border: '1px solid #333', 
+          background: 'var(--admin-bg)', 
+          border: '1px solid var(--admin-border)', 
           color: 'var(--admin-text-primary)',
           fontSize: '0.75rem',
           fontWeight: '950',

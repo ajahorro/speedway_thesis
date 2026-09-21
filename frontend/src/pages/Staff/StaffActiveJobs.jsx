@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { useUI } from '../../context/UIContext';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, Car, Clock, Play, CheckCircle2, Save, UploadCloud, Image as ImageIcon } from 'lucide-react';
 import PageHeader from '../../components/PageHeader';
@@ -11,6 +12,7 @@ import { BACKEND_URL } from '../../config/api';
 
 const StaffActiveJobs = () => {
   const { profile } = useAuth();
+  const { openModal } = useUI();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +76,6 @@ const StaffActiveJobs = () => {
         })
       });
       if (response.ok) {
-        await sendStatusEmail(task.booking_id, newStatus, localNotes[task.id]);
         toast.success(`Marked as ${newStatus.toUpperCase()}`, { id: toastId });
         return fetchActiveTasks();
       }
@@ -85,6 +86,26 @@ const StaffActiveJobs = () => {
       toast.success('Status updated', { id: toastId });
       fetchActiveTasks();
     }
+  };
+
+  const canStartTask = (task) => {
+    if (!profile?.is_clocked_in || !task.start_datetime) return false;
+    const scheduled = new Date(task.start_datetime);
+    const today = new Date();
+    return scheduled.getFullYear() === today.getFullYear()
+      && scheduled.getMonth() === today.getMonth()
+      && scheduled.getDate() === today.getDate();
+  };
+
+  const requestUpdateStatus = (task, newStatus) => {
+    openModal({
+      title: newStatus === 'COMPLETED' ? 'Finalize Service?' : 'Start Service?',
+      message: newStatus === 'COMPLETED' ? 'Confirm this unit has passed service.' : 'Start service for this unit?',
+      confirmText: newStatus === 'COMPLETED' ? 'Finish Job' : 'Start Service',
+      cancelText: 'Cancel',
+      type: newStatus === 'COMPLETED' ? 'success' : 'info',
+      onConfirm: () => handleUpdateStatus(task, newStatus)
+    });
   };
 
   const handleSaveNotes = async (taskId) => {
@@ -160,12 +181,12 @@ const StaffActiveJobs = () => {
 
               <div style={{ display: 'flex', gap: '1rem' }}>
                 {task.status?.toUpperCase() === 'PENDING' && (
-                  <button onClick={() => handleUpdateStatus(task, 'IN_PROGRESS')} style={{ flex: 1, padding: '0.85rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'pointer', textTransform: 'uppercase' }}>
+                  <button onClick={() => requestUpdateStatus(task, 'IN_PROGRESS')} disabled={!canStartTask(task)} style={{ flex: 1, padding: '0.85rem', background: canStartTask(task) ? '#E61E2A' : 'var(--admin-border)', color: canStartTask(task) ? 'white' : 'var(--admin-text-secondary)', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: canStartTask(task) ? 'pointer' : 'not-allowed', textTransform: 'uppercase' }}>
                     <Play size={16} /> Start Service
                   </button>
                 )}
                 {task.status?.toUpperCase() === 'IN_PROGRESS' && (
-                  <button onClick={() => { if (window.confirm('Finalize unit?')) handleUpdateStatus(task, 'COMPLETED') }} style={{ flex: 1, padding: '0.85rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'pointer', textTransform: 'uppercase' }}>
+                  <button onClick={() => requestUpdateStatus(task, 'COMPLETED')} style={{ flex: 1, padding: '0.85rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'pointer', textTransform: 'uppercase' }}>
                     <CheckCircle2 size={16} /> Mark Finished
                   </button>
                 )}

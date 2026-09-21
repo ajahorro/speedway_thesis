@@ -1,30 +1,14 @@
 import React, { useState } from 'react';
-import { Mail, Lock } from 'lucide-react';
+import { Mail, Lock, AlertCircle } from 'lucide-react';
+import StyledInput from './StyledInput';
 
-const LoginForm = ({ onLogin, onSwitchMode, isLoading, prefillEmail = '' }) => {
-  const [email, setEmail] = useState(prefillEmail);
+const LoginForm = ({ onLogin, onSwitchMode, isLoading, error, onClearError }) => {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-
-  React.useEffect(() => {
-    if (prefillEmail) setEmail(prefillEmail);
-  }, [prefillEmail]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onLogin(email.trim(), password);
-  };
-
-  const inputStyle = {
-    width: '100%',
-    background: 'var(--admin-bg)',
-    border: '1px solid var(--admin-border)',
-    padding: '1rem 1rem 1rem 3rem',
-    borderRadius: '0.85rem',
-    color: 'var(--admin-text-primary)',
-    fontSize: '0.95rem',
-    outline: 'none',
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-    boxSizing: 'border-box'
   };
 
   const buttonStyle = {
@@ -46,29 +30,17 @@ const LoginForm = ({ onLogin, onSwitchMode, isLoading, prefillEmail = '' }) => {
 
   return (
     <form onSubmit={handleSubmit}>
-      <div style={{ position: 'relative', marginBottom: '1.25rem' }}>
-        <Mail size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="email" 
-          placeholder="Email Address" 
-          required 
-          value={email} 
-          onChange={e => setEmail(e.target.value)} 
-          style={inputStyle} 
-          autoComplete="email" 
-        />
+      <div style={{ marginBottom: '1.25rem' }}>
+        {error && (
+          <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '0.65rem', color: '#fca5a5', fontSize: '0.8rem', fontWeight: '700', lineHeight: 1.4 }}>
+            <AlertCircle size={16} style={{ flexShrink: 0 }} />
+            <span>{error}</span>
+          </div>
+        )}
+        <StyledInput icon={Mail} type="email" placeholder="Email Address" required value={email} onChange={e => { setEmail(e.target.value); onClearError?.(); }} autoComplete="email" />
       </div>
       <div style={{ position: 'relative', marginBottom: '1.25rem' }}>
-        <Lock size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="password" 
-          placeholder="Password" 
-          required 
-          value={password} 
-          onChange={e => setPassword(e.target.value)} 
-          style={inputStyle} 
-          autoComplete="current-password" 
-        />
+        <StyledInput icon={Lock} type="password" placeholder="Password" required value={password} onChange={e => { setPassword(e.target.value); onClearError?.(); }} autoComplete="current-password" />
       </div>
       <button type="submit" disabled={isLoading} style={buttonStyle}>
         {isLoading ? 'Processing...' : 'Login'}

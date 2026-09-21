@@ -236,7 +236,8 @@ const AdminNotifications = () => {
   };
 
   const filteredNotifications = notifications.filter(n => {
-    const matchesSearch = n.message?.toLowerCase().includes(searchQuery.toLowerCase());
+    const haystack = [n.title, n.message, n.notification_type, n.action_url].filter(Boolean).join(' ').toLowerCase();
+    const matchesSearch = haystack.includes(searchQuery.trim().toLowerCase());
     if (filter === 'UNREAD') return matchesSearch && !n.is_read;
     if (filter === 'READ') return matchesSearch && n.is_read;
     return matchesSearch;

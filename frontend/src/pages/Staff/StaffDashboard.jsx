@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../hooks/useAuth';
+import { useUI } from '../../context/UIContext';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
@@ -15,6 +16,7 @@ import ConfirmationToast from '../../components/ConfirmationToast';
 import { BACKEND_URL } from '../../config/api';
 const StaffDashboard = () => {
   const { profile } = useAuth();
+  const { openModal } = useUI();
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width: 1024px)');
   const [tasks, setTasks] = useState([]);
@@ -147,7 +149,6 @@ const StaffDashboard = () => {
         })
       });
       if (response.ok) {
-        await sendStatusEmail(task.booking_id, newStatus, localNotes[task.id]);
         toast.success(`Unit marked as ${newStatus.toUpperCase()}`, { id: toastId });
         return fetchAssignedTasks();
       }
@@ -159,6 +160,28 @@ const StaffDashboard = () => {
       toast.success('Status updated (Syncing...)', { id: toastId });
       fetchAssignedTasks();
     }
+  };
+
+  const canStartTask = (task) => {
+    if (!profile?.is_clocked_in || !task.start_datetime) return false;
+    const scheduled = new Date(task.start_datetime);
+    const today = new Date();
+    return scheduled.getFullYear() === today.getFullYear()
+      && scheduled.getMonth() === today.getMonth()
+      && scheduled.getDate() === today.getDate();
+  };
+
+  const requestUpdateStatus = (task, newStatus) => {
+    openModal({
+      title: newStatus === 'COMPLETED' ? 'Finalize Service?' : 'Start Service?',
+      message: newStatus === 'COMPLETED'
+        ? `Confirm completion for ${task.brand} ${task.model}. This will notify the customer.`
+        : `Start service for ${task.brand} ${task.model}?`,
+      confirmText: newStatus === 'COMPLETED' ? 'Finish Job' : 'Start Service',
+      cancelText: 'Cancel',
+      type: newStatus === 'COMPLETED' ? 'success' : 'info',
+      onConfirm: () => handleUpdateStatus(task, newStatus)
+    });
   };
 
   const handleSaveNotes = async (taskId) => {
@@ -368,23 +391,13 @@ const StaffDashboard = () => {
 
                   <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
                     {task.status?.toUpperCase() === 'PENDING' && (
-                      <button onClick={() => handleUpdateStatus(task, 'IN_PROGRESS')} disabled={!profile?.is_clocked_in} style={{ flex: 1, padding: '1rem', background: '#E61E2A', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      <button onClick={() => requestUpdateStatus(task, 'IN_PROGRESS')} disabled={!canStartTask(task)} style={{ flex: 1, padding: '1rem', background: canStartTask(task) ? '#E61E2A' : 'var(--admin-border)', color: canStartTask(task) ? 'white' : 'var(--admin-text-secondary)', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', cursor: canStartTask(task) ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
                         <Play size={18} /> START SERVICE
                       </button>
                     )}
                     {task.status?.toUpperCase() === 'IN_PROGRESS' && (
                       <button 
-                        onClick={() => {
-                          openModal({
-                            title: "Finalize Service?",
-                            message: `Confirming completion for ${task.brand} ${task.model}. This will notify the customer and prepare the final invoice.`,
-                            confirmText: "Finish Job",
-                            type: "brand",
-                            onConfirm: () => {
-                              handleUpdateStatus(task, 'COMPLETED');
-                            }
-                          });
-                        }} 
+                        onClick={() => requestUpdateStatus(task, 'COMPLETED')} 
                         disabled={!profile?.is_clocked_in} 
                         style={{ flex: 1, padding: '1rem', background: '#10b981', color: 'white', border: 'none', borderRadius: '4px', fontWeight: '950', fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', textTransform: 'uppercase', letterSpacing: '1px' }}
                       >

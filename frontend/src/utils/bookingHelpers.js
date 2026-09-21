@@ -26,12 +26,30 @@ export const getStatusLabel = (status) => {
     confirmed: 'Confirmed',
     in_progress: 'In Progress',
     completed: 'Completed',
+    released: 'Released',
     cancelled: 'Cancelled',
     flagged_noshow: 'No-Show',
     queued: 'Queued',
     pending: 'Pending',
   };
   return labels[status?.toLowerCase()] || status?.toUpperCase() || 'Unknown';
+};
+
+export const formatBookingDate = (date) => {
+  if (!date) return 'Unscheduled';
+  return new Date(date).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+};
+
+export const formatBookingTime = (date) => {
+  if (!date) return '';
+  return new Date(date).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 };
 
 // ─── STATUS TRANSITIONS ─────────────────────────────────────────
@@ -44,7 +62,8 @@ export const canTransitionTo = (current, target) => {
     [BOOKING_STATUSES.SCHEDULED]: [BOOKING_STATUSES.CONFIRMED, BOOKING_STATUSES.CANCELLED],
     [BOOKING_STATUSES.CONFIRMED]: [BOOKING_STATUSES.IN_PROGRESS, BOOKING_STATUSES.CANCELLED],
     [BOOKING_STATUSES.IN_PROGRESS]: [BOOKING_STATUSES.COMPLETED, BOOKING_STATUSES.CANCELLED],
-    [BOOKING_STATUSES.COMPLETED]: [],
+    [BOOKING_STATUSES.COMPLETED]: [BOOKING_STATUSES.RELEASED],
+    [BOOKING_STATUSES.RELEASED]: [],
     [BOOKING_STATUSES.CANCELLED]: [],
     [BOOKING_STATUSES.FLAGGED_NOSHOW]: [BOOKING_STATUSES.CANCELLED, BOOKING_STATUSES.IN_PROGRESS],
   };
@@ -61,7 +80,7 @@ export const isBookingOverdue = (booking, graceMins = THRESHOLDS.NOSHOW_GRACE_MI
   const start = new Date(booking.start_datetime);
   const now = new Date();
   const diffMins = (now - start) / (1000 * 60);
-  const activeStatuses = [BOOKING_STATUSES.IN_PROGRESS, BOOKING_STATUSES.COMPLETED, BOOKING_STATUSES.CANCELLED];
+  const activeStatuses = [BOOKING_STATUSES.IN_PROGRESS, BOOKING_STATUSES.COMPLETED, BOOKING_STATUSES.RELEASED, BOOKING_STATUSES.CANCELLED, BOOKING_STATUSES.FLAGGED_NOSHOW];
   return diffMins > graceMins && !activeStatuses.includes(booking.status);
 };
 

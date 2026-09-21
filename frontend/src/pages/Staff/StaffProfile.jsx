@@ -6,7 +6,7 @@ import toast from 'react-hot-toast';
 import PageHeader from '../../components/PageHeader';
 
 const StaffProfile = () => {
-  const { profile, user, verifyPassword, resetPassword } = useAuth();
+  const { profile, user, verifyPassword } = useAuth();
   const [loading, setLoading] = useState(false);
   const [passLoading, setPassLoading] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
@@ -14,25 +14,6 @@ const StaffProfile = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const isFormValid = currentPassword.trim().length > 0 && newPassword.length > 4 && confirmPassword === newPassword;
-
-  const handleForgotPassword = async () => {
-    const email = profile?.email || user?.email;
-    if (!email) return toast.error('No email address associated with this account');
-    const toastId = toast.loading('Sending password reset instructions...');
-    try {
-      await resetPassword(email);
-      toast.success('Password reset email sent. Check your inbox!', { id: toastId });
-    } catch (err) {
-      if (err.message === 'SMTP_UNAVAILABLE') {
-        toast.error(
-          'Password reset email service is currently unavailable. Please contact an Administrator to reset your password.',
-          { id: toastId, duration: 7000 }
-        );
-      } else {
-        toast.error(err.message || 'Failed to send reset email', { id: toastId });
-      }
-    }
-  };
 
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
@@ -164,23 +145,17 @@ const StaffProfile = () => {
               aria-hidden="true" 
             />
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <div style={{ marginBottom: '0.5rem' }}>
                 <div style={labelStyle}>Current Password</div>
-                <button 
-                  type="button" 
-                  onClick={handleForgotPassword}
-                  style={{ background: 'none', border: 'none', color: '#E61E2A', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', padding: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}
-                >
-                  Forgot Password?
-                </button>
               </div>
               <input 
                 type="password" 
                 value={currentPassword}
+                onFocus={() => setCurrentPassword('')}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 placeholder="Verify identity"
                 style={inputStyle}
-                autoComplete="current-password"
+                autoComplete="off"
                 required
               />
             </div>

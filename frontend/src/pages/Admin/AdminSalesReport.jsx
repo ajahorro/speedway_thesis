@@ -52,6 +52,7 @@ const AdminSalesReport = () => {
           booking:bookings!payments_booking_id_fkey(
             id, 
             customer_id,
+            customer_name,
             vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(
               *,
               services:booking_vehicle_services(*)
@@ -59,6 +60,7 @@ const AdminSalesReport = () => {
           )
         `)
         .in('status', ['PAID', 'REFUNDED'])
+        .gt('amount', 0)
         .gte('created_at', startDate.toISOString())
         .order('created_at', { ascending: false });
 
@@ -70,15 +72,14 @@ const AdminSalesReport = () => {
         for (const p of paymentsRaw) {
           if (p.booking?.customer_id) {
             const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', p.booking.customer_id).single();
-            payments.push({ ...p, booking: { ...p.booking, customer: { full_name: profile?.full_name || 'Walk-in' } } });
+            payments.push({ ...p, booking: { ...p.booking, customer: { full_name: profile?.full_name || p.booking.customer_name || 'Walk-in' } } });
           } else {
-            payments.push(p);
+            payments.push({ ...p, booking: { ...p.booking, customer: { full_name: p.booking?.customer_name || 'Walk-in' } } });
           }
         }
       }
 
-      // 2. Fetch the negative refund ledger entries only. Original payments
-      // are marked REFUNDED and must not inflate gross or refund totals.
+      // 2. Fetch negative refund ledger entries separately from positive source payments.
       const { data: refundData } = await supabase
         .from('payments')
         .select('amount')
@@ -93,7 +94,7 @@ const AdminSalesReport = () => {
       }));
 
       // Aggregates Logic
-      const gross = enrichedTransactions.filter(payment => payment.status === 'PAID').reduce((sum, p) => sum + Number(p.amount), 0);
+      const gross = enrichedTransactions.reduce((sum, p) => sum + Number(p.amount), 0);
       const refunded = Math.abs((refundData || []).reduce((sum, payment) => sum + Number(payment.amount), 0));
       
       const serviceMap = {};

@@ -22,7 +22,6 @@ const AdminRefunds = () => {
     loading: true,
     searchQuery: '',
     filter: 'PENDING',
-    processedMethodFilter: 'ALL', // 'ALL' | 'DIGITAL' | 'CASH'
     selectedItem: null,
     confirmRefundItem: null,
     refundReason: '',
@@ -39,25 +38,32 @@ const AdminRefunds = () => {
         .select(`
           *,
           customer:profiles!bookings_customer_id_fkey(full_name, email, phone_number),
-          vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*),
+          vehicles:booking_vehicles!booking_vehicles_booking_id_fkey(*, services:booking_vehicle_services(*)),
           payments:payments!payments_booking_id_fkey(*)
         `)
-        .in('status', ['cancelled', 'FLAGGED_NOSHOW'])
+        .or('status.in.(cancelled,FLAGGED_NOSHOW),refund_status.in.(QUEUED,PROCESSING,PROCESSED,EMAIL_PENDING)')
         .order('updated_at', { ascending: false });
 
       if (error) throw error;
 
       const processed = (data || []).map(b => {
-        const totalPaid = (b.payments || [])
-          .filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING' || p.status === 'REFUNDED')
+        const positivePayments = (b.payments || [])
+          .filter(p => ['PAID', 'REFUND_PENDING', 'REFUNDED'].includes(p.status) && Number(p.amount) > 0)
           .reduce((sum, p) => sum + Number(p.amount), 0);
+        const processedRefunds = (b.payments || [])
+          .filter(p => p.method === 'SYSTEM_REFUND' && Number(p.amount) < 0)
+          .reduce((sum, p) => sum + Math.abs(Number(p.amount)), 0);
+        const totalPaid = Math.max(0, positivePayments - processedRefunds);
         
         return {
           ...b,
+          customer: b.customer
+            ? { ...b.customer, full_name: b.customer.full_name || b.customer_name || 'Customer' }
+            : { full_name: b.customer_name || 'Customer' },
           totalPaid,
-          refundStatus: b.refund_status || 'PENDING' 
+          refundStatus: b.refund_status || 'QUEUED' 
         };
-      }).filter(b => b.totalPaid > 0);
+      }).filter(b => b.totalPaid > 0 || ['PROCESSED', 'EMAIL_PENDING'].includes(b.refundStatus));
 
       setState(prev => ({ ...prev, refundItems: processed, loading: false }));
       logger.admin('Refund directory synchronized.');
@@ -77,108 +83,69 @@ const AdminRefunds = () => {
     return state.refundItems.filter(b => {
       const matchesSearch = 
         b.customer?.full_name?.toLowerCase().includes(state.searchQuery.toLowerCase()) || 
+        b.customer_name?.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
         b.id.toLowerCase().includes(state.searchQuery.toLowerCase());
       
-      if (state.filter === 'PENDING') return matchesSearch && b.refundStatus === 'PENDING';
-      if (state.filter === 'PROCESSED') {
-        const isProcessed = b.refundStatus === 'PROCESSED';
-        if (!isProcessed) return false;
-        const hasCash = (b.payments || []).some(p => p.method?.toLowerCase() === 'cash');
-        const hasDigital = (b.payments || []).some(p => p.method?.toLowerCase() !== 'cash');
-        if (state.processedMethodFilter === 'DIGITAL') return matchesSearch && hasDigital;
-        if (state.processedMethodFilter === 'CASH') return matchesSearch && hasCash;
-        return matchesSearch;
-      }
+      if (state.filter === 'PENDING') return matchesSearch && ['PENDING', 'QUEUED', 'PROCESSING', 'EMAIL_PENDING'].includes(b.refundStatus);
+      if (state.filter === 'PROCESSED') return matchesSearch && b.refundStatus === 'PROCESSED';
       
       return matchesSearch;
     });
-  }, [state.refundItems, state.searchQuery, state.filter, state.processedMethodFilter]);
+  }, [state.refundItems, state.searchQuery, state.filter]);
 
   const handleProcessRefund = async (item) => {
     const toastId = toast.loading('Synchronizing financial reversal...');
-    
-    // OPTIMISTIC UI: Update local state immediately
     const previousRefundItems = [...state.refundItems];
-    const updatedItems = state.refundItems.map(b => 
-      b.id === item.id ? { ...b, refundStatus: 'PROCESSED' } : b
-    );
-    setState(prev => ({ ...prev, refundItems: updatedItems, selectedItem: { ...prev.selectedItem, refundStatus: 'PROCESSED' } }));
 
     try {
-      const refundRef = `RFD-${Date.now().toString().slice(-6)}-${item.id.substring(0,4).toUpperCase()}`;
+      let refundRef = item.payments?.find(payment => payment.method === 'SYSTEM_REFUND')?.reference_number;
+      let refundAmount = state.refundAmount;
 
-      // 1. Update Booking Status (REQ-NFR-20)
-      const { error: bError } = await supabase
-        .from('bookings')
-        .update({ 
-          refund_status: 'PROCESSING',
-          refund_notes: state.refundReason,
-          status: 'cancelled' 
-        })
-        .eq('id', item.id);
-
-      if (bError) throw new Error(`Booking update failed: ${bError.message}`);
-
-      // 2. Mark the original payment as refunded so it is excluded from gross sales.
-      const { data: pUpdateData, error: pUpdateError } = await supabase
-        .from('payments')
-        .update({ 
-          status: 'REFUNDED',
-          notes: `REFUND_PROCESSED_ON_${new Date().toLocaleDateString()}` 
-        })
-        .eq('booking_id', item.id)
-        .eq('status', 'REFUND_PENDING');
-
-      if (pUpdateError) throw new Error(`Payment status update failed: ${pUpdateError.message}`);
-
-      // 3. Insert Negative Line Item for Partial/Full Refund (REQ-ADM-10)
-      const { error: pInsertError } = await supabase
-        .from('payments')
-        .insert({
-          booking_id: item.id,
-          amount: -Math.abs(state.refundAmount),
-          status: 'REFUNDED', 
-          method: 'SYSTEM_REFUND',
-          reference_number: refundRef,
-          refund_reason: state.refundReason,
-          notes: `REFUND_PROCESSED: ${state.refundReason}`, 
-          refunded_at: new Date().toISOString()
+      if (!['PROCESSED', 'EMAIL_PENDING'].includes(item.refundStatus)) {
+        refundRef = `RFD-${Date.now().toString().slice(-6)}-${item.id.substring(0, 4).toUpperCase()}`;
+        const { data: { user } } = await supabase.auth.getUser();
+        const { data: rpcData, error: rpcError } = await supabase.rpc('process_booking_refund', {
+          p_booking_id: item.id,
+          p_refund_amount: state.refundAmount,
+          p_refund_reason: state.refundReason,
+          p_refund_reference: refundRef,
+          p_actor_id: user?.id || null
         });
+        if (rpcError) throw new Error(`Refund transaction failed: ${rpcError.message}`);
+        refundAmount = Number(rpcData?.refund_amount || state.refundAmount);
+      } else {
+        refundAmount = Math.abs(Number(item.payments?.find(payment => payment.method === 'SYSTEM_REFUND')?.amount || state.refundAmount));
+      }
 
-      if (pInsertError) throw new Error(`Refund ledger insertion failed: ${pInsertError.message}`);
+      const refundEmail = item.customer?.email || item.customer_email;
+      const { error: emailError } = refundEmail
+        ? await supabase.functions.invoke('send-refund-receipt', {
+            body: {
+              bookingId: item.id,
+              refundReference: refundRef
+            }
+          })
+        : { error: new Error('Customer email not found') };
 
-      const { error: completeRefundError } = await supabase.from('bookings').update({ refund_status: 'PROCESSED' }).eq('id', item.id);
-      if (completeRefundError) throw new Error(`Refund status update failed: ${completeRefundError.message}`);
+      if (emailError) {
+        await supabase.from('bookings').update({ refund_status: 'EMAIL_PENDING' }).eq('id', item.id);
+        throw new Error(`Refund saved, but email is pending: ${emailError.message}`);
+      }
 
+      if (item.refundStatus === 'EMAIL_PENDING') {
+        const { error: retryStateError } = await supabase
+          .from('bookings')
+          .update({ refund_status: 'PROCESSED' })
+          .eq('id', item.id);
+        if (retryStateError) throw retryStateError;
+      }
 
-      // 4. MASTER AUDIT LOG (REQ-NFR-15)
-      const { data: { user } } = await supabase.auth.getUser();
-      await supabase.from('audit_logs').insert({
-        booking_id: item.id,
-        action_type: 'ADMIN_PROCESSED_REFUND',
-        details: `Administrator processed refund of ₱${state.refundAmount.toLocaleString()}. Ref: ${refundRef}. Reason: ${state.refundReason}`,
-        actor_name: 'Administrator',
-        actor_role: 'ADMIN',
-        actor_id: user?.id,
-        metadata: { amount: state.refundAmount, reason: state.refundReason, refund_reference_id: refundRef }
-      });
-
-      // 5. System Chat Injection (REQ-NFR-20)
-      await supabase.from('booking_messages').insert({
-        booking_id: item.id,
-        sender_id: null, 
-        message: `[SYSTEM] Refund Processed. Amount: ₱${state.refundAmount.toLocaleString()}. Reason: ${state.refundReason}`,
-        message_type: 'system'
-      });
-
-      // 6. Final State Synchronization
-      toast.success('Financial record has been updated. Notification queued.', { id: toastId });
+      toast.success('Financial record and refund email completed.', { id: toastId });
       await fetchRefundData();
       setState(prev => ({ ...prev, selectedItem: null, confirmRefundItem: null, refundReason: '', refundAmount: 0 }));
     } catch (err) {
       logger.error('Refund Process Error', err);
       toast.error(err.message || 'Failed to synchronize refund records', { id: toastId });
-      // ROLLBACK Optimistic UI on error
       setState(prev => ({ ...prev, refundItems: previousRefundItems }));
     }
   };
@@ -235,38 +202,6 @@ const AdminRefunds = () => {
                 </button>
               ))}
             </div>
-            {state.filter === 'PROCESSED' && (
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', marginTop: '0.25rem', paddingLeft: '0.25rem', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '0.25rem' }}>
-                  Filter Processed:
-                </span>
-                {[
-                  { key: 'ALL', label: 'All' },
-                  { key: 'DIGITAL', label: 'Digital' },
-                  { key: 'CASH', label: 'Cash' }
-                ].map(m => (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => setState(prev => ({ ...prev, processedMethodFilter: m.key }))}
-                    style={{
-                      padding: '0.35rem 0.75rem',
-                      borderRadius: 'var(--admin-radius-sm)',
-                      border: `1px solid ${state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                      background: state.processedMethodFilter === m.key ? 'rgba(var(--admin-brand-rgb), 0.12)' : 'var(--admin-bg)',
-                      color: state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-text-secondary)',
-                      fontSize: '0.65rem',
-                      fontWeight: '900',
-                      cursor: 'pointer',
-                      textTransform: 'uppercase',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           {filteredItems.length === 0 ? (
@@ -289,7 +224,7 @@ const AdminRefunds = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>#{b.id.slice(0, 8).toUpperCase()}</div>
-                  <h3 style={{ margin: 0, fontWeight: '900', fontSize: isMobile ? '0.9rem' : '1rem', textTransform: 'uppercase' }}>{b.customer?.full_name}</h3>
+                  <h3 style={{ margin: 0, fontWeight: '900', fontSize: isMobile ? '0.9rem' : '1rem', textTransform: 'uppercase' }}>{b.customer?.full_name || b.customer_name || 'Customer'}</h3>
                 </div>
                 <span style={{ fontSize: '0.6rem', padding: '0.2rem 0.5rem', borderRadius: 'var(--admin-radius)', background: b.refundStatus === 'PROCESSED' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: b.refundStatus === 'PROCESSED' ? '#10b981' : '#ef4444', fontWeight: '900' }}>{b.refundStatus}</span>
               </div>
@@ -315,7 +250,7 @@ const AdminRefunds = () => {
               </div>
 
               <div style={{ background: 'var(--admin-bg)', padding: '0.85rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)' }}>
-                <div style={{ fontWeight: '900', fontSize: '0.9rem' }}>{state.selectedItem.customer?.full_name}</div>
+                <div style={{ fontWeight: '900', fontSize: '0.9rem' }}>{state.selectedItem.customer?.full_name || state.selectedItem.customer_name || 'Customer'}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>{state.selectedItem.customer?.email}</div>
               </div>
 
@@ -380,13 +315,13 @@ const AdminRefunds = () => {
                   <ExternalLink size={14} /> VIEW BOOKING DETAILS
                 </button>
 
-                {state.selectedItem.refundStatus === 'PENDING' && (
+                {['PENDING', 'QUEUED', 'PROCESSING', 'EMAIL_PENDING'].includes(state.selectedItem.refundStatus) && (
                   <button 
-                    disabled={!state.refundReason || state.refundAmount <= 0}
+                    disabled={state.selectedItem.refundStatus !== 'EMAIL_PENDING' && (!state.refundReason || state.refundAmount <= 0)}
                     onClick={() => setState(prev => ({ ...prev, confirmRefundItem: state.selectedItem }))} 
-                    style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', opacity: (!state.refundReason || state.refundAmount <= 0) ? 0.5 : 1 }}
+                    style={{ width: '100%', padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', cursor: 'pointer', opacity: state.selectedItem.refundStatus !== 'EMAIL_PENDING' && (!state.refundReason || state.refundAmount <= 0) ? 0.5 : 1 }}
                   >
-                    MARK AS REFUNDED
+                    {state.selectedItem.refundStatus === 'EMAIL_PENDING' ? 'RETRY REFUND EMAIL' : 'MARK AS REFUNDED'}
                   </button>
                 )}
               </div>

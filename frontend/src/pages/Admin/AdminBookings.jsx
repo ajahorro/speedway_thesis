@@ -9,7 +9,7 @@ import PageHeader from '../../components/PageHeader';
 import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { getPaymentStatusUI } from '../../utils/paymentUtils';
-import { getStatusColor } from '../../utils/bookingHelpers';
+import { formatBookingDate, formatBookingTime, getStatusColor } from '../../utils/bookingHelpers';
 import { useAdminBookings } from '../../hooks/useAdminBookings';
 
 import AdminSchedulingGrid from './AdminSchedulingGrid';
@@ -37,6 +37,8 @@ const AdminBookings = () => {
       setState(prev => ({ ...prev, filterStatus: 'unassigned' }));
     } else if (filter === 'overdue' || filter === 'FLAGGED_NOSHOW') {
       setState(prev => ({ ...prev, filterStatus: 'FLAGGED_NOSHOW' }));
+    } else if (['ongoing', 'pending_payment', 'pending_refund', 'completed', 'done'].includes(filter)) {
+      setState(prev => ({ ...prev, filterStatus: filter }));
     }
   }, [location.search]);
 
@@ -45,9 +47,11 @@ const AdminBookings = () => {
     return bookings.filter(b => {
       const matchesSearch = `
         ${b.id} 
-        ${b.customer?.full_name || ''} 
+        ${b.customer?.full_name || b.customer_name || ''} 
+        ${b.customer_email || b.contact_number || ''}
         ${b.vehicles?.map(v => v.vehicle_type).join(' ') || ''} 
         ${b.vehicles?.map(v => v.plate_number).join(' ') || ''} 
+        ${b.vehicles?.map(v => `${v.brand || ''} ${v.model || ''} ${(v.services || []).map(s => s.service_name || '').join(' ')}`).join(' ') || ''}
       `.toLowerCase().includes(state.searchTerm.toLowerCase());
       
       let matchesStatus = state.filterStatus === 'all' || b.status?.toLowerCase() === state.filterStatus.toLowerCase();
@@ -57,6 +61,14 @@ const AdminBookings = () => {
         matchesStatus = !b.staff_id && b.status?.toLowerCase() !== 'cancelled';
       } else if (state.filterStatus === 'FLAGGED_NOSHOW') {
         matchesStatus = b.status?.toUpperCase() === 'FLAGGED_NOSHOW';
+      } else if (state.filterStatus === 'ongoing') {
+        matchesStatus = ['scheduled', 'confirmed', 'in_progress', 'ongoing'].includes(b.status?.toLowerCase());
+      } else if (state.filterStatus === 'pending_payment') {
+        matchesStatus = (b.payments || []).some(payment => payment.status === 'FOR_VERIFICATION');
+      } else if (state.filterStatus === 'pending_refund') {
+        matchesStatus = ['PENDING', 'PROCESSING', 'REFUND_PENDING'].includes(b.refund_status) || (b.payments || []).some(payment => payment.status === 'REFUND_PENDING');
+      } else if (state.filterStatus === 'done') {
+        matchesStatus = b.status?.toUpperCase() === 'RELEASED';
       }
       
       return matchesSearch && matchesStatus;
@@ -108,7 +120,7 @@ const AdminBookings = () => {
           </div>
 
           <div style={{ display: 'flex', gap: '0.5rem', background: 'var(--admin-bg)', padding: '0.4rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', overflowX: 'auto' }}>
-            {['all', 'unassigned', 'FLAGGED_NOSHOW', 'scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled'].map(f => (
+            {['all', 'unassigned', 'FLAGGED_NOSHOW', 'scheduled', 'confirmed', 'in_progress', 'completed', 'done', 'cancelled'].map(f => (
               <button 
                 key={f}
                 onClick={() => setState(prev => ({ ...prev, filterStatus: f }))}
@@ -120,7 +132,7 @@ const AdminBookings = () => {
                   whiteSpace: 'nowrap'
                 }}
               >
-                {f}
+                {f === 'done' ? 'DONE' : f}
               </button>
             ))}
           </div>
@@ -164,7 +176,7 @@ const AdminBookings = () => {
                   </div>
                   <div>
                     <p style={{ margin: 0, fontSize: '0.6rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Date</p>
-                    <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>{new Date(booking.start_datetime).toLocaleDateString()}</p>
+                    <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', fontWeight: '800', color: 'var(--admin-text-primary)' }}>{formatBookingDate(booking.start_datetime)}</p>
                   </div>
                 </div>
 
@@ -210,8 +222,8 @@ const AdminBookings = () => {
                       </div>
                     </td>
                      <td style={{ padding: '1.25rem 1.5rem' }}>
-                      <div style={{ fontWeight: '800', color: 'var(--admin-text-primary)', fontSize: '0.8rem' }}>{new Date(booking.start_datetime).toLocaleDateString()}</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>{new Date(booking.start_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div style={{ fontWeight: '800', color: 'var(--admin-text-primary)', fontSize: '0.8rem' }}>{formatBookingDate(booking.start_datetime)}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>{formatBookingTime(booking.start_datetime)}</div>
                     </td>
                     <td style={{ padding: '1.25rem 1.5rem' }}>
                       <div style={{ fontWeight: '950', color: 'var(--admin-brand)', fontSize: '1rem', fontFamily: 'monospace' }}>

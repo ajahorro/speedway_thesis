@@ -6,11 +6,12 @@ import toast from 'react-hot-toast';
 
 export const useAuthFlow = () => {
   const navigate = useNavigate();
-  const { user, profile, signInWithPassword, resetPassword } = useAuth();
+  const { user, profile, signInWithPassword, requestPasswordReset } = useAuth();
   
   const [mode, setMode] = useState('LOGIN'); // LOGIN, REGISTER, VERIFY, AWAIT_LINK, RECOVER, RECOVER_VERIFY, RESET
   const [isLoading, setIsLoading] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState('');
+  const [loginError, setLoginError] = useState('');
 
   // Auto-redirect whenever session and profile are both available
   useEffect(() => {
@@ -29,6 +30,7 @@ export const useAuthFlow = () => {
 
   const login = async (email, password) => {
     setIsLoading(true);
+    setLoginError('');
     try {
       const { error } = await signInWithPassword(email, password);
       if (error) throw error;
@@ -37,6 +39,7 @@ export const useAuthFlow = () => {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', backdropFilter: 'blur(12px)' }
       });
     } catch (error) {
+      setLoginError(error.message || 'Login failed.');
       toast.error(error.message || 'Login failed.', {
         style: { background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', backdropFilter: 'blur(12px)' }
       });
@@ -48,35 +51,45 @@ export const useAuthFlow = () => {
   const startRegister = async (userData) => {
     setIsLoading(true);
     try {
+      const email = userData.email.trim().toLowerCase();
+      const fullName = `${userData.firstName.trim()} ${userData.lastName.trim()}`.trim();
       if (userData.password.length < 6) {
         throw new Error('Password must be at least 6 characters long.');
       }
-      if (!userData.firstName || !userData.lastName) {
+      if (!userData.firstName.trim() || !userData.lastName.trim()) {
         throw new Error('First and last name are required.');
       }
 
-      setVerificationEmail(userData.email);
-
-      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-      const response = await fetch(`${BACKEND_URL}/customer/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          email: userData.email,
-          password: userData.password,
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          phone: userData.phone
-        })
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: userData.password,
+        options: {
+          data: {
+            full_name: fullName,
+            first_name: userData.firstName.trim(),
+            last_name: userData.lastName.trim(),
+            phone_number: userData.phone.trim(),
+            role: 'CUSTOMER'
+          }
+        }
       });
+      if (error) throw error;
 
-      const data = await response.json();
-      
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Registration failed.');
+      if (data.user) {
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: data.user.id,
+          email,
+          full_name: fullName,
+          first_name: userData.firstName.trim(),
+          last_name: userData.lastName.trim(),
+          phone_number: userData.phone.trim(),
+          role: 'CUSTOMER',
+          is_active: true
+        }, { onConflict: 'id' });
+        if (profileError) throw profileError;
       }
+
+      setVerificationEmail(email);
 
       toast.success('Registration successful!', {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', backdropFilter: 'blur(12px)' }
@@ -139,9 +152,18 @@ export const useAuthFlow = () => {
   const updatePassword = async (newPassword) => {
     setIsLoading(true);
     try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!session?.user) {
+        throw new Error('Your password reset link has expired or is invalid. Please request a fresh reset link from the login screen.');
+      }
+
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
-      
+
+      // Tokenized recovery sessions must be closed after a successful password reset.
+      await supabase.auth.signOut();
+
       toast.success('Password updated successfully!', {
         style: { background: 'var(--admin-card)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-border)', backdropFilter: 'blur(12px)' }
       });
@@ -164,6 +186,8 @@ export const useAuthFlow = () => {
     startRegister,
     verifyOtp,
     recoverPassword,
-    updatePassword
+    updatePassword,
+    loginError,
+    clearLoginError: () => setLoginError(''),
   };
 };

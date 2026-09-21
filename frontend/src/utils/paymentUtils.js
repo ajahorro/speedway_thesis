@@ -12,6 +12,7 @@ export const calculatePaymentStatus = (booking) => {
     .reduce((sum, p) => sum + Number(p.amount), 0);
     
   const isPendingVerification = payments.some(p => p.status === 'FOR_VERIFICATION');
+  const requiredDownpayment = calculateRequiredDownpayment(totalAmount).amount;
   
   if (totalAmount <= 0) return 'UNPAID';
   
@@ -19,12 +20,14 @@ export const calculatePaymentStatus = (booking) => {
     return 'PAID';
   } else if (isPendingVerification) {
     return 'VERIFYING';
-  } else if (totalPaid >= (totalAmount * 0.3)) {
+  } else if (totalPaid >= requiredDownpayment) {
     return 'DOWNPAYMENT_PAID';
   }
   
   return 'UNPAID';
 };
+
+export const requiresDownpayment = (totalAmount) => Number(totalAmount || 0) >= 1000;
 
 export const calculateRequiredDownpayment = (totalAmount) => {
   const total = Number(totalAmount || 0);

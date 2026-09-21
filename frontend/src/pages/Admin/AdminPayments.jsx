@@ -13,6 +13,8 @@ import LoadingState from '../../components/LoadingState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { getAuditCompliantTransactions } from '../../utils/bookingHelpers';
 import { sendPaymentReceiptEmail } from '../../services/notificationService';
+import { calculateRequiredDownpayment } from '../../utils/paymentUtils';
+import OfficialReceipt from '../../components/OfficialReceipt';
 
 const AdminPayments = () => {
   const navigate = useNavigate();
@@ -25,12 +27,14 @@ const AdminPayments = () => {
     loading: true,
     searchTerm: location.state?.filter || '',
     filter: 'PENDING',
-    processedMethodFilter: 'ALL', // 'ALL' | 'DIGITAL' | 'CASH'
+    methodFilter: 'ALL',
     selectedItem: null,
-    isScanning: false
+    isScanning: false,
+    overrideAI: false
   });
 
   const [receiptBooking, setReceiptBooking] = useState(null);
+  const [receiptPayment, setReceiptPayment] = useState(null);
 
   // MEMOIZED FETCH: Optimized with deep relationship embedding
   const fetchPayments = useCallback(async () => {
@@ -52,6 +56,7 @@ const AdminPayments = () => {
             )
           )
         `)
+        .neq('method', 'Cash')
         .order('created_at', { ascending: false });
 
       if (paymentError) throw paymentError;
@@ -59,14 +64,17 @@ const AdminPayments = () => {
       const processed = (paymentData || []).map(p => {
         let url = p.receipt_url;
         if (url && !url.startsWith('http')) {
-          const { data: { publicUrl } } = supabase.storage.from('receipts').getPublicUrl(url);
+          const { data: { publicUrl } } = supabase.storage.from('payment-receipts').getPublicUrl(url);
           url = publicUrl;
         }
+        const customerName = p.booking?.customer?.full_name || p.booking?.customer_name || 'Fleet Transaction';
         return {
           ...p,
           receipt_url: url,
-          customer_name: p.booking?.customer?.full_name || 'Fleet Transaction',
+          customer_name: customerName,
           customer: p.booking?.customer
+            ? { ...p.booking.customer, full_name: customerName }
+            : { full_name: customerName }
         };
       });
 
@@ -95,48 +103,114 @@ const AdminPayments = () => {
   // MEMOIZED FILTERING
   const filteredItems = useMemo(() => {
     return state.payments.filter(p => {
-      const searchStr = `${p.customer?.full_name} ${p.reference_number} ${p.amount}`.toLowerCase();
+      const searchStr = `${p.customer_name} ${p.reference_number} ${p.amount}`.toLowerCase();
       const matchesSearch = searchStr.includes(state.searchTerm.toLowerCase());
-      
+      const normalizedMethod = String(p.method || '').trim().toLowerCase();
+      const isCashMethod = normalizedMethod === 'cash';
+      const isDigitalMethod = ['gcash', 'digital', 'bank transfer', 'paymaya', 'maya', 'card', 'online'].includes(normalizedMethod);
+
       if (state.filter === 'PENDING') return matchesSearch && p.status === 'FOR_VERIFICATION';
       if (state.filter === 'PROCESSED') {
-        const isProcessed = p.status === 'PAID' || p.status === 'REFUNDED';
-        if (!isProcessed) return false;
-        if (state.processedMethodFilter === 'DIGITAL') {
-          return matchesSearch && p.method?.toLowerCase() !== 'cash';
-        }
-        if (state.processedMethodFilter === 'CASH') {
-          return matchesSearch && p.method?.toLowerCase() === 'cash';
-        }
-        return matchesSearch;
+        const isProcessed = ['PAID', 'REFUND_PENDING', 'REFUNDED'].includes(p.status);
+        const matchesMethodFilter = state.methodFilter === 'ALL'
+          ? true
+          : state.methodFilter === 'Cash'
+            ? isCashMethod
+            : isDigitalMethod;
+        return matchesSearch && isProcessed && matchesMethodFilter;
       }
       
       return matchesSearch;
     });
-  }, [state.payments, state.searchTerm, state.filter, state.processedMethodFilter]);
+  }, [state.payments, state.searchTerm, state.filter, state.methodFilter]);
+
+  const confirmBookingWhenReady = async (bookingId) => {
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('status, staff_id, total_amount')
+      .eq('id', bookingId)
+      .single();
+    if (bookingError) throw bookingError;
+    if (!['scheduled', 'pending'].includes(String(booking.status).toLowerCase()) || !booking.staff_id) return;
+
+    const { data: paidPayments, error: paymentError } = await supabase
+      .from('payments')
+      .select('amount')
+      .eq('booking_id', bookingId)
+      .eq('status', 'PAID');
+    if (paymentError) throw paymentError;
+    const paidAmount = (paidPayments || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    if (paidAmount < calculateRequiredDownpayment(Number(booking.total_amount || 0)).amount) return;
+
+    const { error: updateError } = await supabase.from('bookings').update({ status: 'confirmed' }).eq('id', bookingId);
+    if (updateError) throw updateError;
+  };
 
   const handleVerifyPayment = async (payment) => {
     const toastId = toast.loading('Verifying transaction...');
     try {
       const { data: { user: verifier } } = await supabase.auth.getUser();
+      const bookingTotal = Number(payment.booking?.total_amount || 0);
+      const declaredAmount = Number(payment.amount || 0);
+      const ocrAmount = Number(payment.detected_amount || 0);
+      const ocrReference = payment.detected_ref || '';
+      const paymentType = payment.notes?.match(/(?:TYPE|PAYMENT_TYPE):([^|]+)/i)?.[1]?.toLowerCase();
+      const isDownpayment = paymentType === 'downpayment' || (!paymentType && declaredAmount < bookingTotal);
+      const requiredDownpayment = calculateRequiredDownpayment(bookingTotal).amount;
+      const verifiedAmount = ocrAmount > 0 ? ocrAmount : declaredAmount;
+      const wasOverpaidDownpayment = isDownpayment && verifiedAmount > requiredDownpayment;
+      const isCashPayment = String(payment.method || '').trim().toUpperCase() === 'CASH';
+      const hasValidOCRAmount = Number.isFinite(ocrAmount) && ocrAmount > 0;
+      if (!isCashPayment && !hasValidOCRAmount && !state.overrideAI) {
+        toast.error('This digital payment has no valid OCR amount. Re-scan the receipt or enable Override AI for manual review.', { id: toastId });
+        return;
+      }
+      const isUnderpaidDownpayment = ocrAmount > 0 && isDownpayment && verifiedAmount < requiredDownpayment;
+      if (isUnderpaidDownpayment && !state.overrideAI) {
+        toast.error(`OCR amount is below the required ₱${requiredDownpayment.toLocaleString()} downpayment. Check Override AI to continue.`, { id: toastId });
+        return;
+      }
+      const verificationNote = [
+        payment.notes || 'PAYMENT_DIGITAL',
+        `OCR_AMOUNT:${verifiedAmount}`,
+        `VERIFIED_TYPE:${isDownpayment ? 'Downpayment' : 'Full'}`,
+        wasOverpaidDownpayment ? 'OVERPAID_DOWNPAYMENT:TRUE' : null,
+        state.overrideAI
+          ? `[AI_OVERRIDE] Admin ID: ${verifier?.id || 'UNKNOWN'} | Required: ₱${requiredDownpayment} | Detected: ₱${ocrAmount || 'NULL'}`
+          : null
+      ].filter(Boolean).join('|');
+
       const { error } = await supabase.from('payments').update({ 
+        amount: verifiedAmount,
         status: 'PAID', 
         verified_by: verifier?.id, 
-        verified_at: new Date().toISOString() 
+        verified_at: new Date().toISOString(),
+        notes: verificationNote,
+        ...(ocrReference ? { reference_number: ocrReference } : {})
       }).eq('id', payment.id);
       
       if (error) throw error;
       
       // 📧 DISPATCH RECEIPT EMAIL (REQ-FIN-01)
-      if (payment.method !== 'Cash') {
+      if (!isCashPayment) {
         sendPaymentReceiptEmail(payment.booking_id, payment.id).catch(err => {
           console.warn('Payment receipt email failed:', err.message);
         });
       }
+      await confirmBookingWhenReady(payment.booking_id);
       
-      toast.success('Payment verified', { id: toastId });
+      const previousPaid = (payment.booking?.payments || [])
+        .filter(existing => existing.id !== payment.id && existing.status === 'PAID')
+        .reduce((sum, existing) => sum + Number(existing.amount || 0), 0);
+      const remainingBalance = Math.max(0, bookingTotal - previousPaid - verifiedAmount);
+      toast.success(
+        wasOverpaidDownpayment
+          ? `Payment verified. Remaining balance: ₱${remainingBalance.toLocaleString()}`
+          : 'Payment verified',
+        { id: toastId }
+      );
       fetchPayments();
-      setState(prev => ({ ...prev, selectedItem: null }));
+      setState(prev => ({ ...prev, selectedItem: null, overrideAI: false }));
     } catch (err) { 
       toast.error('Verification failed', { id: toastId }); 
     }
@@ -148,14 +222,37 @@ const AdminPayments = () => {
     
     const toastId = toast.loading('Rejecting transaction...');
     try {
+      const bookingTotal = Number(payment.booking?.total_amount || 0);
+      const submittedAmount = Number(payment.detected_amount || payment.amount || 0);
+      const paymentType = payment.notes?.match(/(?:TYPE|PAYMENT_TYPE):([^|]+)/i)?.[1]?.toLowerCase();
+      const isDownpayment = paymentType === 'downpayment' || (!paymentType && submittedAmount < bookingTotal);
+      const requiredDownpayment = calculateRequiredDownpayment(bookingTotal).amount;
+      const isUnderpaidDownpayment = isDownpayment && submittedAmount < requiredDownpayment;
+      const rejectionStatus = submittedAmount > 0 ? 'REFUND_PENDING' : 'REJECTED';
+      const rejectionNote = `${payment.notes || 'PAYMENT_DIGITAL'}|REJECTED_AMOUNT:${submittedAmount}|REJECTION_REASON:${reason}`;
+
       const { error } = await supabase.from('payments').update({ 
-        status: 'REJECTED', 
-        rejection_reason: reason 
+        status: rejectionStatus,
+        rejection_reason: reason,
+        notes: rejectionNote
       }).eq('id', payment.id);
       
       if (error) throw error;
+
+      if (submittedAmount > 0) {
+        const { error: refundQueueError } = await supabase.from('bookings').update({
+          refund_status: 'QUEUED',
+          refund_notes: isUnderpaidDownpayment
+            ? `Rejected underpayment: ₱${submittedAmount.toLocaleString()} received; ₱${requiredDownpayment.toLocaleString()} required.`
+            : `Rejected digital payment: ${reason}`
+        }).eq('id', payment.booking_id);
+        if (refundQueueError) throw refundQueueError;
+      }
       
-      toast.error('Payment rejected', { id: toastId });
+      toast.error(
+        submittedAmount > 0 ? 'Payment rejected and refund queued' : 'Payment rejected',
+        { id: toastId }
+      );
       fetchPayments();
       setState(prev => ({ ...prev, selectedItem: null }));
     } catch (err) { 
@@ -163,24 +260,39 @@ const AdminPayments = () => {
     }
   };
 
-  const handleAIScan = async (receiptUrl) => {
+  const handleAIScan = async (receiptUrl, payment) => {
     if (!receiptUrl) return;
     setState(prev => ({ ...prev, isScanning: true }));
     const toastId = toast.loading('AI is scanning receipt...');
     
     try {
       const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-      const response = await fetch(`${BACKEND_URL}/admin/verify-payment-ocr`, {
+      const receiptResponse = await fetch(receiptUrl);
+      if (!receiptResponse.ok) throw new Error('Receipt image could not be downloaded');
+      const receiptBlob = await receiptResponse.blob();
+      const formData = new FormData();
+      const paymentType = payment?.notes?.match(/(?:TYPE|PAYMENT_TYPE):([^|]+)/i)?.[1]?.toLowerCase();
+      const bookingTotal = Number(payment?.booking?.total_amount || 0);
+      const requiredAmount = paymentType === 'downpayment'
+        ? calculateRequiredDownpayment(bookingTotal).amount
+        : bookingTotal;
+      formData.append('receipt', receiptBlob, `receipt-${payment?.id || 'payment'}.jpg`);
+      formData.append('bookingId', payment?.booking_id || 'PENDING');
+      formData.append('paymentId', payment?.id || '');
+      formData.append('requiredAmount', String(requiredAmount));
+
+      const response = await fetch(`${BACKEND_URL}/api/ocr/verify-receipt`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiptUrl })
+        body: formData
       });
 
-      const result = await response.json();
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `OCR request failed (${response.status})`);
       if (!result.success) throw new Error(result.error);
 
       // Auto-update the payment with detected info (simulated for now)
-      toast.success(`AI Scan Complete: Ref ${result.data.referenceNumber}`, { id: toastId });
+      const referenceNumber = result.data.referenceNo || result.data.referenceNumber || 'N/A';
+      toast.success(`AI Scan Complete: Ref ${referenceNumber}`, { id: toastId });
       
       // We highlight the reference number field or update it if needed
       // For this demo, we'll just show the "AI Verified" state in the UI
@@ -190,11 +302,12 @@ const AdminPayments = () => {
         selectedItem: {
           ...prev.selectedItem,
           ai_verified: true,
-          detected_ref: result.data.referenceNumber
+          detected_ref: referenceNumber,
+          detected_amount: result.data.amount
         }
       }));
     } catch (err) {
-      toast.error('AI Scan failed. Please verify manually.', { id: toastId });
+      toast.error(err.message || 'AI Scan failed. Please verify manually.', { id: toastId });
       setState(prev => ({ ...prev, isScanning: false }));
     }
   };
@@ -239,6 +352,7 @@ const AdminPayments = () => {
       
       toast.dismiss(toastId);
       setReceiptBooking(payment.booking);
+      setReceiptPayment(payment);
     } catch (err) {
       toast.error(err.message, { id: toastId });
     }
@@ -247,6 +361,71 @@ const AdminPayments = () => {
   const handlePrint = () => {
     toast.success('System receipt printed for audit.');
     window.print();
+  };
+
+  const handleDownloadPdf = () => {
+    const total = Number(receiptBooking?.total_amount || 0);
+    const subtotal = total > 0 ? total / 1.12 : 0;
+    const vat = total > 0 ? total - subtotal : 0;
+    const items = (receiptBooking.vehicles && receiptBooking.vehicles.length > 0
+      ? receiptBooking.vehicles.flatMap(v => (v.services || []).map(s => ({ name: s.service_name || s.service_name_snapshot || 'Service', amount: Number(s.price || s.price_snapshot || 0) })))
+      : [{ name: 'Booking Service Summary', amount: Number(receiptBooking.total_amount || 0) }]);
+
+    const popup = window.open('', '_blank', 'width=900,height=900');
+    if (!popup) {
+      toast.error('Please allow pop-ups to download the PDF receipt.');
+      return;
+    }
+
+    popup.document.write(`<!doctype html>
+      <html>
+        <head>
+          <title>Official Digital Receipt</title>
+          <style>
+            body { font-family: Arial, sans-serif; background: #fff; color: #111; margin: 0; padding: 32px; }
+            .wrap { max-width: 720px; margin: 0 auto; border: 1px solid #111; border-radius: 16px; padding: 24px; }
+            .brand { text-align: center; margin-bottom: 24px; }
+            h1 { margin: 0; font-size: 2.2rem; letter-spacing: 2px; color: #a91b18; }
+            .subtitle { font-size: 12px; letter-spacing: 2px; color: #666; text-transform: uppercase; }
+            .line { height: 2px; background: #000; width: 48px; margin: 12px auto 0; }
+            .meta { display: flex; justify-content: space-between; gap: 16px; margin: 20px 0; }
+            .meta div { flex: 1; }
+            .label { font-size: 11px; font-weight: 800; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+            .item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+            .total-row { display: flex; justify-content: space-between; padding-top: 12px; font-weight: 800; }
+            .balance { border-top: 2px solid #000; margin-top: 12px; padding-top: 12px; }
+            .foot { text-align: center; margin-top: 24px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <div class="brand">
+              <h1>SPEEDWAY</h1>
+              <div class="subtitle">AutoxMoto Detail Studio</div>
+              <div class="line"></div>
+            </div>
+            <div class="meta">
+              <div>
+                <div class="label">Customer</div>
+                <div>${receiptBooking.customer?.full_name || receiptBooking.customer_name || 'Customer'}</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="label">Date & Time</div>
+                <div>${new Date(receiptBooking.created_at).toLocaleString()}</div>
+              </div>
+            </div>
+            <div class="label" style="margin-bottom: 8px;">Service Summary</div>
+            ${items.map(item => `<div class="item"><span>• ${item.name}</span><strong>${formatCurrency(item.amount)}</strong></div>`).join('')}
+            <div class="total-row"><span>Subtotal</span><span>${formatCurrency(subtotal)}</span></div>
+            <div class="total-row"><span>VAT (12%)</span><span>${formatCurrency(vat)}</span></div>
+            <div class="total-row balance"><span>Grand Total</span><span>${formatCurrency(total)}</span></div>
+            <div class="foot">Transaction Reference: ${receiptBooking.payments?.[0]?.reference_number || receiptBooking.ocr_metadata?.referenceNo || 'SYSTEM_VALIDATED'}</div>
+          </div>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    setTimeout(() => popup.print(), 300);
   };
 
   const cardStyle = { 
@@ -289,60 +468,54 @@ const AdminPayments = () => {
                 style={{ flex: 1, background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-sm)', padding: '0.85rem 1rem 0.85rem 2.75rem', color: 'var(--admin-text-primary)', outline: 'none', fontWeight: '950', fontSize: '0.75rem', width: '100%' }} 
               />
             </div>
-            <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--admin-bg)', padding: '0.25rem', borderRadius: 'var(--admin-radius-sm)', width: isMobile ? '100%' : 'auto', justifyContent: isMobile ? 'center' : 'flex-start', border: '1px solid var(--admin-border)' }}>
-              {['PENDING', 'PROCESSED', 'ALL'].map(f => (
-                <button 
-                  key={f} 
-                  onClick={() => setState(prev => ({ ...prev, filter: f }))} 
-                  style={{ 
-                    flex: isMobile ? 1 : 'none', 
-                    padding: '0.5rem 1rem', 
-                    borderRadius: 'calc(var(--admin-radius-sm) - 2px)', 
-                    border: 'none', 
-                    background: state.filter === f ? 'var(--admin-brand)' : 'transparent', 
-                    color: state.filter === f ? 'white' : 'var(--admin-text-secondary)', 
-                    fontSize: '0.65rem', 
-                    fontWeight: '950', 
-                    cursor: 'pointer',
-                    textTransform: 'uppercase'
-                  }}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-            {state.filter === 'PROCESSED' && (
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', width: '100%', marginTop: '0.25rem', paddingLeft: '0.25rem', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginRight: '0.25rem' }}>
-                  Filter Processed:
-                </span>
-                {[
-                  { key: 'ALL', label: 'All' },
-                  { key: 'DIGITAL', label: 'Digital' },
-                  { key: 'CASH', label: 'Cash' }
-                ].map(m => (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => setState(prev => ({ ...prev, processedMethodFilter: m.key }))}
-                    style={{
-                      padding: '0.35rem 0.75rem',
-                      borderRadius: 'var(--admin-radius-sm)',
-                      border: `1px solid ${state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
-                      background: state.processedMethodFilter === m.key ? 'rgba(var(--admin-brand-rgb), 0.12)' : 'var(--admin-bg)',
-                      color: state.processedMethodFilter === m.key ? 'var(--admin-brand)' : 'var(--admin-text-secondary)',
-                      fontSize: '0.65rem',
-                      fontWeight: '900',
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: isMobile ? '100%' : 'auto' }}>
+              <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--admin-bg)', padding: '0.25rem', borderRadius: 'var(--admin-radius-sm)', width: isMobile ? '100%' : 'auto', justifyContent: isMobile ? 'center' : 'flex-start', border: '1px solid var(--admin-border)' }}>
+                {['PENDING', 'PROCESSED', 'ALL'].map(f => (
+                  <button 
+                    key={f} 
+                    onClick={() => setState(prev => ({ ...prev, filter: f, methodFilter: f === 'PROCESSED' ? prev.methodFilter : 'ALL' }))} 
+                    style={{ 
+                      flex: isMobile ? 1 : 'none', 
+                      padding: '0.5rem 1rem', 
+                      borderRadius: 'calc(var(--admin-radius-sm) - 2px)', 
+                      border: 'none', 
+                      background: state.filter === f ? 'var(--admin-brand)' : 'transparent', 
+                      color: state.filter === f ? 'white' : 'var(--admin-text-secondary)', 
+                      fontSize: '0.65rem', 
+                      fontWeight: '950', 
                       cursor: 'pointer',
-                      textTransform: 'uppercase',
-                      transition: 'all 0.2s ease'
+                      textTransform: 'uppercase'
                     }}
                   >
-                    {m.label}
+                    {f}
                   </button>
                 ))}
               </div>
-            )}
+              {state.filter === 'PROCESSED' && (
+                <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--admin-bg)', padding: '0.25rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', flexWrap: 'wrap' }}>
+                  {['ALL', 'Digital', 'Cash'].map(method => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setState(prev => ({ ...prev, methodFilter: method }))}
+                      style={{
+                        padding: '0.4rem 0.75rem',
+                        borderRadius: 'calc(var(--admin-radius-sm) - 2px)',
+                        border: 'none',
+                        background: state.methodFilter === method ? 'var(--admin-brand)' : 'transparent',
+                        color: state.methodFilter === method ? 'white' : 'var(--admin-text-secondary)',
+                        fontSize: '0.6rem',
+                        fontWeight: '950',
+                        cursor: 'pointer',
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {state.loading ? (
@@ -393,7 +566,7 @@ const AdminPayments = () => {
                 </div>
 
                 <div style={{ background: 'var(--admin-bg)', padding: '1rem', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)' }}>
-                  <div style={{ fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase' }}>{state.selectedItem.customer?.full_name}</div>
+                  <div style={{ fontWeight: '950', fontSize: '0.9rem', textTransform: 'uppercase' }}>{state.selectedItem.customer_name}</div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>{state.selectedItem.customer?.email}</div>
                 </div>
 
@@ -413,7 +586,7 @@ const AdminPayments = () => {
                       <img src={state.selectedItem.receipt_url} alt="Receipt" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                       
                       <button 
-                        onClick={() => handleAIScan(state.selectedItem.receipt_url)}
+                        onClick={() => handleAIScan(state.selectedItem.receipt_url, state.selectedItem)}
                         disabled={state.isScanning}
                         style={{
                           position: 'absolute', bottom: '1rem', right: '1rem',
@@ -448,6 +621,7 @@ const AdminPayments = () => {
                 <div style={{ marginTop: 'auto', display: 'flex', gap: '0.75rem', flexDirection: 'column' }}>
                   {state.selectedItem.status === 'FOR_VERIFICATION' && (
                     <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      <label style={{ position: 'absolute', marginTop: '-2rem', right: 0, fontSize: '0.62rem', color: '#f59e0b', fontWeight: '800' }}><input type="checkbox" checked={state.overrideAI} onChange={(e) => setState(prev => ({ ...prev, overrideAI: e.target.checked }))} /> Override AI</label>
                       <button onClick={() => handleRejectPayment(state.selectedItem)} style={{ flex: 1, padding: '0.85rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid #ef4444', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>REJECT</button>
                       <button onClick={() => handleVerifyPayment(state.selectedItem)} style={{ flex: 2, padding: '0.85rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px' }}>VERIFY PAID</button>
                     </div>
@@ -477,7 +651,7 @@ const AdminPayments = () => {
             </div>
 
             <div style={{ background: 'var(--admin-bg)', padding: '1rem', borderRadius: '0.75rem', border: '1px solid var(--admin-border)' }}>
-              <div style={{ fontWeight: '900', fontSize: '1rem' }}>{state.selectedItem.customer?.full_name}</div>
+              <div style={{ fontWeight: '900', fontSize: '1rem' }}>{state.selectedItem.customer_name}</div>
               <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>{state.selectedItem.customer?.email}</div>
             </div>
 
@@ -503,6 +677,7 @@ const AdminPayments = () => {
               {state.selectedItem.status === 'FOR_VERIFICATION' && (
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button onClick={() => handleRejectPayment(state.selectedItem)} style={{ flex: 1, padding: '1rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'none', borderRadius: '0.75rem', fontWeight: '800', cursor: 'pointer' }}>REJECT</button>
+                  <label style={{ position: 'absolute', right: '1.5rem', marginTop: '-2.25rem', fontSize: '0.62rem', color: '#f59e0b', fontWeight: '800' }}><input type="checkbox" checked={state.overrideAI} onChange={(e) => setState(prev => ({ ...prev, overrideAI: e.target.checked }))} /> Override AI</label>
                   <button onClick={() => handleVerifyPayment(state.selectedItem)} style={{ flex: 2, padding: '1rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: '0.75rem', fontWeight: '900', cursor: 'pointer' }}>VERIFY PAID</button>
                 </div>
               )}
@@ -515,169 +690,46 @@ const AdminPayments = () => {
         </div>
       )}
 
-      {/* 🧾 ADMIN RECEIPT PREVIEW MODAL */}
       {receiptBooking && (
-        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '2rem' }}>
-          <div className="no-print-bg" style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
-            
-            <div className="no-print" style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <ShieldCheck size={24} color="var(--admin-brand)" />
-                <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>
-                  Official Receipt Explorer (Audit View)
-                </span>
-              </div>
-              <button onClick={() => setReceiptBooking(null)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div id="printable-receipt" style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
-              <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-                <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#000', fontStyle: 'italic' }}>SPEEDWAY</h2>
-                <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#666', textTransform: 'uppercase', letterSpacing: '2px' }}>AutoxMoto Detail Studio</div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                <div>
-                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Invoice To</div>
-                  <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>{receiptBooking.customer?.full_name || 'Customer'}</div>
-                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{receiptBooking.customer?.email}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Receipt No.</div>
-                  <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>INV-{receiptBooking.id.substring(0, 8).toUpperCase()}</div>
-                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(receiptBooking.created_at).toLocaleDateString()}</div>
-                </div>
-              </div>
-
-              <div id="receipt-content-area" style={{ position: 'relative' }}>
-                {/* REQ-NFR-14: CSS-based Watermark for Admin Audit */}
-                {receiptBooking.refund_status === 'PROCESSED' && (
-                  <div style={{
-                    position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-45deg)',
-                    fontSize: '8rem', fontWeight: '900', color: 'rgba(239, 68, 68, 0.08)', pointerEvents: 'none', zIndex: 0, whiteSpace: 'nowrap'
-                  }}>
-                    VOID / REFUNDED
-                  </div>
-                )}
-
-              <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '1.5rem 0', margin: '2rem 0' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <tbody>
-                    {(() => {
-                      if (receiptBooking.vehicles && receiptBooking.vehicles.length > 0) {
-                        return receiptBooking.vehicles.map((v) => (
-                          <React.Fragment key={v.id}>
-                            <tr>
-                              <td colSpan="2" style={{ padding: '15px 5px 5px', fontWeight: 'bold', fontSize: '0.9rem', color: '#000' }}>
-                                {v.brand} {v.model} {v.plate_number ? `(${v.plate_number})` : ''}
-                              </td>
-                            </tr>
-                            {(v.services || []).map((s) => (
-                              <tr key={s.id}>
-                                <td style={{ padding: '5px 5px 5px 20px', fontSize: '0.85rem', color: '#333' }}>
-                                  {s.service_name || s.service_name_snapshot}
-                                </td>
-                                <td style={{ padding: '5px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
-                                  {formatCurrency(s.price || s.price_snapshot)}
-                                </td>
-                              </tr>
-                            ))}
-                          </React.Fragment>
-                        ));
-                      } else {
-                        return (
-                          <tr>
-                            <td style={{ padding: '15px 5px', fontSize: '0.85rem', color: '#333' }}>
-                              Premium Detailing Package
-                            </td>
-                            <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '0.85rem', color: '#333' }}>
-                              {formatCurrency(receiptBooking.total_amount)}
-                            </td>
-                          </tr>
-                        );
-                      }
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
-                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>GRAND TOTAL</span>
-                  <span style={{ fontWeight: '900' }}>{formatCurrency(receiptBooking.total_amount)}</span>
-                </div>
-                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL AMOUNT PAID</span>
-                  <span style={{ fontWeight: '900' }}>
-                    {formatCurrency((receiptBooking.payments || []).filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING').reduce((s, p) => s + Number(p.amount), 0))}
-                  </span>
-                </div>
-                {receiptBooking.refund_status === 'PROCESSED' && (
-                  <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', color: '#ef4444' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>AMOUNT REVERTED</span>
-                    <span style={{ fontWeight: '900' }}>
-                      {formatCurrency((receiptBooking.payments || []).filter(p => p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0))}
-                    </span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
-                  <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>REMAINING BALANCE</span>
-                  <span style={{ fontWeight: '950', fontSize: '1.25rem', color: '#000' }}>
-                    {formatCurrency(Math.max(0, receiptBooking.total_amount - (receiptBooking.payments || []).filter(p => p.status === 'PAID' || p.status === 'REFUND_PENDING' || p.status === 'REFUNDED').reduce((s, p) => s + Number(p.amount), 0)))}
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ padding: '1.25rem', background: '#f9f9f9', borderRadius: '12px', border: '1px solid #eee' }}>
-                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                    <div>
-                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
-                      <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{receiptBooking.payments?.[0]?.method || 'Cash / Off-platform'}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Transaction Reference</div>
-                      <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                        {canAccessReceipt(receiptBooking) 
-                          ? (receiptBooking.payments?.[0]?.reference_number || receiptBooking.ocr_metadata?.referenceNo || 'VERIFIED')
-                          : 'Awaiting Verification'}
-                      </div>
-                    </div>
-                 </div>
-                 <div style={{ marginTop: '15px', textAlign: 'center', fontSize: '1rem', fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: '2px' }}>
-                   *** {getReceiptStatusText(receiptBooking)} ***
-                 </div>
-              </div>
-
-              <div style={{ textAlign: 'center', color: '#666', fontSize: '0.65rem', marginTop: '60px', fontWeight: '300' }}>
-                This is a computer-generated document from Speedway AutoXMoto. No signature required.
-              </div>
-              </div> {/* Close receipt-content-area */}
-            </div>
-
-            <div className="no-print" style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
-              <button 
-                onClick={handlePrint}
-                style={{ 
-                  flex: 2, padding: '1rem', background: '#000', 
-                  color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', 
-                  cursor: 'pointer', 
-                  textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' 
-                }}
-              >
-                <Printer size={20} /> Print For Audit
-              </button>
-              <button 
-                onClick={() => setReceiptBooking(null)}
-                style={{ flex: 1, padding: '1rem', background: '#fff', color: '#000', border: '1px solid #ddd', borderRadius: '12px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem' }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <OfficialReceipt
+<<<<<<< HEAD
+          booking={receiptBooking}
+          vehicles={receiptBooking.vehicles || []}
+          selectedPayment={receiptPayment}
+          onClose={() => { setReceiptBooking(null); setReceiptPayment(null); }}
+=======
+          title="OFFICIAL RECEIPT"
+          receiptNumber={receiptBooking.payments?.[0]?.reference_number || receiptBooking.ocr_metadata?.referenceNo || `INV-${(receiptBooking.id || '').slice(0, 8).toUpperCase()}`}
+          bookingReference={receiptBooking.id}
+          issuedAt={receiptBooking.created_at}
+          paymentMethod={receiptBooking.payments?.[0]?.method || 'Digital / Online Payment'}
+          processedBy="System Admin"
+          customerName={receiptBooking.customer?.full_name || receiptBooking.customer_name || 'Customer'}
+          customerContact={receiptBooking.customer?.email || 'N/A'}
+          customerAddress={receiptBooking.customer_address || '-'}
+          customerTaxId={receiptBooking.customer_tax_id || '-'}
+          items={(receiptBooking.vehicles && receiptBooking.vehicles.length > 0
+            ? receiptBooking.vehicles.flatMap(v => (v.services || []).map(s => ({
+                vehicle: `${v.brand || ''} ${v.model || ''}`.trim() || 'Vehicle Unit',
+                service: s.service_name || s.service_name_snapshot || 'Service',
+                qty: 1,
+                unitPrice: Number(s.price || s.price_snapshot || 0),
+                lineTotal: Number(s.price || s.price_snapshot || 0)
+              })))
+            : [{
+                vehicle: 'Booking Summary',
+                service: 'Booking Service Summary',
+                qty: 1,
+                unitPrice: Number(receiptBooking.total_amount || 0),
+                lineTotal: Number(receiptBooking.total_amount || 0)
+              }])}
+          subtotal={Number((receiptBooking.total_amount || 0) / 1.12)}
+          discountAmount={0}
+          vatRate={0.12}
+          onClose={() => setReceiptBooking(null)}
+          showCloseButton
+>>>>>>> e23099d5 (Logic inconsistencies still exists)
+        />
       )}
 
       <style>{`

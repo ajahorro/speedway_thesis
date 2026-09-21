@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
+import StyledInput from './StyledInput';
 
 const ResetForm = ({ onReset, onSwitchMode, isLoading }) => {
   const [newPassword, setNewPassword] = useState('');
@@ -8,24 +9,19 @@ const ResetForm = ({ onReset, onSwitchMode, isLoading }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!newPassword || !confirmPassword) {
+      toast.error('Please enter and confirm your new password');
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters long');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       toast.error('Passwords do not match');
       return;
     }
     onReset(newPassword);
-  };
-
-  const inputStyle = {
-    width: '100%',
-    background: 'var(--admin-bg)',
-    border: '1px solid var(--admin-border)',
-    padding: '1rem 1rem 1rem 3rem',
-    borderRadius: '0.85rem',
-    color: 'var(--admin-text-primary)',
-    fontSize: '0.95rem',
-    outline: 'none',
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-    boxSizing: 'border-box'
   };
 
   const buttonStyle = {
@@ -50,29 +46,11 @@ const ResetForm = ({ onReset, onSwitchMode, isLoading }) => {
       <p style={{ textAlign: 'center', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', marginBottom: '1.5rem', lineHeight: '1.6', fontWeight: '500', opacity: 0.8 }}>
         Create a new secure password for <br />your account.
       </p>
-      <div style={{ position: 'relative', marginBottom: '1.25rem' }}>
-        <Lock size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="password" 
-          placeholder="New Password" 
-          required 
-          value={newPassword} 
-          onChange={e => setNewPassword(e.target.value)} 
-          style={inputStyle} 
-          autoComplete="new-password"
-        />
+      <div style={{ marginBottom: '1.25rem' }}>
+        <StyledInput icon={Lock} type="password" placeholder="New Password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} autoComplete="new-password" />
       </div>
-      <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
-        <Lock size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="password" 
-          placeholder="Confirm New Password" 
-          required 
-          value={confirmPassword} 
-          onChange={e => setConfirmPassword(e.target.value)} 
-          style={inputStyle} 
-          autoComplete="new-password"
-        />
+      <div style={{ marginBottom: '1.5rem' }}>
+        <StyledInput icon={Lock} type="password" placeholder="Confirm New Password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} autoComplete="new-password" />
       </div>
       <button type="submit" disabled={isLoading} style={buttonStyle}>
         {isLoading ? 'Updating...' : 'Update Password'}

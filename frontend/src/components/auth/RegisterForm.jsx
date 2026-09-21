@@ -1,45 +1,33 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User, Phone } from 'lucide-react';
+import { Mail, Lock, User, Phone, Loader2, AlertCircle } from 'lucide-react';
+import StyledInput from './StyledInput';
 
-const RegisterForm = ({ onRegister, onSwitchMode, isLoading, prefillData = null }) => {
+const RegisterForm = ({ onRegister, onSwitchMode, isLoading }) => {
   const [formData, setFormData] = useState({
-    firstName: prefillData?.firstName || '',
-    lastName: prefillData?.lastName || '',
-    email: prefillData?.email || '',
-    phone: prefillData?.phone || '',
-    password: ''
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    password: '',
+    confirmPassword: ''
   });
-
-  React.useEffect(() => {
-    if (prefillData) {
-      setFormData(prev => ({
-        ...prev,
-        firstName: prefillData.firstName ?? prev.firstName,
-        lastName: prefillData.lastName ?? prev.lastName,
-        email: prefillData.email ?? prev.email,
-        phone: prefillData.phone ?? prev.phone
-      }));
-    }
-  }, [prefillData]);
-
-  const isEmailLocked = Boolean(prefillData?.isLockedEmail);
+  const [error, setError] = useState('');
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setError('');
     onRegister(formData);
   };
 
-  const inputStyle = {
-    width: '100%',
-    background: 'var(--admin-bg)',
-    border: '1px solid var(--admin-border)',
-    padding: '1rem 1rem 1rem 3rem',
-    borderRadius: '0.85rem',
-    color: 'var(--admin-text-primary)',
-    fontSize: '0.95rem',
-    outline: 'none',
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-    boxSizing: 'border-box'
+  const updateField = (field, value) => {
+    if (field === 'firstName' || field === 'lastName') value = value.replace(/[^a-zA-Z ]/g, '').replace(/\s+/g, ' ');
+    if (field === 'phone') value = value.replace(/\D/g, '').slice(0, 15);
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (error) setError('');
   };
 
   const buttonStyle = {
@@ -61,88 +49,38 @@ const RegisterForm = ({ onRegister, onSwitchMode, isLoading, prefillData = null 
 
   return (
     <form onSubmit={handleSubmit}>
+      {error && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '0.65rem', color: '#fca5a5', fontSize: '0.8rem', fontWeight: '700' }}>
+          <AlertCircle size={16} style={{ flexShrink: 0 }} /> {error}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
         <div style={{ position: 'relative' }}>
-          <User size={16} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-          <input 
-            type="text" 
-            placeholder="First Name" 
-            required 
-            value={formData.firstName} 
-            onChange={e => setFormData({ ...formData, firstName: e.target.value })} 
-            style={{ ...inputStyle, paddingLeft: '2.75rem' }} 
-            autoComplete="given-name" 
-          />
+          <StyledInput icon={User} type="text" placeholder="First Name" required value={formData.firstName} onChange={e => updateField('firstName', e.target.value)} autoComplete="given-name" />
         </div>
         <div style={{ position: 'relative' }}>
-          <User size={16} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-          <input 
-            type="text" 
-            placeholder="Last Name" 
-            required 
-            value={formData.lastName} 
-            onChange={e => setFormData({ ...formData, lastName: e.target.value })} 
-            style={{ ...inputStyle, paddingLeft: '2.75rem' }} 
-            autoComplete="family-name" 
-          />
+          <StyledInput icon={User} type="text" placeholder="Last Name" required value={formData.lastName} onChange={e => updateField('lastName', e.target.value)} autoComplete="family-name" />
         </div>
       </div>
 
       <div style={{ position: 'relative', marginBottom: '1rem' }}>
-        <Mail size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: isEmailLocked ? '38%' : '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="email" 
-          placeholder="Email Address" 
-          required 
-          readOnly={isEmailLocked}
-          value={formData.email} 
-          onChange={e => {
-            if (!isEmailLocked) setFormData({ ...formData, email: e.target.value });
-          }} 
-          style={{
-            ...inputStyle,
-            background: isEmailLocked ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'var(--admin-bg)',
-            border: isEmailLocked ? '1px solid rgba(var(--admin-brand-rgb), 0.3)' : '1px solid var(--admin-border)',
-            cursor: isEmailLocked ? 'not-allowed' : 'text',
-            opacity: isEmailLocked ? 0.9 : 1
-          }} 
-          autoComplete="email" 
-        />
-        {isEmailLocked && (
-          <div style={{ fontSize: '0.68rem', color: 'var(--admin-brand)', fontWeight: '800', marginTop: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.35rem', paddingLeft: '0.5rem' }}>
-            <Lock size={11} /> Locked to your walk-in booking record
-          </div>
-        )}
+        <StyledInput icon={Mail} type="email" placeholder="Email Address" required value={formData.email} onChange={e => updateField('email', e.target.value)} autoComplete="email" />
       </div>
       
       <div style={{ position: 'relative', marginBottom: '1rem' }}>
-        <Phone size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="tel" 
-          placeholder="Phone Number" 
-          required 
-          value={formData.phone} 
-          onChange={e => setFormData({ ...formData, phone: e.target.value })} 
-          style={inputStyle} 
-          autoComplete="tel" 
-        />
+        <StyledInput icon={Phone} type="tel" placeholder="Phone Number" required value={formData.phone} onChange={e => updateField('phone', e.target.value)} autoComplete="tel" />
       </div>
 
       <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
-        <Lock size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="password" 
-          placeholder="Create Password" 
-          required 
-          value={formData.password} 
-          onChange={e => setFormData({ ...formData, password: e.target.value })} 
-          style={inputStyle} 
-          autoComplete="new-password" 
-        />
+        <StyledInput icon={Lock} type="password" placeholder="Create Password" required value={formData.password} onChange={e => updateField('password', e.target.value)} autoComplete="new-password" />
+      </div>
+
+      <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
+        <StyledInput icon={Lock} type="password" placeholder="Confirm Password" required value={formData.confirmPassword} onChange={e => updateField('confirmPassword', e.target.value)} autoComplete="new-password" />
       </div>
 
       <button type="submit" disabled={isLoading} style={buttonStyle}>
-        {isLoading ? 'Creating Account...' : 'Register'}
+        {isLoading ? <><Loader2 size={16} style={{ verticalAlign: 'middle', marginRight: '0.4rem', animation: 'spin 1s linear infinite' }} /> Creating Account...</> : 'Register'}
       </button>
       
       <p style={{ textAlign: 'center', marginTop: '1.5rem', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600' }}>

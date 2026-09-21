@@ -19,7 +19,7 @@ export const SHOP_CONFIG = {
 
 // ─── OPERATIONAL THRESHOLDS ──────────────────────────────────────
 export const THRESHOLDS = {
-  NOSHOW_GRACE_MINUTES: 30,             // REQ-SYS-02: Auto-flag after 30m
+  NOSHOW_GRACE_MINUTES: 60,             // REQ-SYS-02: Auto-flag after 1 hour
   URGENT_REMINDER_MINUTES: 15,          // REQ-SYS-02: Send reminder at 15m
 };
 
@@ -34,10 +34,13 @@ export const CAPACITY_THRESHOLD = {
 export const BOOKING_STATUSES = {
   SCHEDULED: 'scheduled',
   CONFIRMED: 'confirmed',
+  PENDING_CONFIRMATION: 'pending_confirmation',
   IN_PROGRESS: 'in_progress',
   COMPLETED: 'completed',
+  RELEASED: 'released',
   CANCELLED: 'cancelled',
   FLAGGED_NOSHOW: 'FLAGGED_NOSHOW',
+  NO_SHOW: 'no_show',
 };
 
 export const VEHICLE_STATUSES = {
@@ -46,6 +49,17 @@ export const VEHICLE_STATUSES = {
   COMPLETED: 'completed',
 };
 
+export const VEHICLE_TYPE_OPTIONS = [
+  { value: 'Sedan', label: 'Sedan' },
+  { value: 'SUV', label: 'SUV' },
+  { value: 'Van/L300', label: 'Van / L300' },
+  { value: 'Regular', label: 'Motorcycle (Regular)' },
+  { value: 'Bigbike', label: 'Motorcycle (Bigbike)' }
+];
+
+export const sanitizeVehiclePlate = (value = '') => value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+export const sanitizeVehicleText = (value = '') => value.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, ' ');
+
 // ─── UNIFIED STATUS COLORS ──────────────────────────────────────
 // Extracted from AdminBookings, SchedulingGrid, CustomerBookingDetails
 export const STATUS_COLORS = {
@@ -53,6 +67,7 @@ export const STATUS_COLORS = {
   confirmed: '#3b82f6',                 // Info blue
   in_progress: '#a855f7',              // Purple
   completed: '#10b981',                // Green
+  released: '#14b8a6',                 // Teal
   cancelled: '#ef4444',                // Red
   flagged_noshow: '#ef4444',           // Red (urgent)
   queued: '#f59e0b',                   // Amber

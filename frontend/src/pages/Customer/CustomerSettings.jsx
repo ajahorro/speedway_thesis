@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Moon, Sun, Settings, Bell, BellOff
-} from 'lucide-react';
+import { Monitor, Moon, Sun, Settings, Bell, BellOff } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
@@ -65,7 +63,7 @@ const CustomerSettings = () => {
       
       {/* Header */}
       <div>
-        <h1 style={{ fontSize: '2.5rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'white', letterSpacing: '-1.5px' }}>App Settings</h1>
+          <h1 style={{ fontSize: 'clamp(1.8rem, 5vw, 2.5rem)', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'var(--admin-text-primary)', letterSpacing: '-1.5px' }}>App Settings</h1>
         <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.95rem', fontWeight: '600', opacity: 0.8 }}>
           Configure your interface preferences and notification behavior.
         </p>
@@ -78,24 +76,24 @@ const CustomerSettings = () => {
           <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Interface Preferences</h2>
         </div>
 
-        {/* Theme Toggle */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--admin-border)' }}>
+        {/* Theme Choices */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', background: 'var(--admin-input-bg)', padding: 'clamp(1rem, 3vw, 1.25rem)', borderRadius: '12px', border: '1px solid var(--admin-border)' }}>
           <div>
-            <div style={{ fontWeight: '900', color: 'white', fontSize: '0.95rem' }}>Interface Theme</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Switch between dark and light modes.</div>
+            <div style={{ fontWeight: '900', color: 'var(--admin-text-primary)', fontSize: '0.95rem' }}>Interface Theme</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', fontWeight: '600' }}>Choose system, light, or dark appearance.</div>
           </div>
-          <button 
-            onClick={toggleTheme}
-            style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '950', fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'uppercase' }}
-          >
-            {theme === 'dark' ? <><Sun size={16} /> Light Mode</> : <><Moon size={16} /> Dark Mode</>}
-          </button>
+          <div role="radiogroup" aria-label="Interface theme" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(92px, 1fr))', width: 'min(100%, 390px)', gap: '0.35rem', padding: '0.35rem', background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', borderRadius: '10px' }}>
+            {[{ value: 'system', label: 'System', icon: Monitor }, { value: 'light', label: 'Light', icon: Sun }, { value: 'dark', label: 'Dark', icon: Moon }].map(({ value, label, icon: Icon }) => {
+              const isActive = theme === value;
+              return <button key={value} type="button" role="radio" aria-checked={isActive} onClick={() => toggleTheme(value)} style={{ minHeight: '44px', padding: '0.65rem 0.5rem', background: isActive ? 'var(--admin-brand)' : 'transparent', border: `1px solid ${isActive ? 'var(--admin-brand)' : 'transparent'}`, borderRadius: '7px', color: isActive ? '#fff' : 'var(--admin-text-secondary)', fontWeight: '900', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', textTransform: 'uppercase' }}><Icon size={15} />{label}</button>;
+            })}
+          </div>
         </div>
 
         {/* Push Notification Toggle */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--admin-border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', background: 'var(--admin-input-bg)', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--admin-border)', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontWeight: '900', color: 'white', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ fontWeight: '900', color: 'var(--admin-text-primary)', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               {pushEnabled ? <Bell size={16} color="var(--admin-brand)" /> : <BellOff size={16} color="#8E9196" />}
               Email Notifications
             </div>
@@ -110,7 +108,7 @@ const CustomerSettings = () => {
             onClick={handleTogglePush}
             style={{
               position: 'relative', width: '50px', height: '26px',
-              background: pushEnabled ? 'var(--admin-brand)' : 'rgba(255,255,255,0.1)',
+              background: pushEnabled ? 'var(--admin-brand)' : 'var(--admin-border)',
               borderRadius: '25px', cursor: savingPush ? 'default' : 'pointer',
               padding: '4px', transition: 'background 0.3s ease',
               opacity: savingPush ? 0.6 : 1

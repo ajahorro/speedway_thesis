@@ -72,12 +72,16 @@ export const subscribeToNotifications = (userId, callback) => {
 
 export const sendBookingConfirmationEmail = async (bookingId) => {
   try {
+    console.info(`[Email] Sending booking confirmation for ${bookingId}`);
     const response = await fetch(`${BACKEND_URL}/api/emails/booking-confirmation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bookingId })
     });
-    return await response.json();
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `Email request failed (${response.status})`);
+    console.info(`[Email] Booking confirmation accepted for ${bookingId}`);
+    return result;
   } catch (error) {
     console.error('[NotificationService] Booking Email Error:', error);
     return { error: error.message };
@@ -86,12 +90,16 @@ export const sendBookingConfirmationEmail = async (bookingId) => {
 
 export const sendPaymentReceiptEmail = async (bookingId, paymentId) => {
   try {
+    console.info(`[Email] Sending payment receipt for ${bookingId}/${paymentId}`);
     const response = await fetch(`${BACKEND_URL}/api/emails/payment-receipt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bookingId, paymentId })
     });
-    return await response.json();
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `Email request failed (${response.status})`);
+    console.info(`[Email] Payment receipt accepted for ${bookingId}/${paymentId}`);
+    return result;
   } catch (error) {
     console.error('[NotificationService] Payment Email Error:', error);
     return { error: error.message };

@@ -136,28 +136,28 @@ export const UIProvider = ({ children }) => {
 
       {/* Category A: Blocking Center-Screen Modals */}
       {modal && (
-        <div style={{
+        <div className="app-modal-overlay" style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(0, 0, 0, 0.8)',
+          background: 'var(--modal-overlay)',
           backdropFilter: 'blur(8px)',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
           zIndex: 99999,
-          padding: '1rem',
+          padding: 'clamp(0.75rem, 4vw, 1.5rem)',
           animation: 'fadeIn 0.25s ease-out'
         }}>
-          <div style={{
-            background: '#15171A',
+          <div className="app-modal" style={{
+            background: 'var(--admin-card)',
             border: `1px solid ${getModalStyles(modal.type).brandColor}40`,
-            borderRadius: '8px',
+            borderRadius: 'var(--admin-radius)',
             maxWidth: '500px',
             width: '100%',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.75)',
+            boxShadow: 'var(--modal-shadow)',
             position: 'relative',
             overflow: 'hidden',
             animation: 'modalSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
@@ -171,7 +171,7 @@ export const UIProvider = ({ children }) => {
                 right: '1rem',
                 background: 'transparent',
                 border: 'none',
-                color: 'var(--admin-text-secondary, #8E9196)',
+                color: 'var(--admin-text-secondary)',
                 cursor: 'pointer',
                 padding: '0.25rem',
                 display: 'flex',
@@ -181,11 +181,11 @@ export const UIProvider = ({ children }) => {
                 transition: 'all 0.2s ease',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.color = '#fff';
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                e.currentTarget.style.color = 'var(--admin-text-primary)';
+                e.currentTarget.style.background = 'var(--modal-hover-bg)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.color = 'var(--admin-text-secondary, #8E9196)';
+                e.currentTarget.style.color = 'var(--admin-text-secondary)';
                 e.currentTarget.style.background = 'transparent';
               }}
             >
@@ -193,7 +193,7 @@ export const UIProvider = ({ children }) => {
             </button>
 
             {/* Modal Content */}
-            <div style={{ padding: '2rem 2rem 1.5rem 2rem' }}>
+            <div className="app-modal-content" style={{ padding: '2rem 2rem 1.5rem 2rem' }}>
               <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', marginBottom: '1rem' }}>
                 {getModalStyles(modal.type).icon}
                 <div style={{ flex: 1 }}>
@@ -201,7 +201,7 @@ export const UIProvider = ({ children }) => {
                     margin: 0,
                     fontSize: '1.25rem',
                     fontWeight: '900',
-                    color: '#FFF',
+                    color: 'var(--admin-text-primary)',
                     letterSpacing: '0.5px',
                     textTransform: 'uppercase'
                   }}>
@@ -210,7 +210,7 @@ export const UIProvider = ({ children }) => {
                   <div style={{
                     marginTop: '0.75rem',
                     fontSize: '0.9rem',
-                    color: 'var(--admin-text-secondary, #8E9196)',
+                    color: 'var(--admin-text-secondary)',
                     lineHeight: '1.6',
                     fontWeight: '500'
                   }}>
@@ -221,13 +221,13 @@ export const UIProvider = ({ children }) => {
             </div>
 
             {/* Modal Actions */}
-            <div style={{
-              background: '#0F1012',
+            <div className="app-modal-actions" style={{
+              background: 'var(--admin-sidebar)',
               padding: '1rem 2rem',
               display: 'flex',
               justifyContent: 'flex-end',
               gap: '0.75rem',
-              borderTop: '1px solid rgba(255, 255, 255, 0.03)'
+              borderTop: '1px solid var(--admin-border)'
             }}>
               <button
                 onClick={() => {
@@ -238,8 +238,8 @@ export const UIProvider = ({ children }) => {
                   padding: '0.6rem 1.25rem',
                   borderRadius: '4px',
                   background: 'transparent',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: 'var(--admin-text-secondary, #8E9196)',
+                  border: '1px solid var(--admin-input-border)',
+                  color: 'var(--admin-text-secondary)',
                   fontWeight: '700',
                   fontSize: '0.8rem',
                   textTransform: 'uppercase',
@@ -247,12 +247,12 @@ export const UIProvider = ({ children }) => {
                   transition: 'all 0.2s ease'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.color = '#fff';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                  e.currentTarget.style.color = 'var(--admin-text-primary)';
+                  e.currentTarget.style.borderColor = 'var(--admin-text-secondary)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.color = 'var(--admin-text-secondary, #8E9196)';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                  e.currentTarget.style.color = 'var(--admin-text-secondary)';
+                  e.currentTarget.style.borderColor = 'var(--admin-input-border)';
                 }}
               >
                 {modal.cancelText}
@@ -267,7 +267,7 @@ export const UIProvider = ({ children }) => {
                   borderRadius: '4px',
                   background: getModalStyles(modal.type).buttonBg,
                   border: 'none',
-                  color: '#FFF',
+                  color: '#fff',
                   fontWeight: '700',
                   fontSize: '0.8rem',
                   textTransform: 'uppercase',

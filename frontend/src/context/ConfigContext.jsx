@@ -8,6 +8,7 @@ const ConfigContext = createContext();
 export const ConfigProvider = ({ children }) => {
   const [settings, setSettings] = useState({
     MAX_BAYS: SHOP_CONFIG.MAX_BAYS,
+    MAX_VEHICLES_PER_STAFF: 4,
     OPENING_HOUR: SHOP_CONFIG.OPENING_HOUR,
     CLOSING_HOUR: SHOP_CONFIG.CLOSING_HOUR,
     BUSINESS_NAME: 'SPEEDWAY STUDIO',
@@ -49,6 +50,7 @@ export const ConfigProvider = ({ children }) => {
       if (data) {
         setSettings({
           MAX_BAYS: data.slots_per_hour || SHOP_CONFIG.MAX_BAYS,
+          MAX_VEHICLES_PER_STAFF: Number(data.max_vehicles_per_staff) || 4,
           OPENING_HOUR: parseHour(data.opening_hour, SHOP_CONFIG.OPENING_HOUR),
           CLOSING_HOUR: parseHour(data.closing_hour, SHOP_CONFIG.CLOSING_HOUR),
           BUSINESS_NAME: data.business_name || 'SPEEDWAY STUDIO',

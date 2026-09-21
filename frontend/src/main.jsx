@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { UIProvider } from './context/UIContext';
@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { UnifiedProvider } from './context/UnifiedContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ConfigProvider } from './context/ConfigContext';
+import { ChatProvider } from './context/ChatContext';
 import AdminLayout from './pages/Admin/AdminLayout';
 import AdminDashboard from './pages/Admin/AdminDashboard';
 import AdminBookings from './pages/Admin/AdminBookings';
@@ -22,7 +23,7 @@ import AdminNotifications from './pages/Admin/AdminNotifications';
 import AdminProfile from './pages/Admin/AdminProfile';
 import AdminAcceptInvite from './pages/Admin/AdminAcceptInvite';
 import AdminSlotManagement from './pages/Admin/AdminSlotManagement';
-import AdminWalkInForm from './pages/Admin/AdminWalkInForm';
+import AdminWalkInForm from './pages/Admin/AdminWalkInWizard';
 import StaffLayout from './pages/Staff/StaffLayout';
 import StaffDashboard from './pages/Staff/StaffDashboard';
 import StaffActiveJobs from './pages/Staff/StaffActiveJobs';
@@ -44,7 +45,29 @@ import GlobalNotifications from "./pages/GlobalNotifications";
 import CustomerSettings from './pages/Customer/CustomerSettings';
 import CustomerProfile from './pages/Customer/CustomerProfile';
 import CustomerBookingDetails from './pages/Customer/CustomerBookingDetails';
+import CustomerReceipt from './pages/Customer/CustomerReceipt';
 import './index.css';
+
+const InputCapitalizationController = () => {
+  useEffect(() => {
+    const capitalizeFirstLetter = (event) => {
+      const target = event.target;
+      const isTextInput = target instanceof HTMLInputElement && target.type === 'text';
+      const isTextArea = target instanceof HTMLTextAreaElement;
+      if ((!isTextInput && !isTextArea) || target.dataset.noAutoCapitalize !== undefined) return;
+
+      const match = target.value.match(/^(\s*)([a-z])/);
+      if (!match) return;
+
+      target.value = `${match[1]}${match[2].toUpperCase()}${target.value.slice(match[0].length)}`;
+    };
+
+    document.addEventListener('input', capitalizeFirstLetter, true);
+    return () => document.removeEventListener('input', capitalizeFirstLetter, true);
+  }, []);
+
+  return null;
+};
 
 // Suppress React Router v7 Future Flag Warnings
 const originalWarn = console.warn;
@@ -59,9 +82,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <ConfigProvider>
     <ThemeProvider>
       <AuthProvider>
-        <UnifiedProvider>
-          <BrowserRouter>
-            <UIProvider>
+        <ChatProvider>
+          <InputCapitalizationController />
+          <UnifiedProvider>
+            <BrowserRouter>
+              <UIProvider>
               <Routes>
                 {/* Public Routes */}
                 <Route path="/" element={<Landing />} />
@@ -85,6 +110,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                   <Route path="payments" element={<AdminPayments />} />
                   <Route path="refunds" element={<AdminRefunds />} />
                   <Route path="analytics" element={<AdminSalesReport />} />
+                  <Route path="finance" element={<AdminSalesReport />} />
                   <Route path="audit-logs" element={<AdminAuditLogs />} />
                   <Route path="accounts" element={<AdminAccountsManagement />} />
                   <Route path="users" element={<AdminUserManagement />} />
@@ -131,11 +157,13 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                   <Route path="notifications" element={<GlobalNotifications />} />
                   <Route path="settings" element={<CustomerSettings />} />
                   <Route path="profile" element={<CustomerProfile />} />
+                  <Route path="receipt/:id" element={<CustomerReceipt />} />
                 </Route>
-              </Routes>
-            </UIProvider>
-          </BrowserRouter>
-        </UnifiedProvider>
+                </Routes>
+              </UIProvider>
+            </BrowserRouter>
+          </UnifiedProvider>
+        </ChatProvider>
       </AuthProvider>
     </ThemeProvider>
   </ConfigProvider>

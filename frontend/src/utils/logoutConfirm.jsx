@@ -27,7 +27,7 @@ export const useConfirmation = () => {
 
   const confirmLogout = (onConfirm) => {
     showConfirmation({
-      title: 'End Session?',
+      title: 'Are you sure you want to log out?',
       message: 'Are you sure you want to log out of your account? Any unsaved progress may be lost.',
       confirmLabel: 'Log Out',
       onConfirm,
@@ -87,7 +87,7 @@ export const confirmLogout = (arg1, arg2) => {
 
   if (modalFn) {
     modalFn({
-      title: 'End Session?',
+      title: 'Are you sure you want to log out?',
       message: 'Are you sure you want to log out of your account? Any unsaved progress may be lost.',
       confirmText: 'Log Out',
       cancelText: 'Cancel',

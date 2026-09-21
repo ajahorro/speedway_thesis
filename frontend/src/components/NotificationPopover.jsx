@@ -52,10 +52,39 @@ const NotificationPopover = ({ profile, onClose, onRead }) => {
     }
   };
 
+  const isChatNotification = (n) => n.notification_type === 'MESSAGE_RECEIVED' || (n.title || '').toLowerCase().includes('new message');
+
+  const renderNotificationPreview = (n) => {
+    if (!isChatNotification(n) || !n.booking_id) return n.message || 'New notification';
+
+    const rawText = String(n.message || '').replace(/\s+/g, ' ').trim();
+    const words = rawText.split(' ');
+    if (words.length <= 3) return rawText;
+
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', color: 'var(--admin-text-primary)' }}>
+        <span>{words.slice(0, 3).join(' ')}</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            const rolePrefix = profile?.role?.toUpperCase() === 'ADMIN'
+              ? '/admin'
+              : profile?.role?.toUpperCase() === 'STAFF' ? '/staff' : '/customer';
+            onClose();
+            navigate(`${rolePrefix}/bookings/${n.booking_id}?chat=open`);
+          }}
+          style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontWeight: '900', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}
+        >
+          See More
+        </button>
+      </span>
+    );
+  };
+
   const handleNotificationClick = async (n) => {
     if (!n.is_read) {
       await supabase.from('notifications').update({ is_read: true }).eq('id', n.id);
-      // 4. Update state when clicking an individual unread item
       if (typeof refreshData === 'function') await refreshData();
       if (typeof onRead === 'function') await onRead();
     }
@@ -65,7 +94,7 @@ const NotificationPopover = ({ profile, onClose, onRead }) => {
         ? '/admin'
         : profile?.role?.toUpperCase() === 'STAFF' ? '/staff' : '/customer';
       onClose();
-      navigate(`${rolePrefix}/bookings/${n.booking_id}`);
+      navigate(`${rolePrefix}/bookings/${n.booking_id}${isChatNotification(n) ? '?chat=open' : ''}`);
       return;
     }
     setSelectedNotification(n);
@@ -150,7 +179,7 @@ const NotificationPopover = ({ profile, onClose, onRead }) => {
                     overflow: 'hidden', textOverflow: 'ellipsis',
                     display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical'
                   }}>
-                    {n.message}
+                    {renderNotificationPreview(n)}
                   </div>
                   <div style={{ fontSize: '0.6rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>
                     {timeAgo(n.created_at)}

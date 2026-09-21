@@ -47,6 +47,31 @@ const RecentNotifications = () => {
     return `${days}d ago`;
   };
 
+  const renderMessagePreview = (notif) => {
+    const isChatNote = notif.notification_type === 'MESSAGE_RECEIVED' || (notif.title || '').toLowerCase().includes('new message');
+    if (!isChatNote || !notif.booking_id) return notif.message;
+
+    const rawText = String(notif.message || '').replace(/\s+/g, ' ').trim();
+    const words = rawText.split(' ');
+    if (words.length <= 3) return rawText;
+
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+        <span>{words.slice(0, 3).join(' ')}</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            navigate(`/customer/bookings/${notif.booking_id}?chat=open`);
+          }}
+          style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontWeight: '900', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}
+        >
+          See More
+        </button>
+      </span>
+    );
+  };
+
   return (
     <div style={{
       background: 'var(--admin-card)',
@@ -64,7 +89,7 @@ const RecentNotifications = () => {
         justifyContent: 'space-between',
         alignItems: 'center'
       }}>
-        <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Operational Alerts</h3>
+        <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Operational Alerts</h3>
         <button
           onClick={() => navigate('/customer/notifications')}
           style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.7rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.5px' }}
@@ -101,12 +126,12 @@ const RecentNotifications = () => {
                 background: notif.is_read ? 'transparent' : 'rgba(var(--admin-brand-rgb), 0.03)',
                 transition: 'all 0.2s ease'
               }}
-              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--admin-input-bg)'}
               onMouseLeave={(e) => e.currentTarget.style.background = notif.is_read ? 'transparent' : 'rgba(var(--admin-brand-rgb), 0.03)'}
             >
               <div style={{
                 width: '36px', height: '36px', borderRadius: '8px',
-                background: 'rgba(255,255,255,0.03)',
+                background: 'var(--admin-input-bg)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: '1px solid var(--admin-border)',
                 flexShrink: 0
@@ -114,11 +139,11 @@ const RecentNotifications = () => {
                 {getIcon(notif.notification_type)}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: 0 }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: '950', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: '950', color: 'var(--admin-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {notif.title}
                 </div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-secondary)', lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                  {notif.message}
+                  {renderMessagePreview(notif)}
                 </div>
                 <div style={{ fontSize: '0.6rem', fontWeight: '900', color: 'var(--admin-text-secondary)', marginTop: '0.25rem', textTransform: 'uppercase', opacity: 0.6 }}>
                   {timeAgo(notif.created_at)}

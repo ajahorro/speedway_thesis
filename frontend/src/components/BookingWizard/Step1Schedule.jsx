@@ -2,21 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, Phone, AlertCircle } from 'lucide-react';
 import { getAvailableSlots } from '../../services/scheduleService';
 import CustomCalendar from './CustomCalendar';
+import { sanitizeVehicleText } from '../../config/constants';
 
-const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack, onCancel }) => {
+const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, onNext, onBack, onCancel, customerDetailsLocked = false }) => {
   const [availableSlots, setAvailableSlots] = useState([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
 
-  // Calculate total duration for all vehicles + 1 hour operational buffer
-  const totalDuration = ((bookingData.vehicles || []).reduce((total, v) => {
-    return total + (v.services || []).reduce((sub, s) => sub + (s.durationMinutes || 60), 0);
-  }, 0) || 60) + 60; // REQ-SCH-05: 1-hour Buffer Enforcement
+  // Vehicles are serviced concurrently; duration is driven by the longest unit,
+  // while bay capacity separately limits how many units can share the slot.
+  const totalDuration = ((bookingData.vehicles || []).reduce((longest, vehicle) => Math.max(
+    longest,
+    (vehicle.services || []).reduce((sum, service) => sum + Number(service.durationMinutes || 60), 0)
+  ), 0) || 60) + 60;
 
   // Basic validation
   const vehicle = bookingData.vehicles && bookingData.vehicles[activeVehicleIndex] ? bookingData.vehicles[activeVehicleIndex] : {};
+  const allVehiclesComplete = (bookingData.vehicles || []).length > 0 && (bookingData.vehicles || []).every((item) =>
+    item.type && item.brand && item.model && item.plateNumber && item.services?.length
+  );
   const isValid = bookingData.date && bookingData.time && (bookingData.contactNumber || '').length >= 10 &&
-    (bookingData.customerName || '').trim().length > 0 &&
-    vehicle.type && vehicle.brand && vehicle.model && vehicle.plateNumber;
+    (bookingData.customerName || '').trim().length > 0 && allVehiclesComplete;
 
   // Fetch available slots when date changes (real bay capacity check)
   useEffect(() => {
@@ -25,11 +30,11 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
     const fetchSlots = async () => {
       setIsLoadingSlots(true);
       try {
-        const slots = await getAvailableSlots(bookingData.date, totalDuration);
+        const slots = await getAvailableSlots(bookingData.date, totalDuration, bookingData.vehicles || []);
         setAvailableSlots(slots);
 
         // Auto-clear time if the selected time is no longer available
-        if (bookingData.time && !slots.includes(bookingData.time)) {
+        if (bookingData.time && !slots.some(slot => slot.time === bookingData.time)) {
           setBookingData(prev => ({ ...prev, time: '' }));
         }
       } catch (error) {
@@ -40,7 +45,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
     };
 
     fetchSlots();
-  }, [bookingData.date, totalDuration]); // eslint-disable-line
+  }, [bookingData.date, totalDuration, bookingData.vehicles]); // eslint-disable-line
 
   const handleDateChange = (e) => {
     setBookingData({ ...bookingData, date: e.target.value });
@@ -67,8 +72,8 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
 
   const inputStyle = {
     width: '100%',
-    background: 'var(--admin-bg)',
-    border: '1px solid var(--admin-border)',
+    background: 'var(--admin-input-bg)',
+    border: '1px solid var(--admin-input-border)',
     padding: '0.85rem 1rem',
     borderRadius: '8px',
     color: 'var(--admin-text-primary)',
@@ -112,7 +117,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
       <div className="schedule-grid">
 
         {/* Left Col: Contact & Date */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', padding: 'clamp(1rem, 3vw, 1.5rem)', boxShadow: 'var(--admin-card-shadow)' }}>
 
           <div>
             <label style={{ display: 'block', fontSize: '0.65rem', fontWeight: '950', color: 'var(--admin-text-secondary)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
@@ -121,7 +126,10 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             <input
               type="text"
               value={bookingData.customerName || ''}
-              onChange={(e) => setBookingData({ ...bookingData, customerName: e.target.value })}
+              disabled={customerDetailsLocked}
+              onChange={(e) => setBookingData({ ...bookingData, customerName: sanitizeVehicleText(e.target.value) })}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--admin-brand)'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--admin-input-border)'; }}
               style={inputStyle}
               placeholder="e.g. John Doe"
             />
@@ -135,8 +143,11 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
               <Phone size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)' }} />
               <input
                 type="tel"
-                value={bookingData.contactNumber || ''}
-                onChange={(e) => setBookingData({ ...bookingData, contactNumber: e.target.value })}
+                value={bookingData.contactNumber}
+                disabled={customerDetailsLocked}
+                onChange={(e) => setBookingData({ ...bookingData, contactNumber: e.target.value.replace(/\D/g, '').slice(0, 15) })}
+                onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--admin-brand)'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--admin-input-border)'; }}
                 style={iconInputStyle}
                 placeholder="e.g. 09123456789"
               />
@@ -159,7 +170,9 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
             </label>
             <textarea
               value={bookingData.notes || ''}
-              onChange={(e) => setBookingData({ ...bookingData, notes: e.target.value })}
+              onChange={(e) => setBookingData({ ...bookingData, notes: sanitizeVehicleText(e.target.value) })}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--admin-brand)'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--admin-input-border)'; }}
               placeholder="e.g. Please take extra care of the leather seats..."
               style={{ ...inputStyle, minHeight: '100px', resize: 'none' }}
             />
@@ -168,7 +181,7 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
         </div>
 
         {/* Right Col: Time Slots & Vehicle Details */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', padding: 'clamp(1rem, 3vw, 1.5rem)', boxShadow: 'var(--admin-card-shadow)' }}>
 
           {/* Time Slots Section */}
           <div>
@@ -186,32 +199,34 @@ const Step1Schedule = ({ bookingData, setBookingData, activeVehicleIndex = 0, on
               </div>
             ) : availableSlots.length === 0 ? (
               <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: 'var(--admin-radius-md)', padding: '1.5rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: '600', fontSize: '0.9rem' }}>
-                <AlertCircle size={20} /> All bays are fully booked for this date. Please choose another day.
+                <AlertCircle size={20} /> No matching time slots are available for this fleet. Try another date or a shorter service selection.
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '0.75rem' }}>
-                {availableSlots.map(time => (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', gap: '0.75rem' }}>
+                {availableSlots.map(slot => (
                   <button
-                    key={time}
-                    onClick={() => handleTimeSelect(time)}
+                    key={slot.time}
+                    onClick={() => handleTimeSelect(slot.time)}
                     className="admin-card-hover"
                     style={{
-                      padding: '1rem 0.5rem',
-                      background: bookingData.time === time ? 'var(--admin-brand)' : 'var(--admin-bg)',
-                      color: bookingData.time === time ? '#fff' : 'var(--admin-text-primary)',
-                      border: `1px solid ${bookingData.time === time ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
+                      padding: '0.75rem 0.5rem',
+                      background: bookingData.time === slot.time ? 'var(--admin-brand)' : 'var(--admin-input-bg)',
+                      color: bookingData.time === slot.time ? '#fff' : 'var(--admin-text-primary)',
+                      border: `1px solid ${bookingData.time === slot.time ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
                       borderRadius: 'var(--admin-radius-md)',
                       cursor: 'pointer',
                       fontWeight: '900',
                       fontSize: '0.9rem',
                       display: 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: '0.5rem',
                       transition: 'all 0.2s ease'
                     }}
                   >
-                    <Clock size={16} /> {time}
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}><Clock size={15} /> {slot.time}</span>
+                    <small style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.65rem', fontWeight: '700', opacity: bookingData.time === slot.time ? 0.9 : 0.7 }}>{slot.availableBays} bay{slot.availableBays === 1 ? '' : 's'} available</small>
                   </button>
                 ))}
               </div>

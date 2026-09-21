@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 const CustomerProfile = () => {
-  const { user, profile, updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount, resetPassword } = useAuth();
+  const { user, profile, updateProfile, verifyPassword, requestEmailChange, confirmEmailChange, deactivateAccount } = useAuth();
   
   // States
   const [isEditing, setIsEditing] = useState(false);
@@ -17,26 +17,8 @@ const CustomerProfile = () => {
   const [showPassModal, setShowPassModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+  const [passwordInputReady, setPasswordInputReady] = useState(false);
 
-  const handleForgotPassword = async () => {
-    const email = profile?.email || user?.email;
-    if (!email) return toast.error('No email address associated with this account');
-    const toastId = toast.loading('Sending password reset instructions...');
-    try {
-      await resetPassword(email);
-      toast.success('Password reset email sent. Check your inbox!', { id: toastId });
-    } catch (err) {
-      if (err.message === 'SMTP_UNAVAILABLE') {
-        toast.error(
-          'Password reset email service is currently unavailable. Please contact an Administrator to reset your password.',
-          { id: toastId, duration: 7000 }
-        );
-      } else {
-        toast.error(err.message || 'Failed to send reset email', { id: toastId });
-      }
-    }
-  };
-  
   // Form Data
   const [formData, setFormData] = useState({
     firstName: profile?.first_name || user?.user_metadata?.first_name || '',
@@ -57,6 +39,9 @@ const CustomerProfile = () => {
   });
 
   const [pendingAction, setPendingAction] = useState(null); // 'profile' or 'password'
+
+  const displayName = `${formData.firstName} ${formData.lastName}`.trim() || 'Customer';
+  const initials = displayName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase();
 
   // Reset form when profile loads
   useEffect(() => {
@@ -82,6 +67,7 @@ const CustomerProfile = () => {
   const handleSaveProfileClick = (e) => {
     e.preventDefault();
     setPendingAction('profile');
+    setPasswordInputReady(false);
     setShowPassModal(true);
   };
 
@@ -95,7 +81,7 @@ const CustomerProfile = () => {
       return toast.error('New password must be more than 4 characters');
     }
 
-    const toastId = toast.loading('Verifying identity & rotating keys...');
+    const toastId = toast.loading('Checking your current password...');
     try {
       const isVerified = await verifyPassword(passwordData.currentPassword);
       if (!isVerified.success) {
@@ -107,7 +93,7 @@ const CustomerProfile = () => {
       if (error) throw error;
       
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      toast.success('Security credentials rotated successfully', { id: toastId });
+      toast.success('Password updated successfully', { id: toastId });
     } catch (error) {
       toast.error(error.message || 'Operation failed', { id: toastId });
     }
@@ -117,12 +103,12 @@ const CustomerProfile = () => {
     const isVerified = await verifyPassword(passwordData.currentPassword);
     
     if (!isVerified.success) {
-      toast.error('Identity verification failed. Incorrect password.');
+      toast.error('Password check failed. Please try again.');
       return;
     }
 
     setShowPassModal(false);
-    const toastId = toast.loading('Synchronizing security credentials...');
+    const toastId = toast.loading('Saving your changes...');
 
     try {
       if (pendingAction === 'profile') {
@@ -133,12 +119,12 @@ const CustomerProfile = () => {
           full_name: `${formData.firstName} ${formData.lastName}`.trim()
         });
         setIsEditing(false);
-        toast.success('Identity profile updated', { id: toastId });
+        toast.success('Profile updated', { id: toastId });
       } else if (pendingAction === 'password') {
         const { error } = await supabase.auth.updateUser({ password: passwordData.newPassword });
         if (error) throw error;
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-        toast.success('Security credentials rotated successfully', { id: toastId });
+        toast.success('Password updated successfully', { id: toastId });
       }
     } catch (error) {
       toast.error(error.message || 'Operation failed', { id: toastId });
@@ -196,22 +182,23 @@ const CustomerProfile = () => {
 
   const labelStyle = {
     display: 'block',
-    fontSize: '0.65rem',
-    fontWeight: '950',
+    fontSize: '0.68rem',
+    fontWeight: '700',
     color: 'var(--admin-text-secondary)',
-    textTransform: 'uppercase',
+    textTransform: 'none',
     marginBottom: '0.5rem',
-    letterSpacing: '1px'
+    letterSpacing: '0'
   };
 
   const inputStyle = {
     width: '100%',
-    background: isEditing ? 'var(--admin-bg)' : 'rgba(255,255,255,0.02)',
+    background: isEditing ? 'var(--admin-bg)' : 'var(--admin-input-bg)',
     border: `1px solid ${isEditing ? 'var(--admin-brand)' : 'var(--admin-border)'}`,
     borderRadius: '8px',
     padding: '0.85rem 1rem',
-    color: isEditing ? 'white' : 'var(--admin-text-secondary)',
-    fontWeight: '800',
+    color: isEditing ? 'var(--admin-text-primary)' : 'var(--admin-text-secondary)',
+    fontSize: '0.9rem',
+    fontWeight: '500',
     outline: 'none',
     transition: 'all 0.2s ease',
     cursor: isEditing ? 'text' : 'not-allowed'
@@ -221,17 +208,22 @@ const CustomerProfile = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
       
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'white', letterSpacing: '-1.5px' }}>My Profile</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '1.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div aria-hidden="true" style={{ width: '58px', height: '58px', flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'rgba(var(--admin-brand-rgb), 0.12)', border: '1px solid var(--admin-brand)', color: 'var(--admin-brand)', fontSize: '1rem', fontWeight: '900' }}>{initials}</div>
+          <div>
+          <h1 style={{ fontSize: 'clamp(1.8rem, 5vw, 2.5rem)', fontWeight: '900', margin: '0 0 0.35rem 0', color: 'var(--admin-text-primary)', letterSpacing: '-1px' }}>My Profile</h1>
+          <div style={{ color: 'var(--admin-text-primary)', fontSize: '0.9rem', fontWeight: '800' }}>{displayName}</div>
+          <div style={{ color: 'var(--admin-text-secondary)', fontSize: '0.78rem', marginTop: '0.15rem' }}>{user?.email}</div>
           <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.95rem', fontWeight: '600', opacity: 0.8 }}>
-            Manage your industrial identity and security infrastructure.
+            Manage your personal details, contact info, and account security.
           </p>
+          </div>
         </div>
         {!isEditing && (
           <button 
             onClick={() => setIsEditing(true)}
-            style={{ padding: '0.75rem 1.5rem', background: 'var(--admin-brand)', color: 'white', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '950', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', textTransform: 'uppercase', letterSpacing: '1px' }}
+            style={{ padding: '0.65rem 1rem', background: 'var(--admin-brand)', color: '#fff', border: 'none', borderRadius: 'var(--admin-radius-sm)', fontWeight: '800', fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           >
             <Edit3 size={16} /> Edit Profile
           </button>
@@ -245,7 +237,7 @@ const CustomerProfile = () => {
           <section style={cardStyle}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <User size={20} color="var(--admin-brand)" />
-              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase' }}>Identity Specs</h2>
+              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800' }}>Personal Information</h2>
             </div>
 
             <form onSubmit={handleSaveProfileClick} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -286,48 +278,35 @@ const CustomerProfile = () => {
                 </div>
               </div>
 
+              <div>
+                <label style={labelStyle}>Email Address</label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', padding: '0.85rem 1rem', background: 'var(--admin-input-bg)', border: '1px solid var(--admin-border)', borderRadius: '8px' }}>
+                  <span style={{ color: 'var(--admin-text-primary)', fontSize: '0.9rem', fontWeight: '600', overflowWrap: 'anywhere' }}>{user?.email}</span>
+                  <span style={{ color: 'var(--admin-success)', fontSize: '0.65rem', fontWeight: '900', textTransform: 'uppercase' }}>Verified Account</span>
+                </div>
+                <button type="button" onClick={() => setShowEmailModal(true)} style={{ marginTop: '0.6rem', padding: '0.6rem 0.85rem', background: 'transparent', border: '1px solid var(--admin-brand)', color: 'var(--admin-brand)', borderRadius: '8px', fontWeight: '800', cursor: 'pointer', fontSize: '0.7rem' }}>Change Email Address</button>
+              </div>
+
               {isEditing && (
                 <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
                   <button 
                     type="button" 
                     onClick={() => { setIsEditing(false); setFormData({ firstName: profile?.first_name || '', lastName: profile?.last_name || '', phone: profile?.phone_number || '' }); }}
-                    style={{ flex: 1, padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'white', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}
+                    style={{ flex: 1, padding: '0.75rem 1rem', background: 'transparent', border: '1px solid var(--admin-border)', borderRadius: '8px', color: 'var(--admin-text-primary)', fontWeight: '800', cursor: 'pointer' }}
                   >
                     Cancel
                   </button>
                   <button 
                     type="submit" 
-                    style={{ flex: 1.5, padding: '1rem', background: 'var(--admin-brand)', border: 'none', borderRadius: '8px', color: 'white', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
+                    style={{ flex: 1.5, padding: '0.75rem 1rem', background: 'var(--admin-brand)', border: 'none', borderRadius: '8px', color: '#fff', fontWeight: '800', cursor: 'pointer' }}
                   >
-                    Authorize & Save
+                    Save Changes
                   </button>
                 </div>
               )}
             </form>
           </section>
 
-          {/* Email Management */}
-          <section style={cardStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-              <Mail size={20} color="var(--admin-brand)" />
-              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase' }}>System Communication</h2>
-            </div>
-            
-            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: 'var(--admin-radius-md)', border: '1px solid var(--admin-border)', marginBottom: '1.5rem' }}>
-              <label style={labelStyle}>Primary Email</label>
-              <div style={{ fontSize: '1.1rem', fontWeight: '900', color: 'white' }}>{user?.email}</div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--admin-success)', fontWeight: '900', marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.3rem', textTransform: 'uppercase' }}>
-                <ShieldCheck size={12} /> Verified Root Account
-              </div>
-            </div>
-
-            <button 
-              onClick={() => setShowEmailModal(true)}
-              style={{ alignSelf: 'flex-start', padding: '0.75rem 1.25rem', background: 'transparent', border: '1px solid var(--admin-brand)', color: 'var(--admin-brand)', borderRadius: '8px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.75rem' }}
-            >
-              Update Primary Email
-            </button>
-          </section>
         </div>
 
         {/* Right Column: Security & Danger Zone */}
@@ -337,7 +316,7 @@ const CustomerProfile = () => {
           <section style={cardStyle}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <Lock size={20} color="var(--admin-brand)" />
-              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase' }}>Security Key</h2>
+              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800' }}>Password & Security</h2>
             </div>
 
             <form onSubmit={handleUpdatePasswordClick} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -351,20 +330,19 @@ const CustomerProfile = () => {
                 aria-hidden="true" 
               />
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <div style={{ marginBottom: '0.5rem' }}>
                   <label style={{ ...labelStyle, marginBottom: 0 }}>Current Password</label>
-                  <button 
-                    type="button" 
-                    onClick={handleForgotPassword}
-                    style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', padding: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}
-                  >
-                    Forgot Password?
-                  </button>
                 </div>
                 <input 
                   type="password" 
-                  autoComplete="current-password"
-                  placeholder="Verify your identity"
+                  name="verification-password"
+                  autoComplete="off"
+                  readOnly={!passwordInputReady}
+                  onFocus={() => {
+                    setPasswordInputReady(true);
+                    setPasswordData(prev => ({ ...prev, currentPassword: '' }));
+                  }}
+                  placeholder="Current password"
                   value={passwordData.currentPassword}
                   onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
                   style={{ ...inputStyle, background: 'var(--admin-bg)', cursor: 'text' }} 
@@ -407,19 +385,10 @@ const CustomerProfile = () => {
               <button 
                 type="submit" 
                 disabled={!isPasswordFormValid}
-                style={{ width: '100%', padding: '1rem', background: isPasswordFormValid ? 'var(--admin-brand)' : 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '8px', color: isPasswordFormValid ? 'white' : 'rgba(255,255,255,0.3)', fontWeight: '950', cursor: isPasswordFormValid ? 'pointer' : 'not-allowed', textTransform: 'uppercase', transition: 'all 0.2s ease', opacity: isPasswordFormValid ? 1 : 0.5 }}
+                style={{ width: '100%', padding: '0.75rem 1rem', background: isPasswordFormValid ? 'var(--admin-brand)' : 'var(--admin-border)', border: 'none', borderRadius: '8px', color: isPasswordFormValid ? '#fff' : 'var(--admin-text-secondary)', fontWeight: '800', cursor: isPasswordFormValid ? 'pointer' : 'not-allowed', transition: 'all 0.2s ease', opacity: isPasswordFormValid ? 1 : 0.65 }}
               >
-                Rotate Password
+                Update Password
               </button>
-              <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
-                <button 
-                  type="button"
-                  onClick={handleForgotPassword}
-                  style={{ background: 'none', border: 'none', color: 'var(--admin-brand)', fontSize: '0.65rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
-                >
-                  Forgot Password?
-                </button>
-              </div>
             </form>
           </section>
 
@@ -427,14 +396,14 @@ const CustomerProfile = () => {
           <section style={{ ...cardStyle, border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.02)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
               <AlertTriangle size={20} color="#ef4444" />
-              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '950', textTransform: 'uppercase', color: '#ef4444' }}>Danger Zone</h2>
+              <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: '#ef4444' }}>Account Actions</h2>
             </div>
             <p style={{ margin: '0 0 1.5rem 0', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600', lineHeight: 1.5 }}>
               Account deactivation initiates a 15-day grace period. After 15 days, all data will be permanently purged from Speedway servers.
             </p>
             <button 
               onClick={() => setShowDeactivateModal(true)}
-              style={{ width: '100%', padding: '1rem', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '8px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}
+              style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: '8px', fontWeight: '800', fontSize: '0.8rem', cursor: 'pointer' }}
             >
               Deactivate Account
             </button>
@@ -451,11 +420,18 @@ const CustomerProfile = () => {
             <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'rgba(var(--admin-brand-rgb), 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem auto' }}>
               <Shield size={32} color="var(--admin-brand)" />
             </div>
-            <h2 style={{ fontWeight: '950', textTransform: 'uppercase', marginBottom: '0.5rem' }}>Identity Verification</h2>
-            <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600', marginBottom: '2rem' }}>Please enter your current password to authorize this sensitive update.</p>
+            <h2 style={{ fontWeight: '800', marginBottom: '0.5rem' }}>Confirm Your Identity</h2>
+            <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600', marginBottom: '2rem' }}>Enter your current password to confirm this change.</p>
             
             <input 
               type="password"
+              name="verification-password-modal"
+              autoComplete="off"
+              readOnly={!passwordInputReady}
+              onFocus={() => {
+                setPasswordInputReady(true);
+                setPasswordData(prev => ({ ...prev, currentPassword: '' }));
+              }}
               placeholder="Current Password"
               value={passwordData.currentPassword}
               onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
@@ -532,7 +508,7 @@ const CustomerProfile = () => {
             <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem auto' }}>
               <AlertTriangle size={32} color="#ef4444" />
             </div>
-            <h2 style={{ fontWeight: '950', textTransform: 'uppercase', color: '#ef4444' }}>Authorize Deactivation</h2>
+            <h2 style={{ fontWeight: '800', color: '#ef4444' }}>Confirm Account Deactivation</h2>
             <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.85rem', fontWeight: '600', marginBottom: '2rem', lineHeight: 1.6 }}>
               This will log you out immediately. You will have 15 days to recover your account by logging back in. After that, all data is permanently purged.
             </p>

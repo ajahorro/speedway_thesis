@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
-import { Send, Image as ImageIcon, Bot } from 'lucide-react';
+import { Send, Image as ImageIcon, Bot, Check, CheckCheck, Loader2, AlertCircle, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { emitEventToMany, EVENTS } from '../services/eventEngine';
+import { useGlobalChat } from '../context/ChatContext';
 
 /**
  * BookingChat — Unified real-time chat per booking.
@@ -12,25 +13,50 @@ import { emitEventToMany, EVENTS } from '../services/eventEngine';
  */
 const BookingChat = ({ bookingId }) => {
   const { user, profile } = useAuth();
+  const { refreshUnreadCount } = useGlobalChat();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [attachment, setAttachment] = useState(null);
+  const [error, setError] = useState('');
   const bottomRef = useRef(null);
   const chatContainerRef = useRef(null);
   const fileRef = useRef(null);
 
   // --- FETCH MESSAGES ---
+  const markMessagesAsRead = async (messageList) => {
+    const unreadIds = messageList
+      .filter(message => message.sender_id !== user?.id && !message.is_read)
+      .map(message => message.id);
+    if (unreadIds.length === 0) {
+      await refreshUnreadCount();
+      return;
+    }
+
+    const { error: readError } = await supabase
+      .from('booking_messages')
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .in('id', unreadIds);
+    if (readError) console.error('Unable to mark chat messages as read:', readError);
+    await refreshUnreadCount();
+  };
+
   const fetchMessages = async () => {
     const { data, error } = await supabase
       .from('booking_messages')
-      .select('*, sender:profiles!booking_messages_sender_id_fkey(first_name, last_name, role)')
+      .select('*, sender:profiles!booking_messages_sender_id_fkey(full_name, first_name, last_name, role)')
       .eq('booking_id', bookingId)
       .order('created_at', { ascending: true });
 
-    if (!error && data) setMessages(data);
+    if (!error && data) {
+      const conversationMessages = data.filter(message => message.message_type !== 'system');
+      setMessages(conversationMessages);
+      await markMessagesAsRead(conversationMessages);
+    }
   };
 
   useEffect(() => {
+    if (!bookingId || !user?.id) return undefined;
     fetchMessages();
 
     // Real-time subscription
@@ -42,6 +68,7 @@ const BookingChat = ({ bookingId }) => {
         table: 'booking_messages',
         filter: `booking_id=eq.${bookingId}`
       }, (payload) => {
+        if (payload.new.message_type === 'system') return;
         // Silently replace optimistic messages or append new DB confirmed ones
         setMessages(prev => {
           const filtered = prev.filter(m => !(m.status === 'sending' && m.message === payload.new.message));
@@ -51,7 +78,21 @@ const BookingChat = ({ bookingId }) => {
           }
           return filtered;
         });
+        if (payload.new.sender_id !== user.id) {
+          supabase.from('booking_messages').update({ is_read: true, read_at: new Date().toISOString() }).eq('id', payload.new.id).then(async ({ error: readError }) => {
+            if (readError) console.error('Unable to mark incoming message as read:', readError);
+            else await refreshUnreadCount();
+          });
+        }
         fetchMessages();
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'booking_messages',
+        filter: `booking_id=eq.${bookingId}`
+      }, (payload) => {
+        setMessages(prev => prev.map(message => message.id === payload.new.id ? { ...message, ...payload.new } : message));
       })
       .subscribe((status) => {
         if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
@@ -60,7 +101,7 @@ const BookingChat = ({ bookingId }) => {
       });
 
     return () => { supabase.removeChannel(channel); };
-  }, [bookingId]); // eslint-disable-line
+  }, [bookingId, user?.id, refreshUnreadCount]);
 
   // Smart Auto-scroll (REQ-NFR-30)
   const prevMsgCount = useRef(0);
@@ -83,7 +124,8 @@ const BookingChat = ({ bookingId }) => {
   // --- SEND MESSAGE ---
   const handleSend = async (retryMessage = null) => {
     const textToSend = retryMessage?.message || newMessage.trim();
-    if (!textToSend || sending) return;
+    if ((!textToSend && !attachment) || sending) return;
+    setError('');
     
     const tempId = retryMessage?.id || `temp-${Date.now()}`;
     setSending(true);
@@ -95,6 +137,7 @@ const BookingChat = ({ bookingId }) => {
         booking_id: bookingId,
         sender_id: user?.id || profile?.id,
         message: textToSend,
+        message_text: textToSend,
         message_type: 'text',
         created_at: new Date().toISOString(),
         status: 'sending',
@@ -111,7 +154,8 @@ const BookingChat = ({ bookingId }) => {
         booking_id: bookingId,
         sender_id: user?.id || profile?.id,
         message: textToSend,
-        message_type: 'text'
+        message_type: 'text',
+        is_read: false
       });
       if (error) throw error;
       const { data: booking } = await supabase.from('bookings').select('customer_id').eq('id', bookingId).maybeSingle();
@@ -129,7 +173,15 @@ const BookingChat = ({ bookingId }) => {
       }
       toast.success('Message sent securely', { position: 'top-center' });
     } catch (err) {
-      console.error('Send error:', err);
+      console.error('Send error:', {
+        code: err?.code,
+        status: err?.status,
+        message: err?.message,
+        details: err?.details,
+        hint: err?.hint,
+        raw: err
+      });
+      setError(err?.message || 'Failed to send message. Please try again.');
       // Fallback to error state
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
     } finally {
@@ -141,29 +193,65 @@ const BookingChat = ({ bookingId }) => {
   const handleImageUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setSending(true);
-    try {
-      const filePath = `chat/${bookingId}/${Date.now()}_${file.name}`;
-      const { error: uploadErr } = await supabase.storage.from('chat-attachments').upload(filePath, file);
-      
-      let imageUrl = filePath;
-      if (!uploadErr) {
-        const { data: { publicUrl } } = supabase.storage.from('chat-attachments').getPublicUrl(filePath);
-        imageUrl = publicUrl;
-      }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Attachments must be 5MB or smaller.');
+      e.target.value = '';
+      return;
+    }
 
-      await supabase.from('booking_messages').insert({
+    setError('');
+    setAttachment(file);
+    e.target.value = '';
+  };
+
+  const handleSendAttachment = async () => {
+    if (!attachment || sending) return;
+    setSending(true);
+    setError('');
+    try {
+      const safeName = attachment.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `chat/${bookingId}/${Date.now()}_${safeName}`;
+      const { error: uploadErr } = await supabase.storage.from('chat_media').upload(filePath, attachment);
+      if (uploadErr) throw uploadErr;
+
+      const { data: { publicUrl } } = supabase.storage.from('chat_media').getPublicUrl(filePath);
+      const { error: insertError } = await supabase.from('booking_messages').insert({
         booking_id: bookingId,
         sender_id: user.id,
-        message: imageUrl,
-        message_type: 'image'
+        message: publicUrl,
+        message_text: publicUrl,
+        message_type: attachment.type.startsWith('image/') ? 'image' : 'file',
+        is_read: false
       });
+      if (insertError) throw insertError;
+      const { data: booking } = await supabase.from('bookings').select('customer_id').eq('id', bookingId).maybeSingle();
+      const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'ADMIN').eq('is_active', true);
+      const recipients = [...new Set([
+        booking?.customer_id,
+        ...(admins || []).map(admin => admin.id)
+      ].filter(recipientId => recipientId && recipientId !== user.id))];
+      if (recipients.length > 0) {
+        await emitEventToMany(EVENTS.MESSAGE_RECEIVED, {
+          userIds: recipients,
+          bookingId,
+          meta: { bookingRef: bookingId.substring(0, 8).toUpperCase(), senderName: profile?.full_name || profile?.first_name || 'A user' }
+        });
+      }
+      setAttachment(null);
+      toast.success('Attachment sent securely', { position: 'top-center' });
     } catch (err) {
       console.error('Image upload error:', err);
+      setError('Failed to upload attachment. Please try again.');
     } finally {
       setSending(false);
       if (fileRef.current) fileRef.current.value = '';
     }
+  };
+
+  const handleSubmit = async () => {
+    if (sending || (!newMessage.trim() && !attachment)) return;
+    if (newMessage.trim()) await handleSend();
+    if (attachment) await handleSendAttachment();
   };
 
   const handleKeyDown = (e) => {
@@ -213,7 +301,9 @@ const BookingChat = ({ bookingId }) => {
           messages.map((msg) => {
             const isMe = msg.sender_id === user?.id;
             const isSystem = msg.message_type === 'system';
-            const senderName = msg.sender ? `${msg.sender.first_name}` : 'Unknown';
+            const senderName = msg.sender
+              ? msg.sender.full_name || `${msg.sender.first_name || ''} ${msg.sender.last_name || ''}`.trim() || 'Unknown'
+              : 'Unknown';
             const senderRole = msg.sender?.role || 'SYSTEM';
 
             if (isSystem) {
@@ -241,6 +331,10 @@ const BookingChat = ({ bookingId }) => {
                     style={{ maxWidth: '200px', maxHeight: '200px', borderRadius: 'var(--admin-radius-sm)', border: '1px solid var(--admin-border)', cursor: 'zoom-in', objectFit: 'cover', opacity: msg.status === 'sending' ? 0.6 : 1 }}
                     onClick={() => window.open(msg.message, '_blank')}
                   />
+                ) : msg.message_type === 'file' ? (
+                  <a href={msg.message} target="_blank" rel="noreferrer" style={{ color: isMe ? '#fff' : 'var(--admin-brand)', fontWeight: '800', textDecoration: 'underline' }}>
+                    Open attachment
+                  </a>
                 ) : (
                   <div style={{
                     background: isSystem ? 'rgba(var(--admin-brand-rgb), 0.05)' : (isMe ? 'var(--admin-brand)' : 'var(--admin-card)'),
@@ -269,6 +363,7 @@ const BookingChat = ({ bookingId }) => {
                     </span>
                   )}
                   {msg.status !== 'sending' && msg.status !== 'failed' && <span>{timeFormat(msg.created_at)}</span>}
+                  {isMe && msg.status !== 'sending' && msg.status !== 'failed' && (msg.is_read ? <CheckCheck size={13} color="#34d399" title="Seen" /> : <Check size={13} title="Sent" />)}
                 </div>
               </div>
             );
@@ -278,8 +373,10 @@ const BookingChat = ({ bookingId }) => {
       </div>
 
       {/* Input Area */}
-      <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--admin-border)', display: 'flex', gap: '0.5rem', alignItems: 'center', background: 'var(--admin-card)' }}>
-        <input type="file" ref={fileRef} accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
+      <div style={{ position: 'relative', padding: '0.75rem 1rem', borderTop: '1px solid var(--admin-border)', display: 'flex', gap: '0.5rem', alignItems: 'center', background: 'var(--admin-card)' }}>
+        {error && <div role="alert" style={{ position: 'absolute', transform: 'translateY(-100%)', left: '1rem', right: '1rem', padding: '0.5rem 0.75rem', background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderRadius: '4px' }}><AlertCircle size={14} /> {error}</div>}
+        {attachment && <div style={{ position: 'absolute', transform: 'translateY(-100%)', left: '1rem', right: '1rem', padding: '0.5rem 0.75rem', background: 'var(--admin-card)', border: '1px solid var(--admin-border)', color: 'var(--admin-text-secondary)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}><span>{attachment.name} ({(attachment.size / 1024 / 1024).toFixed(2)} MB)</span><button type="button" onClick={() => setAttachment(null)} aria-label="Remove attachment" style={{ background: 'none', border: 0, color: 'inherit', cursor: 'pointer' }}><X size={14} /></button></div>}
+        <input type="file" ref={fileRef} accept="image/*,.pdf" onChange={handleImageUpload} style={{ display: 'none' }} />
         <button 
           onClick={() => fileRef.current?.click()}
           style={{ background: 'none', border: 'none', color: 'var(--admin-text-secondary)', cursor: 'pointer', padding: '0.25rem' }}
@@ -299,19 +396,19 @@ const BookingChat = ({ bookingId }) => {
           }}
         />
         <button
-          onClick={handleSend}
-          disabled={!newMessage.trim() || sending}
+          onClick={handleSubmit}
+          disabled={(!newMessage.trim() && !attachment) || sending}
           style={{
-            background: newMessage.trim() ? 'var(--admin-brand)' : 'var(--admin-bg)',
-            color: newMessage.trim() ? '#fff' : 'var(--admin-text-secondary)',
+            background: (newMessage.trim() || attachment) ? 'var(--admin-brand)' : 'var(--admin-bg)',
+            color: (newMessage.trim() || attachment) ? '#fff' : 'var(--admin-text-secondary)',
             border: 'none', borderRadius: '50%',
             width: '36px', height: '36px',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: newMessage.trim() ? 'pointer' : 'not-allowed',
+            cursor: (newMessage.trim() || attachment) ? 'pointer' : 'not-allowed',
             transition: 'all 0.2s'
           }}
         >
-          <Send size={16} />
+          {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
         </button>
       </div>
     </div>

@@ -42,3 +42,116 @@ export const SERVICES_DATA = {
     { id: "add_3", name: "Degreaser Add-on", desc: "Heavy-duty degreasing for underchassis or specific dirty areas.", prices: { Sedan: 200, SUV: 300, "Van/L300": 400 }, estTime: "30 Mins", durationMinutes: 30 },
   ]
 };
+
+export const getServiceCatalog = () => {
+  if (typeof window === 'undefined') return SERVICES_DATA;
+  try {
+    const customCatalog = JSON.parse(localStorage.getItem('speedway_custom_services') || '[]');
+    const activeCustomServices = Array.isArray(customCatalog) ? customCatalog.filter(service => !service.archived) : [];
+    if (!activeCustomServices.length) return SERVICES_DATA;
+    return {
+      ...SERVICES_DATA,
+      'Custom Services': activeCustomServices.map(service => ({
+        id: service.id || `custom_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        name: service.name,
+        desc: service.description || 'Custom service added by the admin.',
+        prices: { Sedan: Number(service.price || 0), SUV: Number(service.price || 0), 'Van/L300': Number(service.price || 0), Regular: Number(service.price || 0), Bigbike: Number(service.price || 0) },
+        estTime: `${Number(service.durationMinutes || 60)} mins`,
+        durationMinutes: Number(service.durationMinutes || 60)
+      }))
+    };
+  } catch {
+    return SERVICES_DATA;
+  }
+};
+
+export const getAvailableServiceNames = () => {
+  const catalog = getServiceCatalog();
+  return Object.values(catalog).flatMap(list => list.map(service => service.name));
+};
+
+export const getPromoRules = () => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem('speedway_promo_rules') || '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter(rule => rule && rule.active !== false)
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const isPromoActiveForNow = (rule) => {
+  if (!rule || rule.active === false) return false;
+
+  const now = new Date();
+  const validFrom = rule.valid_from ? new Date(rule.valid_from) : null;
+  const validUntil = rule.valid_until ? new Date(rule.valid_until) : null;
+
+  if (validFrom && validFrom > now) return false;
+  if (validUntil && validUntil < now) return false;
+  if (rule.never_expires === true || rule.neverExpires === true) return true;
+  return true;
+};
+
+export const getApplicablePromoRules = ({ vehicleType, serviceName }) => {
+  const targetVehicleType = String(vehicleType || '').trim();
+  const targetServiceName = String(serviceName || '').trim();
+
+  if (!targetVehicleType || !targetServiceName) return [];
+
+  return getPromoRules().filter(rule => {
+    if (!isPromoActiveForNow(rule)) return false;
+
+    const hasVehicleScope = Array.isArray(rule.vehicleTypes) && rule.vehicleTypes.length > 0;
+    const vehicleMatch = !hasVehicleScope || rule.vehicleTypes.some(vehicle => String(vehicle).toLowerCase() === targetVehicleType.toLowerCase());
+
+    const hasServiceScope = Array.isArray(rule.serviceNames) && rule.serviceNames.length > 0;
+    const normalizedServiceName = targetServiceName.toLowerCase();
+    const serviceMatch = !hasServiceScope || rule.serviceNames.some(name => {
+      const candidate = String(name || '').trim().toLowerCase();
+      return !candidate || normalizedServiceName.includes(candidate) || candidate.includes(normalizedServiceName);
+    });
+
+    const fallbackServiceMatch = !rule.serviceNames?.length && !!rule.serviceName && (normalizedServiceName.includes(String(rule.serviceName).trim().toLowerCase()) || String(rule.serviceName).trim().toLowerCase().includes(normalizedServiceName));
+
+    return vehicleMatch && (serviceMatch || fallbackServiceMatch);
+  });
+};
+
+export const getEffectivePriceForService = (basePrice, vehicleType, serviceName) => {
+  let adjustedPrice = Number(basePrice || 0);
+  const rules = getApplicablePromoRules({ vehicleType, serviceName });
+
+  rules.forEach(rule => {
+    if (rule.type === 'percentage') {
+      adjustedPrice = adjustedPrice * (1 - (Number(rule.value || 0) / 100));
+    } else if (rule.type === 'fixed') {
+      adjustedPrice = Math.max(0, adjustedPrice - Number(rule.value || 0));
+    }
+  });
+
+  return Math.round(adjustedPrice * 100) / 100;
+};
+
+export const calculateBookingDiscountSummary = (vehicles = []) => {
+  let originalTotal = 0;
+  let discountedTotal = 0;
+
+  (vehicles || []).forEach(vehicle => {
+    (vehicle.services || []).forEach(service => {
+      const basePrice = Number(service.price || service.basePrice || 0);
+      originalTotal += basePrice;
+      discountedTotal += getEffectivePriceForService(basePrice, vehicle.type, service.name || service.service_name);
+    });
+  });
+
+  return {
+    originalTotal,
+    discountedTotal,
+    totalDiscount: Math.max(0, originalTotal - discountedTotal)
+  };
+};
+
+export const applyPromoRules = (basePrice, serviceName = '', vehicleType = '') => getEffectivePriceForService(basePrice, vehicleType, serviceName);

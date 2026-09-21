@@ -1,7 +1,10 @@
 import { supabase } from '../lib/supabase';
 import { emitEvent, EVENTS } from './eventEngine';
 import { SHOP_CONFIG } from '../config/constants';
+import { getEffectivePriceForService } from '../data/servicesCatalog';
 import { getRequiredDownpayment } from '../utils/paymentUtils';
+import { sendStatusEmail } from './notificationService';
+import { calculateBayUsage } from '../utils/schedulingUtils';
 
 /**
  * bookingService.js
@@ -15,7 +18,13 @@ import { getRequiredDownpayment } from '../utils/paymentUtils';
  *   bookings -> booking_vehicles -> booking_vehicle_services
  */
 export const createBooking = async (customerId, bookingData) => {
+  const bookingCustomerId = Object.prototype.hasOwnProperty.call(bookingData || {}, 'customerId')
+    ? (bookingData.customerId ?? null)
+    : (customerId ?? null);
   const vehicles = bookingData.vehicles || [];
+  const { data: customerProfile } = bookingCustomerId
+    ? await supabase.from('profiles').select('email').eq('id', bookingCustomerId).maybeSingle()
+    : { data: null };
 
   // 🛡️ INTEGRITY SHIELD: Prevent 'Ghost Bookings' (REQ-SYS-01)
   if (vehicles.length === 0) {
@@ -23,27 +32,31 @@ export const createBooking = async (customerId, bookingData) => {
     throw new Error('SYSTEM ERROR: No vehicles provided for this booking session. Operation aborted for integrity.');
   }
 
+  const { data: capacityConfig } = await supabase.from('business_config').select('slots_per_hour').maybeSingle();
+  const maxBays = Number(capacityConfig?.slots_per_hour || SHOP_CONFIG.MAX_BAYS);
+  const requestedBays = calculateBayUsage(vehicles);
+  if (requestedBays > maxBays) {
+    throw new Error(`This booking needs ${requestedBays} bays, but the shop currently has ${maxBays}. Two motorcycles can share one bay; cars and vans need a full bay.`);
+  }
+
   const totalAmount = vehicles.reduce((total, v) => {
-    return total + (v.services || []).reduce((sub, s) => sub + s.price, 0);
+    return total + (v.services || []).reduce((sub, s) => sub + getEffectivePriceForService(s.price, v.type, s.name || s.service_name), 0);
   }, 0);
 
   // 1. Insert the master booking record
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
     .insert({
-      customer_id: customerId,
+      customer_id: bookingCustomerId,
       customer_name: bookingData.customerName, // Added this field
+      customer_email: bookingData.customerEmail || customerProfile?.email || null,
       start_datetime: combineDateAndTime(bookingData.date, bookingData.time),
       end_datetime: calculateEstimatedEnd(bookingData.date, bookingData.time, vehicles),
-      status: bookingData.payment?.method === 'Cash' ? 'confirmed' : 'scheduled',
+      status: 'scheduled',
       total_amount: totalAmount,
-      notes: bookingData.notes || '',
+      notes: [bookingData.notes, bookingData.fleetGroupId ? `FLEET_GROUP:${bookingData.fleetGroupId}` : ''].filter(Boolean).join(' | '),
       contact_number: bookingData.contactNumber,
-      ocr_metadata: bookingData.payment?.ocrData || {}, // PERSIST OCR RESULTS
-      guest_first_name: bookingData.guestFirstName || null,
-      guest_last_name: bookingData.guestLastName || null,
-      guest_email: bookingData.guestEmail || null,
-      guest_phone: bookingData.guestPhone || bookingData.contactNumber || null
+      ocr_metadata: bookingData.payment?.ocrData || {} // PERSIST OCR RESULTS
     })
     .select()
     .single();
@@ -51,6 +64,19 @@ export const createBooking = async (customerId, bookingData) => {
   if (bookingError) {
     console.error('Master Booking Insert Error:', bookingError);
     throw new Error(`Master Booking Error: ${bookingError.message}`);
+  }
+
+  if (!bookingCustomerId && bookingData.customerEmail) {
+    try {
+      const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+      await fetch(`${BACKEND_URL}/admin/generate-invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: bookingData.customerEmail, role: 'CUSTOMER' })
+      });
+    } catch (inviteError) {
+      console.warn('Guest account invitation failed:', inviteError);
+    }
   }
 
   const bookingRef = booking.id.substring(0, 8).toUpperCase();
@@ -64,7 +90,9 @@ export const createBooking = async (customerId, bookingData) => {
         vehicle_type: vehicle.type,
         brand: vehicle.brand,
         model: vehicle.model,
-        plate_number: vehicle.plateNumber
+        plate_number: vehicle.plateNumber,
+        fleet_group_id: vehicle.fleetGroupId || bookingData.fleetGroupId || null,
+        status: 'SCHEDULED'
       })
       .select()
       .single();
@@ -80,7 +108,7 @@ export const createBooking = async (customerId, bookingData) => {
       await fetch(`${BACKEND_URL}/api/garage/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, vehicle })
+        body: JSON.stringify({ customerId: bookingCustomerId, vehicle })
       });
     } catch (garageEx) {
       console.warn('Silent Garage Sync Failure:', garageEx);
@@ -92,7 +120,7 @@ export const createBooking = async (customerId, bookingData) => {
       const serviceRows = services.map(s => ({
         booking_vehicle_id: bv.id,
         service_name: s.name,
-        price: s.price
+        price: getEffectivePriceForService(s.price, vehicle.type, s.name || s.service_name)
       }));
 
       const { error: svcError } = await supabase
@@ -106,9 +134,22 @@ export const createBooking = async (customerId, bookingData) => {
     }
   }
 
-  // 4. If GCash, insert a payment record with FOR_VERIFICATION status
-  if (bookingData.payment.method === 'GCash' && bookingData.payment.proofOfPayment) {
+  // 4. Persist payment against the booking. Digital payments require a receipt;
+  // cash bookings are recorded as pending on-site payment.
+  if ((!bookingData.adminWalkIn && bookingData.payment?.method === 'Cash') || (bookingData.payment?.method === 'GCash' && bookingData.payment.proofOfPayment)) {
     try {
+      if (bookingData.payment.method === 'Cash') {
+        const cashAmount = bookingData.payment.type === 'Downpayment' ? getRequiredDownpayment(totalAmount) : totalAmount;
+        const { error: cashError } = await supabase.from('payments').insert({
+          booking_id: booking.id,
+          amount: cashAmount,
+          method: 'Cash',
+          payment_type: bookingData.payment.type || 'Full',
+          status: 'PENDING',
+          notes: `PAYMENT_CASH|TYPE:${bookingData.payment.type || 'Full'}|DECLARED_AMOUNT:${cashAmount}`
+        });
+        if (cashError) throw cashError;
+      } else {
       const file = bookingData.payment.proofOfPayment;
       const fileExt = file.name.split('.').pop();
       const filePath = `receipts/${booking.id}/${Date.now()}.${fileExt}`;
@@ -122,56 +163,45 @@ export const createBooking = async (customerId, bookingData) => {
       const { data: { publicUrl } } = supabase.storage.from('payment-receipts').getPublicUrl(filePath);
 
       const paymentAmount = bookingData.payment.type === 'Full' ? totalAmount : getRequiredDownpayment(totalAmount);
+      const detectedAmount = Number(bookingData.payment?.ocrData?.amount || 0);
+      const detectedReference = bookingData.payment?.ocrData?.referenceNo || null;
 
       const { error: payError } = await supabase.from('payments').insert({
         booking_id: booking.id,
         amount: paymentAmount,
         method: 'GCash',
+        payment_type: bookingData.payment.type || 'Full',
         status: 'FOR_VERIFICATION',
         receipt_url: publicUrl,
-        notes: 'PAYMENT_DIGITAL',
-        reference_number: bookingData.payment?.ocrData?.referenceNo || '' // Transaction Reference
+        detected_amount: detectedAmount > 0 ? detectedAmount : null,
+        detected_ref: detectedReference,
+        notes: `PAYMENT_DIGITAL|TYPE:${bookingData.payment.type || 'Full'}|DECLARED_AMOUNT:${paymentAmount}|OCR_AMOUNT:${detectedAmount > 0 ? detectedAmount : 'NULL'}`,
+        reference_number: detectedReference || '' // Transaction Reference
       });
 
       if (payError) throw payError;
 
       // EVENT: Payment Submitted
       await emitEvent(EVENTS.PAYMENT_SUBMITTED, {
-        userId: customerId,
+        userId: bookingCustomerId,
         bookingId: booking.id,
         meta: { bookingRef, amount: paymentAmount }
       });
+      }
     } catch (payEx) {
       console.error('Payment Processing Error:', payEx);
-      // We don't throw here to avoid failing the whole booking if just the payment metadata fails, 
-      // but in a production app we might want to handle this more strictly.
+      throw new Error(`Payment processing failed: ${payEx.message}`);
     }
   }
 
   // EVENT: Booking Created
   await emitEvent(EVENTS.BOOKING_CREATED, {
-    userId: customerId,
+    userId: bookingCustomerId,
     bookingId: booking.id,
     meta: { bookingRef }
   });
 
-  // SEND CONFIRMATION EMAIL via backend Resend integration
-  try {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-    const emailRes = await fetch(`${BACKEND_URL}/api/emails/booking-confirmation`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bookingId: booking.id })
-    });
-    const emailResult = await emailRes.json();
-    if (emailResult.success) {
-      console.log(`[Email] ✅ Email sent successfully for booking ${bookingRef}`);
-    } else {
-      console.warn(`[Email] ⚠ Email dispatch returned failure for booking ${bookingRef}:`, emailResult.error);
-    }
-  } catch (emailErr) {
-    console.warn(`[Email] Confirmation email dispatch failed (non-fatal):`, emailErr.message);
-  }
+  await sendStatusEmail(booking.id, 'scheduled');
 
   return booking;
 };
@@ -191,7 +221,15 @@ export const fetchCustomerBookings = async (customerId) => {
     .eq('customer_id', customerId)
     .order('created_at', { ascending: false });
 
-  if (error) throw error;
+  if (error) {
+    console.error('[Reschedule] RPC failed:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint
+    });
+    throw new Error(error.message || 'The selected appointment time could not be reserved.');
+  }
   return data || [];
 };
 
@@ -277,12 +315,11 @@ export function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
     const startIso = combineDateAndTime(dateStr, timeStr);
     const date = new Date(startIso);
 
-    // Calculate total service duration across all vehicles
+    // Vehicles are serviced concurrently; use the longest unit duration.
     let totalMinutes = 0;
     vehicles.forEach(v => {
-      (v.services || []).forEach(s => {
-        totalMinutes += (s.durationMinutes || 60);
-      });
+      const vehicleDuration = (v.services || []).reduce((sum, service) => sum + Number(service.durationMinutes || 60), 0);
+      totalMinutes = Math.max(totalMinutes, vehicleDuration);
     });
 
     // Minimum duration of 1 hour if no services selected yet
@@ -293,13 +330,8 @@ export function calculateEstimatedEnd(dateStr, timeStr, vehicles = []) {
 
     date.setMinutes(date.getMinutes() + totalMinutes);
 
-    // Cap at CLOSING_HOUR — never let a booking extend past shop close
-    const closingDate = new Date(date);
-    closingDate.setHours(SHOP_CONFIG.CLOSING_HOUR, 0, 0, 0);
-    const capped = date > closingDate ? closingDate : date;
-
-    if (isNaN(capped.getTime())) return new Date().toISOString();
-    return capped.toISOString();
+    if (isNaN(date.getTime())) return new Date().toISOString();
+    return date.toISOString();
   } catch (e) {
     return new Date().toISOString();
   }
@@ -333,6 +365,9 @@ export const cancelBooking = async (bookingId, reason) => {
       .from('bookings')
       .update({
         status: 'cancelled',
+        refund_status: 'QUEUED',
+        staff_id: null,
+        cancellation_reason: reason,
         notes: updatedNotes
       })
       .eq('id', bookingId);
@@ -376,4 +411,31 @@ export const cancelBooking = async (bookingId, reason) => {
     console.error('Error cancelling booking:', err.message || err);
     throw err;
   }
+};
+
+export const rescheduleBooking = async (bookingId, startDatetime, endDatetime, reason = null) => {
+  if (startDatetime && typeof startDatetime === 'object') {
+    const bookingData = startDatetime;
+    startDatetime = combineDateAndTime(bookingData.date, bookingData.time);
+    endDatetime = calculateEstimatedEnd(bookingData.date, bookingData.time, bookingData.vehicles || []);
+  }
+
+  const { data, error } = await supabase.rpc('reschedule_booking', {
+    p_booking_id: bookingId,
+    p_start_datetime: startDatetime,
+    p_end_datetime: endDatetime,
+    p_reason: reason || null
+  });
+
+  if (error) {
+    console.error('[Reschedule] RPC failed:', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint
+    });
+    throw new Error(error.message || 'The selected appointment time could not be reserved.');
+  }
+  await sendStatusEmail(bookingId, 'scheduled');
+  return data;
 };

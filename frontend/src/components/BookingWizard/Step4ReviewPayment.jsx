@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, CheckCircle2, Wallet, Banknote, ShieldAlert } from 'lucide-react';
+import { Upload, CheckCircle2, Wallet, Banknote, ShieldAlert, AlertTriangle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useConfig } from '../../context/ConfigContext';
-import { getRequiredDownpayment } from '../../utils/paymentUtils';
+import { calculateBookingDiscountSummary } from '../../data/servicesCatalog';
+import { getRequiredDownpayment, requiresDownpayment } from '../../utils/paymentUtils';
 import QRMagnifier from '../QRMagnifier';
 
-const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSubmit, isSubmitting, onCancel }) => {
+const Step4ReviewPayment = ({ bookingData, setBookingData, adminMode = false, onNext, onBack, onSubmit, isSubmitting, onCancel }) => {
   const { settings } = useConfig();
   const [isUploading, setIsUploading] = useState(false);
   const [receiptDetails, setReceiptDetails] = useState(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
   const labelStyle = {
@@ -22,9 +24,8 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
     display: 'block'
   };
   const vehicles = bookingData.vehicles || [];
-  const grandTotal = vehicles.reduce((total, v) => {
-    return total + (v.services || []).reduce((sub, s) => sub + s.price, 0);
-  }, 0);
+  const promoSummary = calculateBookingDiscountSummary(vehicles);
+  const grandTotal = promoSummary.discountedTotal;
 
   // Removed local fetchConfig - now using useConfig hook for global settings
 
@@ -57,10 +58,14 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         let result;
         try {
           const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), 20000);
           const response = await fetch(`${BACKEND_URL}/api/ocr/verify-receipt`, {
             method: 'POST',
-            body: formData
+            body: formData,
+            signal: controller.signal
           });
+          window.clearTimeout(timeoutId);
 
           if (!response.ok) {
             const errData = await response.json().catch(() => ({}));
@@ -80,7 +85,6 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
               amount: 0,
               date: new Date().toLocaleDateString(),
               recipient: 'N/A',
-              integrity: 0,
               isReceipt: true,
               description: 'AI verification service was unreachable. Payment proof saved for manual admin verification.'
             }
@@ -92,7 +96,8 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         const extractedData = result.data;
 
         // 🛡️ THESIS FLOW: Use the Authoritative Backend Status
-        const isAmountMatched = result.isMatch;
+        const isAmountMatched = result.isAmountMatch ?? result.isMatch;
+        const isDuplicate = Boolean(result.isDuplicate);
 
         setScanStep('FINALIZING AUDIT...');
         await new Promise(resolve => setTimeout(resolve, 800));
@@ -102,11 +107,13 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
           amount: extractedData.amount,
           requiredAmount: targetAmount,
           date: extractedData.date,
-          status: isAmountMatched ? 'MATCHED' : 'MISMATCHED',
+          status: isDuplicate ? 'DUPLICATE_DETECTED' : (isAmountMatched ? 'MATCHED' : 'MISMATCHED'),
+          isDuplicate,
           recipient: extractedData.recipient || 'N/A',
           recipientMatch: extractedData.isReceipt,
-          integrity: extractedData.integrity,
-          description: extractedData.description || ""
+          description: isDuplicate
+            ? 'This reference number has already been used for another booking. Please upload the correct proof of payment.'
+            : (extractedData.description || 'No additional receipt notes were extracted.')
         };
 
         setReceiptDetails(resultObj);
@@ -131,11 +138,18 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
   };
 
   const isGcash = bookingData.payment.method === 'GCash';
+  const isDuplicateReceipt = Boolean(receiptDetails?.isDuplicate);
+  const isWarningReceipt = isDuplicateReceipt || ['REJECTED', 'MISMATCHED'].includes(receiptDetails?.status);
+  const hasReceiptNotes = Boolean(receiptDetails?.description && receiptDetails.description !== 'No additional receipt notes were extracted.');
+  const manualAmount = Number(bookingData.payment.manualAmount || 0);
   // TIGHTENED LOGIC: must have terms AND (either Cash OR GCash with Proof)
   // Added !isUploading to ensure OCR finishes before submission is allowed
-  const isValid = termsAccepted && (
-    (!isGcash) ||
-    (isGcash && bookingData.payment.proofOfPayment !== null && !isUploading)
+  const adminPaymentValid = !adminMode || (
+    ['Downpayment', 'Full', 'Manual'].includes(bookingData.payment.type) &&
+    (bookingData.payment.type !== 'Manual' || (manualAmount > 0 && manualAmount <= grandTotal))
+  );
+  const isValid = (adminMode || termsAccepted) && !receiptDetails?.isDuplicate && adminPaymentValid && (
+    adminMode || !isGcash || (bookingData.payment.proofOfPayment !== null && !isUploading)
   );
 
   const handleConfirmSubmit = () => {
@@ -145,35 +159,72 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
   };
 
   // Business Logic Constants
-  const MIN_DOWNPAYMENT_THRESHOLD = 1000;
   const CASH_DISABLED_THRESHOLD = 1000;
   const downpaymentAmount = getRequiredDownpayment(grandTotal);
 
-  const canUseCash = grandTotal < CASH_DISABLED_THRESHOLD;
-  const canUseDownpayment = grandTotal >= MIN_DOWNPAYMENT_THRESHOLD;
+  const canUseCash = adminMode || grandTotal < CASH_DISABLED_THRESHOLD;
+  const canUseDownpayment = requiresDownpayment(grandTotal);
 
   // Auto-switch if current selection becomes invalid
   useEffect(() => {
-    if (grandTotal >= CASH_DISABLED_THRESHOLD && bookingData.payment.method === 'Cash') {
+    if (!adminMode && grandTotal >= CASH_DISABLED_THRESHOLD && bookingData.payment.method === 'Cash') {
       setBookingData(prev => ({ ...prev, payment: { ...prev.payment, method: 'GCash' } }));
     }
-    if (grandTotal < MIN_DOWNPAYMENT_THRESHOLD && bookingData.payment.type === 'Downpayment') {
+    if (!requiresDownpayment(grandTotal) && bookingData.payment.type === 'Downpayment') {
       setBookingData(prev => ({ ...prev, payment: { ...prev.payment, type: 'Full' } }));
     }
   }, [grandTotal]); // eslint-disable-line
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <style>{`
+        .review-payment-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 1.5rem;
+          align-items: start;
+        }
+        .review-action-footer {
+          display: flex;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+          gap: 1rem;
+        }
+        .review-action-footer button {
+          flex: 1 1 180px;
+          min-width: 0;
+        }
+        .receipt-amount-summary {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 1rem;
+          align-items: start;
+        }
+        @media (min-width: 900px) {
+          .review-payment-grid {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+            gap: 2rem;
+          }
+          .review-action-footer button {
+            flex: 0 1 auto;
+          }
+        }
+        @media (min-width: 700px) {
+          .receipt-amount-summary {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+      `}</style>
 
       {/* Header */}
       <div>
         <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.5rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>Review & Payment</h2>
         <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.9rem', fontWeight: '600' }}>
-          Please review your booking details and select your preferred payment method to secure your slot.
+          {adminMode ? 'Please review the booking details and select a payment method.' : 'Please review the booking details and select the preferred payment method to secure the slot.'}
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(400px, 1fr) minmax(400px, 1.2fr)', gap: '4rem', alignItems: 'start' }}>
+      <div className="review-payment-grid">
 
         {/* Left Column: Master Summary */}
         <div style={{ background: 'var(--admin-bg)', padding: '1.5rem', borderRadius: 'var(--admin-radius-lg)', border: '1px solid var(--admin-border)' }}>
@@ -217,6 +268,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {adminMode && <div style={{ background: 'var(--admin-bg)', padding: '1rem', borderRadius: 'var(--admin-radius-md)', border: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {/* Payment Toggle */}
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '800', color: 'var(--admin-text-primary)', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
@@ -233,7 +285,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                     fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', cursor: 'pointer', transition: 'all 0.2s'
                   }}
                 >
-                  <Wallet size={20} /> GCash
+                  <Wallet size={20} /> Digital Payment
                 </button>
                 <button
                   onClick={() => canUseCash && setBookingData(prev => ({ ...prev, payment: { ...prev.payment, method: 'Cash' } }))}
@@ -259,7 +311,23 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
             </div>
 
             {/* GCash Flow */}
-            {isGcash && (
+            {adminMode && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem' }}>
+                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: '950', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Payment Amount</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '.5rem' }}>
+                  {[
+                    ['Downpayment', `Downpayment (₱${downpaymentAmount.toLocaleString()})`],
+                    ['Full', `Full Payment (₱${grandTotal.toLocaleString()})`],
+                    ['Manual', 'Manual Amount']
+                  ].map(([value, label]) => <button key={value} type="button" disabled={value === 'Downpayment' && !canUseDownpayment} onClick={() => setBookingData(prev => ({ ...prev, payment: { ...prev.payment, type: value } }))} style={{ minHeight: '3rem', padding: '.65rem', background: bookingData.payment.type === value ? 'var(--admin-brand)' : 'var(--admin-card)', color: bookingData.payment.type === value ? '#fff' : 'var(--admin-text-primary)', border: `1px solid ${bookingData.payment.type === value ? 'var(--admin-brand)' : 'var(--admin-border)'}`, borderRadius: 'var(--admin-radius-sm)', fontWeight: '900', fontSize: '.72rem', cursor: value === 'Downpayment' && !canUseDownpayment ? 'not-allowed' : 'pointer', opacity: value === 'Downpayment' && !canUseDownpayment ? .4 : 1 }}>{label}</button>)}
+                </div>
+                {bookingData.payment.type === 'Manual' && <input type="text" inputMode="numeric" pattern="[0-9]*" value={bookingData.payment.manualAmount || ''} onChange={event => setBookingData(prev => ({ ...prev, payment: { ...prev.payment, manualAmount: event.target.value.replace(/\D/g, '') } }))} placeholder="Enter amount" aria-label="Manual payment amount" style={{ width: '100%', boxSizing: 'border-box', padding: '.85rem 1rem', background: 'var(--admin-input-bg)', color: 'var(--admin-text-primary)', border: '1px solid var(--admin-input-border)', borderRadius: '6px', fontWeight: '800' }} />}
+                {bookingData.payment.type === 'Manual' && manualAmount > grandTotal && <span style={{ color: '#ef4444', fontSize: '.7rem', fontWeight: '800' }}>Manual amount cannot be higher than the booking total.</span>}
+              </div>
+            )}
+            </div>}
+
+            {isGcash && !adminMode && (
               <div style={{ background: 'var(--admin-bg)', padding: '1.5rem', borderRadius: 'var(--admin-radius-md)', border: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
                 {/* Payment Type Selection (Full vs Downpayment) */}
@@ -376,15 +444,15 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                     <div style={{
                       background: 'var(--admin-card)',
                       borderRadius: 'var(--admin-radius-lg)',
-                      border: `1px solid ${receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-success)'}`,
+                      border: `1px solid ${isWarningReceipt ? '#f59e0b' : 'var(--admin-success)'}`,
                       overflow: 'hidden',
                       animation: 'fadeIn 0.5s ease'
                     }}>
                       {/* Header */}
                       <div style={{
-                        background: receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(var(--admin-success-rgb), 0.1)',
+                        background: isWarningReceipt ? 'rgba(245, 158, 11, 0.1)' : 'rgba(var(--admin-success-rgb), 0.1)',
                         padding: '1.25rem',
-                        borderBottom: `1px solid ${receiptDetails.status === 'REJECTED' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(var(--admin-success-rgb), 0.2)'}`,
+                        borderBottom: `1px solid ${isWarningReceipt ? 'rgba(245, 158, 11, 0.2)' : 'rgba(var(--admin-success-rgb), 0.2)'}`,
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center'
@@ -392,17 +460,17 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                           <div style={{
                             width: '32px', height: '32px', borderRadius: '50%',
-                            background: receiptDetails.status === 'REJECTED' ? '#ef4444' : 'var(--admin-success)',
+                            background: isWarningReceipt ? '#f59e0b' : 'var(--admin-success)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center'
                           }}>
-                            {receiptDetails.status === 'REJECTED' ? <ShieldAlert size={20} color="#fff" /> : <CheckCircle2 size={20} color="#fff" />}
+                            {isWarningReceipt ? <AlertTriangle size={20} color="#fff" /> : <CheckCircle2 size={20} color="#fff" />}
                           </div>
                           <div>
-                            <div style={{ color: receiptDetails.status === 'REJECTED' ? '#ef4444' : (receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)'), fontWeight: '950', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                              {receiptDetails.status === 'REJECTED' ? 'Verification Failed' : (receiptDetails.status === 'MISMATCHED' ? 'Amount Discrepancy' : 'AI Audit Verified')}
+                            <div style={{ color: receiptDetails.status === 'REJECTED' || isDuplicateReceipt ? '#ef4444' : (receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)'), fontWeight: '950', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                              {isDuplicateReceipt ? 'Duplicate Receipt Detected' : (receiptDetails.status === 'REJECTED' ? 'Verification Failed' : (receiptDetails.status === 'MISMATCHED' ? 'Amount Discrepancy' : 'AI Audit Verified'))}
                             </div>
                             <div style={{ color: 'var(--admin-text-secondary)', fontSize: '0.65rem', fontWeight: '800' }}>
-                              {receiptDetails.status === 'REJECTED' ? 'SYSTEM ALERT: INVALID FORMAT' : (receiptDetails.status === 'MISMATCHED' ? 'WARNING: PRICE MISMATCH' : 'SECURITY SIGNATURE: GEMINI 1.5 FLASH')}
+                              {isDuplicateReceipt ? 'SYSTEM ALERT: REFERENCE ALREADY USED' : (receiptDetails.status === 'REJECTED' ? 'SYSTEM ALERT: INVALID FORMAT' : (receiptDetails.status === 'MISMATCHED' ? 'WARNING: PRICE MISMATCH' : 'SECURITY SIGNATURE: GEMINI OCR'))}
                             </div>
                           </div>
                         </div>
@@ -410,8 +478,8 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
 
                       <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
-                        {/* Summary Description */}
-                        <div style={{
+                        {/* Optional OCR notes */}
+                        {hasReceiptNotes && <div style={{
                           background: 'var(--admin-bg)',
                           padding: '1rem',
                           borderRadius: 'var(--admin-radius-sm)',
@@ -421,9 +489,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                           lineHeight: 1.5,
                           fontStyle: 'italic',
                           fontWeight: receiptDetails.status === 'REJECTED' ? '700' : 'normal'
-                        }}>
-                          "{receiptDetails.description}"
-                        </div>
+                        }}>{receiptDetails.description}</div>}
 
                         {receiptDetails.status !== 'REJECTED' ? (
                           <>
@@ -431,15 +497,6 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                               <div>
                                 <div style={labelStyle}>Reference No.</div>
                                 <div style={{ color: 'var(--admin-text-primary)', fontSize: '0.9rem', fontWeight: '900', fontFamily: 'monospace' }}>{receiptDetails.referenceNo}</div>
-                              </div>
-                              <div>
-                                <div style={labelStyle}>Integrity Score</div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                  <div style={{ flex: 1, height: '6px', background: 'var(--admin-border)', borderRadius: '3px', overflow: 'hidden' }}>
-                                    <div style={{ width: `${receiptDetails.integrity}%`, height: '100%', background: 'var(--admin-success)' }} />
-                                  </div>
-                                  <span style={{ fontSize: '0.75rem', fontWeight: '900', color: 'var(--admin-success)' }}>{receiptDetails.integrity}%</span>
-                                </div>
                               </div>
                             </div>
 
@@ -452,17 +509,21 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                                 </div>
                               </div>
                               <div>
-                                <div style={labelStyle}>Validation Date</div>
+                                <div style={labelStyle}>Payment Date</div>
                                 <div style={{ color: 'var(--admin-text-primary)', fontSize: '0.85rem', fontWeight: '800' }}>{receiptDetails.date}</div>
                               </div>
                             </div>
 
-                            <div style={{ marginTop: '0.5rem', padding: '1.25rem', background: 'rgba(var(--admin-brand-rgb), 0.03)', borderRadius: 'var(--admin-radius-md)', border: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div className="receipt-amount-summary" style={{ marginTop: '0.5rem', padding: '1.25rem', background: 'rgba(var(--admin-brand-rgb), 0.03)', borderRadius: 'var(--admin-radius-md)', border: '1px solid var(--admin-border)' }}>
                               <div>
                                 <div style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Amount Extracted</div>
                                 <div style={{ color: 'var(--admin-text-primary)', fontSize: '1.5rem', fontWeight: '950' }}>₱{receiptDetails.amount.toLocaleString()}</div>
                               </div>
-                              <div style={{ textAlign: 'right' }}>
+                              <div>
+                                <div style={{ fontSize: '0.65rem', fontWeight: '900', color: 'var(--admin-text-secondary)', textTransform: 'uppercase' }}>Expected Amount</div>
+                                <div style={{ color: 'var(--admin-text-primary)', fontSize: '1.5rem', fontWeight: '950' }}>₱{Number(receiptDetails.requiredAmount || 0).toLocaleString()}</div>
+                              </div>
+                              <div>
                                 <div style={{ fontSize: '0.65rem', fontWeight: '900', color: receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)', textTransform: 'uppercase' }}>Status</div>
                                 <div style={{ color: receiptDetails.status === 'MISMATCHED' ? '#f59e0b' : 'var(--admin-success)', fontSize: '0.85rem', fontWeight: '950', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                   {receiptDetails.status} {receiptDetails.status === 'MATCHED' ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />}
@@ -479,6 +540,13 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                         )}
 
                         {/* Soft Note for Mismatches */}
+                        {isDuplicateReceipt && (
+                          <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.05)', borderRadius: 'var(--admin-radius-sm)', border: '1px dashed #ef4444', textAlign: 'center' }}>
+                            <p style={{ margin: 0, fontSize: '0.8rem', fontWeight: '800', color: '#ef4444' }}>
+                              This receipt cannot be submitted. Upload a payment proof with a new transaction reference number.
+                            </p>
+                          </div>
+                        )}
                         {receiptDetails.status === 'MISMATCHED' && (
                           <div style={{ padding: '1rem', background: 'rgba(245, 158, 11, 0.05)', borderRadius: 'var(--admin-radius-sm)', border: '1px dashed #f59e0b', textAlign: 'center' }}>
                             <p style={{ margin: 0, fontSize: '0.8rem', fontWeight: '800', color: '#f59e0b' }}>
@@ -488,12 +556,9 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                         )}
 
                       </div>
-                      <button
-                        onClick={() => { setReceiptDetails(null); setBookingData(prev => ({ ...prev, payment: { ...prev.payment, proofOfPayment: null } })); }}
-                        style={{ width: '100%', padding: '1rem', background: 'var(--admin-bg)', border: 'none', borderTop: '1px solid var(--admin-border)', color: '#ef4444', fontSize: '0.75rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '1px' }}
-                      >
-                        {receiptDetails.status === 'REJECTED' ? 'Try Another Image' : 'Discard Receipt & Re-Scan'}
-                      </button>
+                      <div style={{ display: 'flex', gap: '.75rem', padding: '1rem', borderTop: '1px solid var(--admin-border)', flexWrap: 'wrap' }}>
+                        <button type="button" onClick={() => { setReceiptDetails(null); setBookingData(prev => ({ ...prev, payment: { ...prev.payment, proofOfPayment: null } })); }} style={{ flex: '1 1 190px', padding: '1rem', background: 'transparent', border: '1px solid var(--admin-border)', color: 'var(--admin-text-primary)', borderRadius: 'var(--admin-radius-sm)', fontSize: '.75rem', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase' }}>Upload Different Receipt</button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -514,8 +579,7 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
             )}
           </div>
 
-          {/* Terms & Conditions Checkbox (NEW) */}
-          <div style={{ padding: '1rem', background: termsAccepted ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'transparent', borderRadius: 'var(--admin-radius-md)', border: `1px solid ${termsAccepted ? 'var(--admin-brand)' : 'var(--admin-border)'}`, transition: 'all 0.2s' }}>
+          {!adminMode && <div style={{ padding: '1rem', background: termsAccepted ? 'rgba(var(--admin-brand-rgb), 0.05)' : 'transparent', borderRadius: 'var(--admin-radius-md)', border: `1px solid ${termsAccepted ? 'var(--admin-brand)' : 'var(--admin-border)'}`, transition: 'all 0.2s' }}>
             <label style={{ display: 'flex', gap: '1rem', cursor: 'pointer', alignItems: 'flex-start' }}>
               <input
                 type="checkbox"
@@ -524,16 +588,38 @@ const Step4ReviewPayment = ({ bookingData, setBookingData, onNext, onBack, onSub
                 style={{ width: '20px', height: '20px', marginTop: '2px', cursor: 'pointer', accentColor: 'var(--admin-brand)' }}
               />
               <span style={{ fontSize: '0.85rem', color: 'var(--admin-text-primary)', fontWeight: '600', lineHeight: 1.4 }}>
-                By clicking this box, you allow <strong>Speedway AutoxMoto Detail Studio</strong> to have access to your personal information and agree to our <strong>Terms and Conditions</strong> for service and data privacy.
+                By clicking this box, you allow <strong>Speedway AutoxMoto Detail Studio</strong> to have access to your personal information and agree to our <button type="button" onClick={() => setShowTermsModal(true)} style={{ border: 'none', background: 'transparent', color: 'var(--admin-brand)', fontWeight: 900, padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>Terms and Conditions</button> for service and data privacy.
               </span>
             </label>
-          </div>
+          </div>}
+
+          {showTermsModal && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+              <div style={{ width: '100%', maxWidth: '620px', background: 'var(--admin-card)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-lg)', boxShadow: '0 20px 45px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem 1.25rem', background: 'var(--admin-sidebar)', borderBottom: '1px solid var(--admin-border)' }}>
+                  <h3 style={{ margin: 0, color: 'var(--admin-text-primary)', fontSize: '1rem', fontWeight: 950, textTransform: 'uppercase' }}>Terms & Conditions</h3>
+                  <button type="button" onClick={() => setShowTermsModal(false)} style={{ border: 'none', background: 'transparent', color: 'var(--admin-text-secondary)', fontSize: '1.25rem', cursor: 'pointer' }}>×</button>
+                </div>
+                <div style={{ padding: '1.25rem', maxHeight: '70vh', overflowY: 'auto', color: 'var(--admin-text-primary)', fontSize: '0.9rem', lineHeight: 1.7 }}>
+                  <p>1. Customer information provided during booking is collected solely for scheduling, service communication, and payment verification.</p>
+                  <p>2. All bookings are subject to vehicle condition, available staff capacity, and service timing confirmation by the studio.</p>
+                  <p>3. Deposits and payments remain subject to the studio’s refund and cancellation policy as disclosed in the booking confirmation.</p>
+                  <p>4. Customers agree to provide truthful vehicle details and to keep the contact information current for appointment updates.</p>
+                  <p>5. By submitting this booking, the customer authorizes the studio to process personal data required for service delivery, account management, and operational communications.</p>
+                  <p>6. This placeholder agreement is subject to future legal review and may be updated without notice.</p>
+                </div>
+                <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--admin-border)', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setShowTermsModal(false)} style={{ padding: '0.75rem 1.25rem', background: 'var(--admin-brand)', border: 'none', borderRadius: 'var(--admin-radius-sm)', color: '#fff', fontWeight: 900, cursor: 'pointer' }}>Close</button>
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
       </div>
 
       {/* Action Footer */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1rem', gap: '1rem' }}>
+      <div className="review-action-footer" style={{ borderTop: '1px solid var(--admin-border)', paddingTop: '1.5rem', marginTop: '1rem' }}>
         <button
           onClick={onBack}
           style={{

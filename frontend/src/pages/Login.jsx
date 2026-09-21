@@ -20,60 +20,16 @@ const Login = ({ isModal = false, onClose }) => {
     startRegister,
     verifyOtp,
     recoverPassword,
-    updatePassword
+    updatePassword,
+    loginError,
+    clearLoginError
   } = useAuthFlow();
 
-  const [invitePrefill, setInvitePrefill] = useState(null);
-  const [prefillEmail, setPrefillEmail] = useState('');
-  const [inviteNotice, setInviteNotice] = useState('');
-
-  // Check for password reset or invite in URL
+  // Check for password reset in URL
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('reset') === 'true') {
       setMode('RESET');
-      return;
-    }
-
-    const isInvite = urlParams.get('invite') === 'true' || urlParams.get('register') === 'true';
-    const email = urlParams.get('email');
-    const firstName = urlParams.get('firstName') || '';
-    const lastName = urlParams.get('lastName') || '';
-    const phone = urlParams.get('phone') || '';
-
-    if (isInvite && email) {
-      const checkEmailAccount = async () => {
-        try {
-          const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-          const res = await fetch(`${BACKEND_URL}/api/auth/check-email?email=${encodeURIComponent(email)}`);
-          const data = await res.json();
-          if (data?.exists) {
-            setMode('LOGIN');
-            setPrefillEmail(email);
-            setInviteNotice('An account already exists for this email. Please sign in to access your bookings.');
-          } else {
-            setMode('REGISTER');
-            setInvitePrefill({
-              firstName,
-              lastName,
-              email,
-              phone,
-              isLockedEmail: true
-            });
-            setInviteNotice('Complete your registration to track your vehicle service history and manage your bookings.');
-          }
-        } catch (err) {
-          setMode('REGISTER');
-          setInvitePrefill({
-            firstName,
-            lastName,
-            email,
-            phone,
-            isLockedEmail: true
-          });
-        }
-      };
-      checkEmailAccount();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -81,9 +37,9 @@ const Login = ({ isModal = false, onClose }) => {
   const renderForm = () => {
     switch (mode) {
       case 'LOGIN':
-        return <LoginForm onLogin={login} onSwitchMode={setMode} isLoading={isLoading} prefillEmail={prefillEmail} />;
+        return <LoginForm onLogin={login} onSwitchMode={setMode} isLoading={isLoading} error={loginError} onClearError={clearLoginError} />;
       case 'REGISTER':
-        return <RegisterForm onRegister={startRegister} onSwitchMode={setMode} isLoading={isLoading} prefillData={invitePrefill} />;
+        return <RegisterForm onRegister={startRegister} onSwitchMode={setMode} isLoading={isLoading} />;
       case 'VERIFY':
       case 'RECOVER_VERIFY':
         return (
@@ -201,21 +157,6 @@ const Login = ({ isModal = false, onClose }) => {
           </button>
         )}
         <AuthHeader mode={mode} />
-        {inviteNotice && (
-          <div style={{
-            background: 'rgba(var(--admin-brand-rgb), 0.08)',
-            border: '1px solid rgba(var(--admin-brand-rgb), 0.25)',
-            borderRadius: '0.65rem',
-            padding: '0.75rem 1rem',
-            marginBottom: '1.25rem',
-            fontSize: '0.8rem',
-            color: 'var(--admin-text-primary)',
-            lineHeight: 1.4,
-            fontWeight: '600'
-          }}>
-            {inviteNotice}
-          </div>
-        )}
         {renderForm()}
       </div>
       <style>{`

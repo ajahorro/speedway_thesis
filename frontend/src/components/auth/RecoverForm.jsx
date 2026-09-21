@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Mail } from 'lucide-react';
+import StyledInput from './StyledInput';
 
 const RecoverForm = ({ onRecover, onSwitchMode, isLoading }) => {
   const [email, setEmail] = useState('');
@@ -7,19 +8,6 @@ const RecoverForm = ({ onRecover, onSwitchMode, isLoading }) => {
   const handleSubmit = (e) => {
     e.preventDefault();
     onRecover(email);
-  };
-
-  const inputStyle = {
-    width: '100%',
-    background: 'var(--admin-bg)',
-    border: '1px solid var(--admin-border)',
-    padding: '1rem 1rem 1rem 3rem',
-    borderRadius: '0.85rem',
-    color: 'var(--admin-text-primary)',
-    fontSize: '0.95rem',
-    outline: 'none',
-    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-    boxSizing: 'border-box'
   };
 
   const buttonStyle = {
@@ -44,17 +32,8 @@ const RecoverForm = ({ onRecover, onSwitchMode, isLoading }) => {
       <p style={{ textAlign: 'center', color: 'var(--admin-text-secondary)', fontSize: '0.85rem', marginBottom: '1.5rem', lineHeight: '1.6', fontWeight: '500', opacity: 0.8 }}>
         Enter your email address to receive a <br />password reset link.
       </p>
-      <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
-        <Mail size={18} color="var(--admin-brand)" style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.8 }} />
-        <input 
-          type="email" 
-          placeholder="Email Address" 
-          required 
-          value={email} 
-          onChange={e => setEmail(e.target.value)} 
-          style={inputStyle} 
-          autoComplete="email" 
-        />
+      <div style={{ marginBottom: '1.5rem' }}>
+        <StyledInput icon={Mail} type="email" placeholder="Email Address" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
       </div>
       <button type="submit" disabled={isLoading} style={buttonStyle}>
         {isLoading ? 'Sending...' : 'Send Recovery Link'}

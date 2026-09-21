@@ -16,8 +16,12 @@
   --admin-input-border: rgba(255, 255, 255, 0.1);
   --admin-radius: 4px; /* Sharper corners as requested */
   --admin-radius-sm: 2px;
+  --modal-overlay: rgba(0, 0, 0, 0.8);
+  --modal-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);
+  --modal-hover-bg: rgba(255, 255, 255, 0.05);
   
   --primary-color: #E61E2A;
+  --page-header-gap: clamp(0.5rem, 1vw, 0.75rem);
 }
 
 [data-theme='light'] {
@@ -32,6 +36,25 @@
   --admin-sidebar-active-text: var(--admin-brand);
   --admin-input-bg: #F3F4F6;
   --admin-input-border: rgba(0, 0, 0, 0.1);
+  --modal-overlay: rgba(17, 24, 39, 0.42);
+  --modal-shadow: 0 25px 50px -12px rgba(17, 24, 39, 0.25);
+  --modal-hover-bg: rgba(17, 24, 39, 0.06);
+}
+
+@media (max-width: 480px) {
+  .app-modal-content {
+    padding: 1.25rem 1.25rem 1rem !important;
+  }
+
+  .app-modal-actions {
+    padding: 1rem 1.25rem !important;
+    flex-direction: column-reverse;
+  }
+
+  .app-modal-actions button {
+    width: 100%;
+    min-height: 2.75rem;
+  }
 }
 
 * {
@@ -41,12 +64,29 @@
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
-body {
+html, body, #root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
   background: var(--admin-bg);
   color: var(--admin-text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
   overflow-x: hidden;
   max-width: 100vw;
-  -webkit-font-smoothing: antialiased;
+}
+
+input, select, textarea, button {
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+}
+
+input, select, textarea {
+  font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
 }
 
 img, video {
@@ -85,6 +125,18 @@ img, video {
 
 .admin-card-hover {
   transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, border-color 0.2s ease !important;
+}
+
+.page-header {
+  /* Page wrappers use a 1.5rem flex gap; offset it to one shared compact gap. */
+  margin-bottom: calc(var(--page-header-gap) - 1.5rem) !important;
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    gap: 0.75rem !important;
+    margin-bottom: calc(0.65rem - 1.5rem) !important;
+  }
 }
 
 
@@ -152,3 +204,57 @@ img, video {
   }
 }
 
+/* ── Enterprise Receipt: Global Print Styles ─────────────────────────── */
+@media print {
+  /* Hide all app chrome */
+  .no-print,
+  .header-close-button,
+  .action-buttons-container,
+  nav, aside, header {
+    display: none !important;
+  }
+
+  /* Force crisp white document */
+  body,
+  .modal-overlay,
+  .no-print-bg {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+  }
+
+  /* Decimal alignment for price columns */
+  .price-column {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  /* Prevent page breaks inside the invoice block */
+  .invoice-content {
+    page-break-inside: avoid;
+  }
+
+  /* Target printable area */
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible !important;
+  }
+
+  #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Ensure body hides everything else */
+  body * {
+    visibility: hidden;
+  }
+
+  @page {
+    size: letter;
+    margin: 0.5in;
+  }
+}

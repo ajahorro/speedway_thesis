@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, FileText, Download, Clock, X, ShieldCheck, Printer } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { CreditCard, FileText, Clock, Printer } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import OfficialReceipt from '../../components/OfficialReceipt';
 
 const CustomerBilling = () => {
   const { user } = useAuth();
@@ -34,6 +34,12 @@ const CustomerBilling = () => {
   };
 
   const formatCurrency = (val) => new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(val || 0);
+  const getReceiptBreakdown = (receipt) => {
+    const total = Number(receipt?.total_amount || 0);
+    const subtotal = total > 0 ? total / 1.12 : 0;
+    const vat = total > 0 ? total - subtotal : 0;
+    return { subtotal, vat, total };
+  };
 
   const totalSpent = bookings.reduce((sum, b) => {
     const totalPaid = (b.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0);
@@ -71,6 +77,75 @@ const CustomerBilling = () => {
   const handlePrint = () => {
     toast.success('Receipt generated and synchronized with ledger.');
     window.print();
+  };
+
+  const handleDownloadPdf = () => {
+    const receipt = selectedReceipt || {};
+    const total = Number(selectedPayment?.amount || receipt.total_amount || 0);
+    const subtotal = total > 0 ? total / 1.12 : 0;
+    const vat = total > 0 ? total - subtotal : 0;
+    const items = selectedPayment
+      ? [{ name: 'Service Installment / Settlement Payment', amount: Number(selectedPayment.amount || 0) }]
+      : (receipt.vehicles || []).flatMap((v) => (v.services || []).map((s) => ({
+          name: s.service_name || s.service_name_snapshot || 'Service',
+          amount: Number(s.price || s.price_snapshot || 0)
+        })));
+
+    const popup = window.open('', '_blank', 'width=900,height=900');
+    if (!popup) {
+      toast.error('Please allow pop-ups to download the PDF receipt.');
+      return;
+    }
+
+    popup.document.write(`<!doctype html>
+      <html>
+        <head>
+          <title>Official Digital Receipt</title>
+          <style>
+            body { font-family: Arial, sans-serif; background: #fff; color: #111; margin: 0; padding: 32px; }
+            .wrap { max-width: 720px; margin: 0 auto; border: 1px solid #111; border-radius: 16px; padding: 24px; }
+            .brand { text-align: center; margin-bottom: 24px; }
+            h1 { margin: 0; font-size: 2.2rem; letter-spacing: 2px; color: #a91b18; }
+            .subtitle { font-size: 12px; letter-spacing: 2px; color: #666; text-transform: uppercase; }
+            .line { height: 2px; background: #000; width: 48px; margin: 12px auto 0; }
+            .meta { display: flex; justify-content: space-between; gap: 16px; margin: 20px 0; }
+            .meta div { flex: 1; }
+            .label { font-size: 11px; font-weight: 800; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+            .item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+            .total-row { display: flex; justify-content: space-between; padding-top: 12px; font-weight: 800; }
+            .balance { border-top: 2px solid #000; margin-top: 12px; padding-top: 12px; }
+            .foot { text-align: center; margin-top: 24px; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <div class="brand">
+              <h1>SPEEDWAY</h1>
+              <div class="subtitle">AutoxMoto Detail Studio</div>
+              <div class="line"></div>
+            </div>
+            <div class="meta">
+              <div>
+                <div class="label">Customer</div>
+                <div>${receipt.customer_name || user?.user_metadata?.full_name || 'Valued Customer'}</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="label">Date & Time</div>
+                <div>${new Date(selectedPayment?.created_at || receipt.created_at).toLocaleString()}</div>
+              </div>
+            </div>
+            <div class="label" style="margin-bottom: 8px;">Service Summary</div>
+            ${items.map(item => `<div class="item"><span>• ${item.name}</span><strong>${formatCurrency(item.amount)}</strong></div>`).join('')}
+            <div class="total-row"><span>Subtotal</span><span>${formatCurrency(subtotal)}</span></div>
+            <div class="total-row"><span>VAT (12%)</span><span>${formatCurrency(vat)}</span></div>
+            <div class="total-row balance"><span>Grand Total</span><span>${formatCurrency(total)}</span></div>
+            <div class="foot">Transaction Reference: ${selectedPayment?.reference_number || receipt.payments?.[0]?.reference_number || 'SYSTEM_VALIDATED'}</div>
+          </div>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    setTimeout(() => popup.print(), 300);
   };
 
   const getReceiptStatusText = (receipt) => {
@@ -143,151 +218,58 @@ const CustomerBilling = () => {
 
   return (
     <>
-      {/* 🧾 OFFICIAL RECEIPT EXPLORER */}
       {(selectedReceipt || selectedPayment) && (
-        <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '2rem' }}>
-          <div className="no-print-bg" style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
-            
-            <div className="no-print" style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <ShieldCheck size={24} color="var(--admin-brand)" />
-                <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>
-                  {selectedPayment ? 'Official Receipt (Verified)' : 'Official Invoice (Consolidated)'}
-                </span>
-              </div>
-              <button onClick={() => { setSelectedReceipt(null); setSelectedPayment(null); }} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div id="printable-receipt" style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
-              {(selectedReceipt.refund_status === 'PROCESSED' || selectedPayment?.status === 'REFUNDED') && (
-                <div style={{
-                  position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%) rotate(-45deg)',
-                  fontSize: '8rem', fontWeight: '900', color: 'rgba(239, 68, 68, 0.08)', pointerEvents: 'none', zIndex: 0, whiteSpace: 'nowrap'
-                }}>
-                  VOID / REFUNDED
-                </div>
-              )}
-              <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-                <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#000', fontStyle: 'italic' }}>SPEEDWAY</h2>
-                <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#666', textTransform: 'uppercase', letterSpacing: '2px' }}>AutoxMoto Detail Studio</div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                <div>
-                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>Billed To</div>
-                  <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>{selectedReceipt.customer_name || user?.user_metadata?.full_name || 'Valued Customer'}</div>
-                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{user?.email}</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.65rem', fontWeight: '950', color: '#999', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.5rem' }}>{selectedPayment ? 'Receipt No.' : 'Invoice No.'}</div>
-                  <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>
-                    {selectedPayment ? `RCP-${selectedPayment.id.substring(0, 8).toUpperCase()}` : `INV-${selectedReceipt.id.substring(0, 8).toUpperCase()}`}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(selectedPayment?.created_at || selectedReceipt.created_at).toLocaleDateString()}</div>
-                </div>
-              </div>
-
-              <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '1.5rem 0', margin: '2rem 0' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <tbody>
-                    {selectedPayment ? (
-                      <tr>
-                        <td style={{ padding: '15px 5px', fontSize: '0.9rem', fontWeight: '900' }}>
-                          Service Installment / Settlement
-                          <div style={{ fontSize: '0.7rem', color: '#666', fontWeight: 'normal' }}>Payment for booking #{selectedReceipt.id.substring(0, 8).toUpperCase()}</div>
-                        </td>
-                        <td style={{ padding: '15px 5px', textAlign: 'right', fontSize: '1.1rem', fontWeight: '950' }}>
-                          {formatCurrency(selectedPayment.amount)}
-                        </td>
-                      </tr>
-                    ) : (
-                      renderServiceRows(selectedReceipt)
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
-                <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                  <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>{selectedPayment ? 'PAYMENT RECEIVED' : 'GRAND TOTAL'}</span>
-                  <span style={{ fontWeight: '900', fontSize: '1.25rem' }}>{formatCurrency(selectedPayment?.amount || selectedReceipt.total_amount)}</span>
-                </div>
-                {!selectedPayment && (
-                  <>
-                    <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                      <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL SETTLED</span>
-                      <span style={{ fontWeight: '900' }}>
-                        {formatCurrency((selectedReceipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0))}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
-                      <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>OUTSTANDING</span>
-                      <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>
-                        {formatCurrency(Math.max(0, (selectedReceipt.total_amount || 0) - (selectedReceipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0)))}
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div style={{ padding: '1.25rem', background: '#f9f9f9', borderRadius: '12px', border: '1px solid #eee' }}>
-                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                    <div>
-                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
-                      <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedPayment?.method || selectedReceipt.payments?.[0]?.method || 'Verified Channel'}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Reference</div>
-                      <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                        {selectedPayment?.reference_number || 'VALIDATED'}
-                      </div>
-                    </div>
-                 </div>
-              </div>
-
-              <div style={{ textAlign: 'center', color: '#666', fontSize: '0.65rem', marginTop: '60px', fontWeight: '300' }}>
-                This is a computer-generated document from Speedway AutoXMoto.
-              </div>
-            </div>
-
-            <div className="no-print" style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
-              <button 
-                onClick={() => window.print()}
-                style={{ 
-                  flex: 2, padding: '1rem', background: '#000', 
-                  color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', 
-                  cursor: 'pointer', 
-                  textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' 
-                }}
-              >
-                <Printer size={20} /> Print Receipt
-              </button>
-              <button 
-                onClick={() => { setSelectedReceipt(null); setSelectedPayment(null); }}
-                style={{ flex: 1, padding: '1rem', background: '#fff', color: '#000', border: '1px solid #ddd', borderRadius: '12px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem' }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-          <style>{`
-            @media print {
-              body * { visibility: hidden; }
-              #printable-receipt, #printable-receipt * { visibility: visible; }
-              #printable-receipt { position: absolute; left: 0; top: 0; width: 100%; }
-              .no-print, .modal-overlay { background: white !important; }
-            }
-          `}</style>
-        </div>
+        <OfficialReceipt
+<<<<<<< HEAD
+          booking={selectedReceipt}
+          vehicles={selectedReceipt?.vehicles || []}
+          user={user}
+          selectedPayment={selectedPayment}
+          onClose={() => { setSelectedReceipt(null); setSelectedPayment(null); }}
+          mode="modal"
+=======
+          title="OFFICIAL RECEIPT"
+          receiptNumber={selectedPayment?.reference_number || selectedReceipt?.payments?.[0]?.reference_number || `INV-${(selectedReceipt?.id || '').slice(0, 8).toUpperCase()}`}
+          bookingReference={selectedReceipt?.id || 'BOOKING-NOT-SET'}
+          issuedAt={selectedPayment?.created_at || selectedReceipt?.created_at || new Date().toISOString()}
+          paymentMethod={selectedPayment?.method || selectedReceipt?.payments?.[0]?.method || 'Digital / Online Payment'}
+          processedBy="System Admin"
+          customerName={selectedReceipt?.customer_name || user?.user_metadata?.full_name || 'Valued Customer'}
+          customerContact={user?.email || selectedReceipt?.customer_phone || '-'}
+          customerAddress={selectedReceipt?.customer_address || '-'}
+          customerTaxId={selectedReceipt?.customer_tax_id || '-'}
+          items={selectedPayment ? [{
+            vehicle: 'Payment Record',
+            service: 'Service Installment / Settlement Payment',
+            qty: 1,
+            unitPrice: Number(selectedPayment.amount || 0),
+            lineTotal: Number(selectedPayment.amount || 0)
+          }] : (selectedReceipt?.vehicles?.flatMap((v) => (v.services || []).map((s) => ({
+            vehicle: `${v.brand || ''} ${v.model || ''}`.trim() || 'Vehicle Unit',
+            service: s.service_name || s.service_name_snapshot || 'Service',
+            qty: 1,
+            unitPrice: Number(s.price || s.price_snapshot || 0),
+            lineTotal: Number(s.price || s.price_snapshot || 0)
+          }))) ?? [{
+            vehicle: 'Booking Summary',
+            service: 'Booking Service Summary',
+            qty: 1,
+            unitPrice: Number(selectedReceipt?.total_amount || 0),
+            lineTotal: Number(selectedReceipt?.total_amount || 0)
+          }])}
+          subtotal={Number((selectedPayment?.amount || selectedReceipt?.total_amount || 0) / 1.12)}
+          discountAmount={0}
+          vatRate={0.12}
+          onClose={() => { setSelectedReceipt(null); setSelectedPayment(null); }}
+          showCloseButton
+>>>>>>> e23099d5 (Logic inconsistencies still exists)
+        />
       )}
 
       {/* 📱 SCREEN UI */}
       <div id="screen-billing-content" style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', paddingBottom: '5rem' }}>
         <div>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'white', letterSpacing: '-1.5px' }}>Billing & Invoices</h1>
+          <h1 style={{ fontSize: 'clamp(1.8rem, 5vw, 2.5rem)', fontWeight: '950', margin: '0 0 0.5rem 0', textTransform: 'uppercase', color: 'var(--admin-text-primary)', letterSpacing: '-1.5px' }}>Billing & Invoices</h1>
           <p style={{ margin: 0, color: 'var(--admin-text-secondary)', fontSize: '0.95rem', fontWeight: '600', opacity: 0.8 }}>
             Operational ledger and digital archives of your DETAILING sessions.
           </p>
@@ -300,7 +282,7 @@ const CustomerBilling = () => {
             </div>
             <div>
               <div style={labelStyle}>Total Invested</div>
-              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'white' }}>{formatCurrency(totalSpent)}</div>
+              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{formatCurrency(totalSpent)}</div>
             </div>
           </div>
 
@@ -310,14 +292,14 @@ const CustomerBilling = () => {
             </div>
             <div>
               <div style={labelStyle}>Pending Balance</div>
-              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'white' }}>{formatCurrency(outstandingBalance)}</div>
+              <div style={{ fontSize: '1.75rem', fontWeight: '950', color: 'var(--admin-text-primary)' }}>{formatCurrency(outstandingBalance)}</div>
             </div>
           </div>
         </div>
 
         <div style={{ background: 'var(--admin-card)', borderRadius: 'var(--admin-radius)', border: '1px solid var(--admin-border)', overflow: 'hidden', boxShadow: 'var(--admin-card-shadow)' }}>
-          <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--admin-border)', background: 'rgba(255,255,255,0.02)' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', color: 'white', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transaction Ledger</h3>
+          <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--admin-border)', background: 'var(--admin-input-bg)' }}>
+            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', color: 'var(--admin-text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transaction Ledger</h3>
           </div>
 
           <div style={{ overflowX: 'auto' }}>
@@ -343,7 +325,7 @@ const CustomerBilling = () => {
                     
                     return bookingPayments.map((p, pIdx) => (
                       <tr key={p.id} className="admin-card-hover" style={{ borderBottom: '1px solid var(--admin-border)', transition: 'all 0.2s ease' }}>
-                        <td style={{ padding: '1.25rem 2rem', fontSize: '0.95rem', fontWeight: '900', color: 'white', fontFamily: 'monospace' }}>
+                        <td style={{ padding: '1.25rem 2rem', fontSize: '0.95rem', fontWeight: '900', color: 'var(--admin-text-primary)', fontFamily: 'monospace' }}>
                           RCP-{p.id.substring(0, 8).toUpperCase()}
                           <div style={{ fontSize: '0.6rem', color: 'var(--admin-brand)', fontWeight: '950', marginTop: '0.2rem' }}>LINKED TO INV-{booking.id.substring(0, 8).toUpperCase()}</div>
                         </td>
@@ -369,8 +351,8 @@ const CustomerBilling = () => {
                               onClick={() => { setSelectedReceipt(booking); setSelectedPayment(p); }}
                               title="View Transaction Receipt"
                               style={{ 
-                                background: 'rgba(255,255,255,0.03)', border: '1px solid var(--admin-border)', 
-                                color: 'white', borderRadius: '8px', width: '40px', height: '40px', 
+                                background: 'var(--admin-input-bg)', border: '1px solid var(--admin-border)',
+                                color: 'var(--admin-text-primary)', borderRadius: '8px', width: '40px', height: '40px',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
                               }}
                             >
@@ -398,159 +380,60 @@ const CustomerBilling = () => {
           </div>
         </div>
 
-        {/* 🧾 RECEIPT PREVIEW MODAL */}
+<<<<<<< HEAD
+        {/* Second receipt view removed — handled by OfficialReceipt above */}
+=======
         {selectedReceipt && (
-          <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}>
-            <div style={{ background: '#fff', color: '#000', width: '100%', maxWidth: '600px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', position: 'relative' }}>
-              
-              <div style={{ background: '#000', color: '#fff', padding: '1.5rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <ShieldCheck size={24} color="var(--admin-brand)" />
-                  <span style={{ fontWeight: '950', letterSpacing: '1px', textTransform: 'uppercase', fontSize: '0.9rem' }}>
-                    {canAccessReceipt(selectedReceipt) ? 'Official Receipt Explorer' : 'Provisional Preview'}
-                  </span>
-                </div>
-                <button onClick={() => setSelectedReceipt(null)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', cursor: 'pointer', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div style={{ padding: '2.5rem', maxHeight: '70vh', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
-                <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
-                  <h2 style={{ margin: 0, fontWeight: '950', fontSize: '1.75rem', color: '#000', fontStyle: 'italic' }}>SPEEDWAY</h2>
-                  <div style={{ fontSize: '0.75rem', fontWeight: '800', color: '#666', textTransform: 'uppercase', letterSpacing: '2px' }}>AutoxMoto Detail Studio</div>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                  <div>
-                    <div style={{ ...labelStyle, color: '#999' }}>Invoice To</div>
-                    <div style={{ fontWeight: '900', fontSize: '1.1rem' }}>{selectedReceipt.customer_name || user?.user_metadata?.full_name || 'Customer'}</div>
-                    <div style={{ fontSize: '0.85rem', color: '#666' }}>{user?.email}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ ...labelStyle, color: '#999' }}>Receipt No.</div>
-                    <div style={{ fontWeight: '900', fontSize: '1.1rem', color: '#000', fontFamily: 'monospace' }}>INV-{selectedReceipt.id.substring(0, 8).toUpperCase()}</div>
-                    <div style={{ fontSize: '0.85rem', color: '#666' }}>{new Date(selectedReceipt.created_at).toLocaleDateString()}</div>
-                  </div>
-                </div>
-
-                <div style={{ borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '1.5rem 0', margin: '2rem 0' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <tbody>
-                      {renderServiceRows(selectedReceipt)}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'flex-end', marginBottom: '2.5rem' }}>
-                  <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                    <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>GRAND TOTAL</span>
-                    <span style={{ fontWeight: '900' }}>{formatCurrency(selectedReceipt.total_amount)}</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end' }}>
-                    <span style={{ color: '#999', fontSize: '0.85rem', fontWeight: '800' }}>TOTAL AMOUNT PAID</span>
-                    <span style={{ fontWeight: '900' }}>
-                      {formatCurrency((selectedReceipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0))}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '2.5rem', width: '100%', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '0.75rem' }}>
-                    <span style={{ fontWeight: '950', fontSize: '1.25rem' }}>REMAINING BALANCE</span>
-                    <span style={{ fontWeight: '950', fontSize: '1.25rem', color: '#000' }}>
-                      {formatCurrency(Math.max(0, selectedReceipt.total_amount - (selectedReceipt.payments || []).filter(p => p.status === 'PAID').reduce((s, p) => s + Number(p.amount), 0)))}
-                    </span>
-                  </div>
-                </div>
-
-                <div style={{ padding: '1.25rem', background: '#f9f9f9', borderRadius: '12px', border: '1px solid #eee' }}>
-                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                      <div>
-                        <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Method</div>
-                        <div style={{ fontWeight: '800', fontSize: '0.85rem' }}>{selectedReceipt.payments?.[0]?.method || 'Cash / Off-platform'}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '0.65rem', fontWeight: '900', color: '#999', textTransform: 'uppercase' }}>Transaction Reference</div>
-                        <div style={{ fontWeight: '800', fontSize: '0.85rem', fontFamily: 'monospace' }}>
-                          {canAccessReceipt(selectedReceipt) 
-                            ? (selectedReceipt.payments?.[0]?.reference_number || selectedReceipt.ocr_metadata?.referenceNo || 'VERIFIED')
-                            : 'Awaiting Verification'}
-                        </div>
-                      </div>
-                   </div>
-                   <div style={{ marginTop: '15px', textAlign: 'center', fontSize: '1rem', fontWeight: '900', color: '#000', textTransform: 'uppercase', letterSpacing: '2px' }}>
-                     *** {getReceiptStatusText(selectedReceipt)} ***
-                   </div>
-                </div>
-              </div>
-
-              <div className="no-print" style={{ padding: '1.5rem 2rem', background: '#f5f5f5', display: 'flex', gap: '1rem' }}>
-                <button 
-                  disabled={!canAccessReceipt(selectedReceipt)}
-                  onClick={handlePrint}
-                  style={{ 
-                    flex: 2, padding: '1rem', background: canAccessReceipt(selectedReceipt) ? '#000' : '#ccc', 
-                    color: '#fff', border: 'none', borderRadius: '12px', fontWeight: '950', 
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', 
-                    cursor: canAccessReceipt(selectedReceipt) ? 'pointer' : 'not-allowed', 
-                    textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' 
-                  }}
-                >
-                  <Printer size={20} /> {canAccessReceipt(selectedReceipt) ? 'Print Official Receipt' : 'Locked'}
-                </button>
-                <button 
-                  onClick={() => setSelectedReceipt(null)}
-                  style={{ flex: 1, padding: '1rem', background: '#fff', color: '#000', border: '1px solid #ddd', borderRadius: '12px', fontWeight: '950', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.85rem' }}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
+          <OfficialReceipt
+            title="OFFICIAL RECEIPT"
+            receiptNumber={selectedPayment?.reference_number || selectedReceipt?.payments?.[0]?.reference_number || `INV-${(selectedReceipt?.id || '').slice(0, 8).toUpperCase()}`}
+            bookingReference={selectedReceipt?.id || 'BOOKING-NOT-SET'}
+            issuedAt={selectedPayment?.created_at || selectedReceipt?.created_at || new Date().toISOString()}
+            paymentMethod={selectedPayment?.method || selectedReceipt?.payments?.[0]?.method || 'Digital / Online Payment'}
+            processedBy="System Admin"
+            customerName={selectedReceipt?.customer_name || user?.user_metadata?.full_name || 'Valued Customer'}
+            customerContact={user?.email || selectedReceipt?.customer_phone || '-'}
+            customerAddress={selectedReceipt?.customer_address || '-'}
+            customerTaxId={selectedReceipt?.customer_tax_id || '-'}
+            items={selectedPayment ? [{
+              vehicle: 'Payment Record',
+              service: 'Service Installment / Settlement Payment',
+              qty: 1,
+              unitPrice: Number(selectedPayment.amount || 0),
+              lineTotal: Number(selectedPayment.amount || 0)
+            }] : (selectedReceipt?.vehicles?.flatMap((v) => (v.services || []).map((s) => ({
+              vehicle: `${v.brand || ''} ${v.model || ''}`.trim() || 'Vehicle Unit',
+              service: s.service_name || s.service_name_snapshot || 'Service',
+              qty: 1,
+              unitPrice: Number(s.price || s.price_snapshot || 0),
+              lineTotal: Number(s.price || s.price_snapshot || 0)
+            }))) ?? [{
+              vehicle: 'Booking Summary',
+              service: 'Booking Service Summary',
+              qty: 1,
+              unitPrice: Number(selectedReceipt?.total_amount || 0),
+              lineTotal: Number(selectedReceipt?.total_amount || 0)
+            }])}
+            subtotal={Number((selectedPayment?.amount || selectedReceipt?.total_amount || 0) / 1.12)}
+            discountAmount={0}
+            vatRate={0.12}
+            onClose={() => { setSelectedReceipt(null); setSelectedPayment(null); }}
+            showCloseButton
+          />
         )}
+>>>>>>> e23099d5 (Logic inconsistencies still exists)
       </div>
 
       {/* 🖨️ PRINT-ONLY CSS ENGINE */}
       <style>{`
         @media print {
-          html, body, #root, .admin-theme, .admin-main-wrapper, main { 
-            background: white !important; 
-            color: black !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-            overflow: visible !important;
-          }
-
-          nav, aside, header, button, .no-print, [role="navigation"], #screen-billing-content, .modal-overlay {
-            display: none !important;
-          }
-
-          #printable-receipt {
-            display: block !important;
-            visibility: visible !important;
-            width: 100% !important;
-            max-width: 800px !important;
-            margin: 0 auto !important;
-            padding: 10mm !important;
-            background: white !important;
-            position: relative !important;
-            z-index: 9999 !important;
-            box-sizing: border-box !important;
-          }
-
-          #printable-receipt * {
-            visibility: visible !important;
-            color: black !important;
-          }
-
-          @page { 
-            size: auto;
-            margin: 0mm; 
-          }
-          
-          * { 
-            -webkit-print-color-adjust: exact !important; 
-            print-color-adjust: exact !important; 
-          }
+          body * { visibility: hidden; }
+          #printable-receipt, #printable-receipt * { visibility: visible; }
+          #printable-receipt { position: absolute; left: 0; top: 0; width: 100%; background: #fff !important; color: #000 !important; }
+          .no-print, .header-close-button, .action-buttons-container { display: none !important; }
+          .price-column { font-variant-numeric: tabular-nums; text-align: right; }
+          .invoice-content { page-break-inside: avoid; }
+          @page { size: letter; margin: 0.5in; }
         }
       `}</style>
     </>

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Zap } from 'lucide-react';
 import { segregateBookings } from '../../utils/schedulingUtils';
+import { formatBookingDate } from '../../utils/bookingHelpers';
 
 const OccupancyShelf = ({ bookings, onBookingClick, config }) => {
   const { fullDay } = segregateBookings(bookings, config);
@@ -28,7 +29,7 @@ const OccupancyShelf = ({ bookings, onBookingClick, config }) => {
             </div>
             <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '950', color: 'white' }}>{booking.customer?.full_name}</h4>
             <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.65rem', color: 'var(--admin-text-secondary)', fontWeight: '700' }}>
-              {new Date(booking.start_datetime).toLocaleDateString()} - {new Date(booking.end_datetime).toLocaleDateString()}
+              {formatBookingDate(booking.start_datetime)} - {formatBookingDate(booking.end_datetime)}
             </p>
           </div>
         ))}
